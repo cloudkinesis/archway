@@ -341,7 +341,7 @@ async def generate_architecture(session_id: str):
         job_manager.update(job_id, progress=62, message="Running architecture critique and repair planning.")
         specs = asyncio.run(_repair_architecture_critiques(report, specs, session_id))
         job_manager.update(job_id, progress=82, message="Saving revision and preparing diagram inputs.")
-        revision = architecture_revisions.initialize(session_id, specs)
+        revision = architecture_revisions.record_generation(session_id, specs)
         specs_path = "architecture/specs.json"
         current = _require_session(session_id)
         current.active_phase = SessionPhase.diagrams
@@ -444,7 +444,7 @@ async def update_architecture(session_id: str, request: UpdateArchitectureReques
 async def regenerate_architecture(session_id: str):
     _require_session(session_id)
     try:
-        revision = architecture_revisions.regenerate_from_active(session_id)
+        revision = architecture_revisions.duplicate_active_revision(session_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     AuditLogger(session_id).event("architecture", "architecture_revision_regenerated", output_hash=hash_payload(revision.model_dump()))
