@@ -160,3 +160,61 @@ def test_async_optional_export_collection_degrades_inside_running_loop():
 
     assert value is None
     assert "already running inside an event loop" in warnings[0]
+
+
+# --- Export pricing headline must fail closed ---------------------------------
+
+def _pricing_for_export(metadata: dict) -> dict:
+    return {
+        "region": "us-east-1",
+        "low_monthly_usd": 10,
+        "expected_monthly_usd": 20,
+        "high_monthly_usd": 40,
+        "main_cost_drivers": ["asset_count=1000"],
+        "unknown_variables": ["event_rate"],
+        "line_items": [
+            {"service": "Amazon Kinesis Data Streams", "unit_basis": "events", "expected_monthly_usd": 20}
+        ],
+        "metadata": metadata,
+    }
+
+
+def _pricing_markdown(metadata: dict, tmp_path, monkeypatch):
+    monkeypatch.setenv("ARCHWAY_DATA_DIR", str(tmp_path / ".archway"))
+    get_settings.cache_clear()
+    pricing = _pricing_for_export(metadata)
+    md = ExportPackageService()._pricing_markdown(pricing)
+    return md, pricing
+
+
+def test_export_missing_headline_flag_fails_closed(tmp_path, monkeypatch):
+    md, _ = _pricing_markdown({"pricing_maturity": "pricing_directional_with_assumptions"}, tmp_path, monkeypatch)
+    assert "Expected monthly estimate:" not in md  # no confident executive headline
+    assert "Headline-safe pricing: No" in md
+
+
+def test_export_explicit_false_remains_unsafe(tmp_path, monkeypatch):
+    md, _ = _pricing_markdown({"pricing_can_be_displayed_as_headline": False}, tmp_path, monkeypatch)
+    assert "Expected monthly estimate:" not in md
+    assert "Headline-safe pricing: No" in md
+
+
+def test_export_explicit_true_preserves_headline(tmp_path, monkeypatch):
+    md, _ = _pricing_markdown({"pricing_can_be_displayed_as_headline": True}, tmp_path, monkeypatch)
+    assert "Expected monthly estimate: $20" in md  # preserved only when explicitly safe
+
+
+def test_export_directional_details_visible_when_headline_unsafe(tmp_path, monkeypatch):
+    md, _ = _pricing_markdown({"pricing_maturity": "pricing_directional_with_assumptions"}, tmp_path, monkeypatch)
+    assert "## Line Items" in md
+    assert "Amazon Kinesis Data Streams" in md
+    assert "## Pricing Drivers" in md
+    assert "$20" in md  # per-line-item directional cost still visible (range headline is withheld)
+
+
+def test_export_pricing_numbers_unchanged_by_fail_closed(tmp_path, monkeypatch):
+    _md, pricing = _pricing_markdown({"pricing_can_be_displayed_as_headline": False}, tmp_path, monkeypatch)
+    assert pricing["low_monthly_usd"] == 10
+    assert pricing["expected_monthly_usd"] == 20
+    assert pricing["high_monthly_usd"] == 40
+    assert pricing["line_items"][0]["expected_monthly_usd"] == 20
