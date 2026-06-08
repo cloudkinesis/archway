@@ -57,6 +57,7 @@ class JobStatus(str, Enum):
     succeeded = "succeeded"
     failed = "failed"
     cancel_requested = "cancel_requested"
+    cancelled = "cancelled"
 
 
 class JobRun(BaseModel):
@@ -73,6 +74,11 @@ class JobRun(BaseModel):
     duration_seconds: float | None = None
     error: str | None = None
     result_path: str | None = None
+    # Additive lifecycle/cancellation metadata (in-memory only).
+    expires_at: datetime | None = None
+    cancellation_requested: bool = False
+    cancellation_requested_at: datetime | None = None
+    cancellation_status: str | None = None  # requested | accepted | completed | not_supported | already_terminal
 
 
 class ExportBundle(BaseModel):
