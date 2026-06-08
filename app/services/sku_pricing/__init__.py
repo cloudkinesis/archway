@@ -26,6 +26,23 @@ from app.services.sku_pricing.snapshot import (
     load_snapshot,
 )
 
+# Local-cache adapter layer (depends on feature/sku-backed-pricing-foundation).
+from app.services.sku_pricing.cache import (
+    LocalCacheError,
+    ProvenanceError,
+    build_local_cache_estimate,
+    build_local_cache_snapshot,
+    build_local_cache_snapshot_from_reduced_price_list,
+    compute_source_hash,
+    load_local_cache_snapshot,
+)
+from app.services.sku_pricing.price_list_parser import parse_reduced_price_list
+from app.services.sku_pricing.provenance import (
+    TRUSTED_UPSTREAM_SOURCES,
+    is_authoritative_snapshot,
+    provenance_report,
+)
+
 __all__ = [
     "PriceSnapshot",
     "RateRecord",
@@ -40,4 +57,16 @@ __all__ = [
     "SkuBackedEstimate",
     "build_estimate",
     "estimate_input_hash",
+    # local-cache adapter
+    "is_authoritative_snapshot",
+    "provenance_report",
+    "TRUSTED_UPSTREAM_SOURCES",
+    "parse_reduced_price_list",
+    "load_local_cache_snapshot",
+    "build_local_cache_snapshot",
+    "build_local_cache_snapshot_from_reduced_price_list",
+    "build_local_cache_estimate",
+    "compute_source_hash",
+    "LocalCacheError",
+    "ProvenanceError",
 ]
