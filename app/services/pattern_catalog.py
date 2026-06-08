@@ -633,8 +633,71 @@ def pattern_flows(profile: UseCaseProfile, production: bool, components: list[Ar
     return _dedupe_flows(flows)
 
 
+_EFFECTFUL_CLASSIFICATIONS = {"external_write", "trade_block", "policy_change", "network_change", "device_update", "dispatch", "pre_position"}
+
+
+def _infer_target_system_type(text: str) -> str:
+    if any(term in text for term in ("ehr", "epic", "fhir", "hl7")):
+        return "ehr"
+    if "payment" in text or ("network" in text and "settle" in text):
+        return "payment_network"
+    if any(term in text for term in ("network controller", "nssf", "smf", "slice", "traffic shaping", "network change")):
+        return "network_controller"
+    if any(term in text for term in ("contract", "repository", "obligation")):
+        return "contract_repository"
+    if any(term in text for term in ("device", "firmware", "ota")):
+        return "device_fleet"
+    if any(term in text for term in ("ticket", "servicenow", "jira", "case")):
+        return "ticketing"
+    if "workflow" in text:
+        return "workflow_system"
+    return "generic_external_system"
+
+
+def _standardized_governance_metadata(source: str, target: str, label: str | None, classification: str | None) -> dict:
+    """Additive, standardized typed governance signals for known effectful flows.
+
+    Only emitted for classifications that the existing string detector already treats
+    as effectful, so this never adds governance where there was none. Impact is not
+    elevated here (no ``customer_or_patient_impacting``) to preserve existing
+    control/impact expectations; it only makes the typed intent explicit so detection
+    no longer depends on label/classification string matching.
+    """
+    cls = (classification or "").lower()
+    if cls not in _EFFECTFUL_CLASSIFICATIONS:
+        return {}
+    text = f"{source} {target} {label or ''}".lower()
+    md: dict = {
+        "governed_action_candidate": True,
+        "requires_approval": True,
+        "automation_mode": "approval_required",
+        "target_system_type": _infer_target_system_type(text),
+    }
+    if cls == "external_write":
+        md["action_intent"] = "writeback" if "writeback" in text else ("publish" if "publish" in text else "update")
+        md["external_write"] = True
+        md["mutates_source_system"] = True
+    elif cls == "trade_block":
+        md["action_intent"] = "block"
+        md["external_write"] = True
+    elif cls == "policy_change":
+        md["action_intent"] = "update"
+    elif cls == "network_change":
+        md["action_intent"] = "update"
+        md["external_write"] = True
+        md["mutates_source_system"] = True
+    elif cls == "device_update":
+        md["action_intent"] = "update"
+        md["external_write"] = True
+    else:  # dispatch / pre_position
+        md["action_intent"] = "create"
+        md["external_write"] = True
+    return md
+
+
 def _flow_metadata(profile: UseCaseProfile, source: str, target: str, label: str | None, classification: str | None) -> dict:
     metadata = {"classification": classification} if classification else {}
+    metadata.update(_standardized_governance_metadata(source, target, label, classification))
     if "healthcare_operations_scheduling" not in profile.workload_families:
         return metadata
     text = f"{source} {target} {label or ''} {classification or ''}".lower()
