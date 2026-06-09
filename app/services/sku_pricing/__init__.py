@@ -43,6 +43,20 @@ from app.services.sku_pricing.provenance import (
     provenance_report,
 )
 
+# Official offer-file snapshot builder (depends on foundation + local-cache adapter).
+from app.services.sku_pricing.official_snapshot_builder import (
+    DIMENSION_SPECS,
+    SUPPORTED_DIMENSION_KEYS,
+    BuildReport,
+    DimensionSpec,
+    MappingResult,
+    SnapshotBuildError,
+    build_snapshot_from_offer_files,
+    map_offer_products_to_dimension_keys,
+    parse_official_offer_file,
+    write_local_cache_snapshot,
+)
+
 __all__ = [
     "PriceSnapshot",
     "RateRecord",
@@ -69,4 +83,15 @@ __all__ = [
     "compute_source_hash",
     "LocalCacheError",
     "ProvenanceError",
+    # official offer-file snapshot builder
+    "DimensionSpec",
+    "DIMENSION_SPECS",
+    "SUPPORTED_DIMENSION_KEYS",
+    "MappingResult",
+    "BuildReport",
+    "SnapshotBuildError",
+    "parse_official_offer_file",
+    "map_offer_products_to_dimension_keys",
+    "build_snapshot_from_offer_files",
+    "write_local_cache_snapshot",
 ]

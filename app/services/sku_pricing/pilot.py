@@ -159,14 +159,35 @@ def build_pilot_trace(use_case_profile: dict | None) -> dict | None:
             return _skip("snapshot not authoritative", snapshot_id=snapshot.snapshot_id,
                          snapshot_source=snapshot.source, snapshot_authoritative=False)
 
-        pilot_drivers = (use_case_profile or {}).get("sku_pricing_pilot_drivers") or {}
+        profile = use_case_profile or {}
+        pilot_drivers = profile.get("sku_pricing_pilot_drivers") or {}
         dims = document_rag_dimensions(pilot_drivers)
         estimate = build_local_cache_estimate(snapshot, dims, workload_drivers=pilot_drivers)
         trace = estimate.to_trace()
 
+        # Rate authority vs quantity confidence are SEPARATE axes (DECISIONS D10).
+        # Reaching here means the snapshot is provenance-authoritative -> rates are
+        # authoritative. Quantities are only "confirmed" when explicitly attested;
+        # assumed/default/inferred drivers must NOT unlock procurement readiness.
+        rate_authoritative = True
+        quantities_confirmed = bool(profile.get("sku_pricing_pilot_quantities_confirmed"))
+        quantity_source = profile.get("sku_pricing_pilot_quantity_source") or (
+            "user_confirmed" if quantities_confirmed else "assumed"
+        )
+        quantity_confidence = "confirmed" if quantities_confirmed else "assumed"
+        # estimate.procurement_ready == rates authoritative AND every required line binds
+        # with a present quantity. That is "estimate ready", NOT procurement ready.
+        estimate_ready = bool(estimate.procurement_ready)
+        pilot_procurement_ready = bool(estimate_ready and quantities_confirmed)
+
         lines = []
         for line in trace["lines"]:
-            line = {**line, "usage_purpose": PURPOSE_BY_KEY.get(line["dimension_key"], "")}
+            line = {
+                **line,
+                "usage_purpose": PURPOSE_BY_KEY.get(line["dimension_key"], ""),
+                "rate_authoritative": bool(line.get("procurement_ready")),
+                "quantities_confirmed": quantities_confirmed,
+            }
             lines.append(line)
 
         status = "completed" if not estimate.not_estimated else "partial"
@@ -182,12 +203,19 @@ def build_pilot_trace(use_case_profile: dict | None) -> dict | None:
             "sku_backed_subtotal": str(estimate.sku_backed_subtotal),
             "directional_subtotal": str(estimate.directional_subtotal),
             "not_estimated": list(estimate.not_estimated),
-            # Pilot-only readiness; deliberately NOT the global PricingAnalysis readiness.
-            "sku_pilot_procurement_ready": bool(estimate.procurement_ready),
+            # Split readiness axes (pilot-only; deliberately NOT global readiness).
+            "rate_authoritative": rate_authoritative,
+            "quantities_confirmed": quantities_confirmed,
+            "quantity_source": quantity_source,
+            "quantity_confidence": quantity_confidence,
+            "sku_pilot_estimate_ready": estimate_ready,
+            # Procurement-ready ONLY when rates are authoritative AND quantities confirmed.
+            "sku_pilot_procurement_ready": pilot_procurement_ready,
             "lines": lines,
             "note": (
-                "Supplemental SKU-backed pilot trace. Does not change PricingAnalysis totals "
-                "or global headline/procurement readiness."
+                "Supplemental SKU-backed pilot trace. Rate authority and quantity confidence are "
+                "separate: assumed quantities never reach procurement readiness. Does not change "
+                "PricingAnalysis totals or global headline/procurement readiness."
             ),
         }
     except Exception as exc:  # noqa: BLE001 - pilot must never break pricing

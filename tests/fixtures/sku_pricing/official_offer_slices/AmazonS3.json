@@ -1,0 +1,104 @@
+{
+  "formatVersion": "v1.0",
+  "disclaimer": "INFORMATIONAL TEST SLICE - small real-shape excerpt of the official AWS Price List offer file; NOT authoritative and NOT the full offer. Public rate data, us-east-1.",
+  "publicationDate": "2026-05-28T22:27:23Z",
+  "version": "20260528222723",
+  "offerCode": "AmazonS3",
+  "products": {
+    "WP9ANXZGBYYSGJEA": {
+      "sku": "WP9ANXZGBYYSGJEA",
+      "productFamily": "Storage",
+      "attributes": {
+        "servicecode": "AmazonS3",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "availability": "99.99%",
+        "storageClass": "General Purpose",
+        "volumeType": "Standard",
+        "usagetype": "TimedStorage-ByteHrs",
+        "operation": "",
+        "durability": "99.999999999%",
+        "regionCode": "us-east-1",
+        "servicename": "Amazon Simple Storage Service"
+      }
+    },
+    "2N3NKSP5AF8HYTS2": {
+      "sku": "2N3NKSP5AF8HYTS2",
+      "productFamily": "Storage",
+      "attributes": {
+        "servicecode": "AmazonS3",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "storageClass": "Files",
+        "volumeType": "Files",
+        "usagetype": "USE1-Files-TimedStorage-ByteHrs",
+        "operation": "Storage",
+        "durability": "99.999999999%",
+        "regionCode": "us-east-1",
+        "servicename": "Amazon Simple Storage Service"
+      }
+    }
+  },
+  "terms": {
+    "OnDemand": {
+      "WP9ANXZGBYYSGJEA": {
+        "WP9ANXZGBYYSGJEA.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "WP9ANXZGBYYSGJEA",
+          "priceDimensions": {
+            "WP9ANXZGBYYSGJEA.JRTCKXETXF.PGHJ3S3EYE": {
+              "rateCode": "WP9ANXZGBYYSGJEA.JRTCKXETXF.PGHJ3S3EYE",
+              "description": "$0.023 per GB - first 50 TB / month of storage used",
+              "beginRange": "0",
+              "endRange": "51200",
+              "unit": "GB-Mo",
+              "pricePerUnit": {
+                "USD": "0.0230000000"
+              }
+            },
+            "WP9ANXZGBYYSGJEA.JRTCKXETXF.D42MF2PVJS": {
+              "rateCode": "WP9ANXZGBYYSGJEA.JRTCKXETXF.D42MF2PVJS",
+              "description": "$0.022 per GB - next 450 TB / month of storage used",
+              "beginRange": "51200",
+              "endRange": "512000",
+              "unit": "GB-Mo",
+              "pricePerUnit": {
+                "USD": "0.0220000000"
+              }
+            },
+            "WP9ANXZGBYYSGJEA.JRTCKXETXF.PXJDJ3YRG3": {
+              "rateCode": "WP9ANXZGBYYSGJEA.JRTCKXETXF.PXJDJ3YRG3",
+              "description": "$0.021 per GB - storage used / month over 500 TB",
+              "beginRange": "512000",
+              "endRange": "Inf",
+              "unit": "GB-Mo",
+              "pricePerUnit": {
+                "USD": "0.0210000000"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      },
+      "2N3NKSP5AF8HYTS2": {
+        "2N3NKSP5AF8HYTS2.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "2N3NKSP5AF8HYTS2",
+          "priceDimensions": {
+            "2N3NKSP5AF8HYTS2.JRTCKXETXF.6YS6EN2CT7": {
+              "rateCode": "2N3NKSP5AF8HYTS2.JRTCKXETXF.6YS6EN2CT7",
+              "description": "$0.30 per GB-Mo of Storage in Files ",
+              "beginRange": "0",
+              "endRange": "Inf",
+              "unit": "GB-Mo",
+              "pricePerUnit": {
+                "USD": "0.3000000000"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      }
+    }
+  }
+}

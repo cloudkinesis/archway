@@ -17,7 +17,13 @@ from app.services.sku_pricing.snapshot import AUTHORITATIVE_SOURCES, PriceSnapsh
 
 # Upstream sources we accept as official/trusted provenance for a local cache.
 TRUSTED_UPSTREAM_SOURCES = frozenset(
-    {"aws_price_list_api", "aws_price_list_bulk", "aws_pricing_mcp", "aws_pricing_reference_mcp"}
+    {
+        "aws_price_list_api",
+        "aws_price_list_bulk",
+        "aws_price_list_bulk_api",  # official offer-file-derived caches (official_snapshot_builder)
+        "aws_pricing_mcp",
+        "aws_pricing_reference_mcp",
+    }
 )
 
 

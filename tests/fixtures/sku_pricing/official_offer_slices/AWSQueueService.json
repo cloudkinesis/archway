@@ -1,0 +1,164 @@
+{
+  "formatVersion": "v1.0",
+  "disclaimer": "INFORMATIONAL TEST SLICE - small real-shape excerpt of the official AWS Price List offer file; NOT authoritative and NOT the full offer. Public rate data, us-east-1.",
+  "publicationDate": "2025-08-28T20:07:13Z",
+  "version": "20250828200713",
+  "offerCode": "AWSQueueService",
+  "products": {
+    "8RN6B8U4MERHRXP3": {
+      "sku": "8RN6B8U4MERHRXP3",
+      "productFamily": "API Request",
+      "attributes": {
+        "servicecode": "AWSQueueService",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "group": "SQS-APIRequest-Tier1",
+        "groupDescription": "Amazon SQS Requests",
+        "usagetype": "Requests-RBP",
+        "operation": "",
+        "messageDeliveryFrequency": "At Least Once",
+        "messageDeliveryOrder": "Not Guaranteed",
+        "queueType": "Standard",
+        "regionCode": "us-east-1",
+        "servicename": "Amazon Simple Queue Service"
+      }
+    },
+    "624ZQ7K46KHFAD9Y": {
+      "sku": "624ZQ7K46KHFAD9Y",
+      "productFamily": "API Request",
+      "attributes": {
+        "servicecode": "AWSQueueService",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "group": "SQS-APIRequest-Tier1",
+        "groupDescription": "Amazon SQS Requests",
+        "usagetype": "Requests-FIFO-RBP",
+        "operation": "",
+        "messageDeliveryFrequency": "Exactly Once",
+        "messageDeliveryOrder": "Guaranteed",
+        "queueType": "FIFO (first-in, first-out)",
+        "regionCode": "us-east-1",
+        "servicename": "Amazon Simple Queue Service"
+      }
+    },
+    "MNCJEPJRCSC9RFY2": {
+      "sku": "MNCJEPJRCSC9RFY2",
+      "productFamily": "API Request",
+      "attributes": {
+        "servicecode": "AWSQueueService",
+        "location": "Any",
+        "locationType": "AWS Region",
+        "group": "SQS-APIRequest-Tier1",
+        "groupDescription": "Amazon SQS Requests",
+        "usagetype": "Global-Requests",
+        "operation": "",
+        "queueType": "Any",
+        "regionCode": "",
+        "servicename": "Amazon Simple Queue Service"
+      }
+    }
+  },
+  "terms": {
+    "OnDemand": {
+      "8RN6B8U4MERHRXP3": {
+        "8RN6B8U4MERHRXP3.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "8RN6B8U4MERHRXP3",
+          "priceDimensions": {
+            "8RN6B8U4MERHRXP3.JRTCKXETXF.VXGXCWQKTY": {
+              "rateCode": "8RN6B8U4MERHRXP3.JRTCKXETXF.VXGXCWQKTY",
+              "description": "$0.40 per million Amazon SQS standard requests in Tier1 in US East (N Virginia)",
+              "beginRange": "0",
+              "endRange": "100000000000",
+              "unit": "Requests",
+              "pricePerUnit": {
+                "USD": "0.0000004000"
+              }
+            },
+            "8RN6B8U4MERHRXP3.JRTCKXETXF.9JVYQWEJJY": {
+              "rateCode": "8RN6B8U4MERHRXP3.JRTCKXETXF.9JVYQWEJJY",
+              "description": "$0.30 per million Amazon SQS standard requests in Tier2 in US East (N Virginia)",
+              "beginRange": "100000000000",
+              "endRange": "200000000000",
+              "unit": "Requests",
+              "pricePerUnit": {
+                "USD": "0.0000003000"
+              }
+            },
+            "8RN6B8U4MERHRXP3.JRTCKXETXF.27HCEGFCXT": {
+              "rateCode": "8RN6B8U4MERHRXP3.JRTCKXETXF.27HCEGFCXT",
+              "description": "$0.24 per million Amazon SQS standard requests in Tier3 in US East (N Virginia)",
+              "beginRange": "200000000000",
+              "endRange": "Inf",
+              "unit": "Requests",
+              "pricePerUnit": {
+                "USD": "0.0000002400"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      },
+      "624ZQ7K46KHFAD9Y": {
+        "624ZQ7K46KHFAD9Y.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "624ZQ7K46KHFAD9Y",
+          "priceDimensions": {
+            "624ZQ7K46KHFAD9Y.JRTCKXETXF.VXGXCWQKTY": {
+              "rateCode": "624ZQ7K46KHFAD9Y.JRTCKXETXF.VXGXCWQKTY",
+              "description": "$0.50 per million Amazon SQS FIFO requests in Tier1 in US East (N Virginia)",
+              "beginRange": "0",
+              "endRange": "100000000000",
+              "unit": "Requests",
+              "pricePerUnit": {
+                "USD": "0.0000005000"
+              }
+            },
+            "624ZQ7K46KHFAD9Y.JRTCKXETXF.9JVYQWEJJY": {
+              "rateCode": "624ZQ7K46KHFAD9Y.JRTCKXETXF.9JVYQWEJJY",
+              "description": "$0.40 per million Amazon SQS FIFO requests in Tier2 in US East (N Virginia)",
+              "beginRange": "100000000000",
+              "endRange": "200000000000",
+              "unit": "Requests",
+              "pricePerUnit": {
+                "USD": "0.0000004000"
+              }
+            },
+            "624ZQ7K46KHFAD9Y.JRTCKXETXF.27HCEGFCXT": {
+              "rateCode": "624ZQ7K46KHFAD9Y.JRTCKXETXF.27HCEGFCXT",
+              "description": "$0.35 per million Amazon SQS FIFO requests in Tier3 in US East (N Virginia)",
+              "beginRange": "200000000000",
+              "endRange": "Inf",
+              "unit": "Requests",
+              "pricePerUnit": {
+                "USD": "0.0000003500"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      },
+      "MNCJEPJRCSC9RFY2": {
+        "MNCJEPJRCSC9RFY2.A429C66SYZ": {
+          "offerTermCode": "A429C66SYZ",
+          "sku": "MNCJEPJRCSC9RFY2",
+          "priceDimensions": {
+            "MNCJEPJRCSC9RFY2.A429C66SYZ.SB2VSFF4TP": {
+              "rateCode": "MNCJEPJRCSC9RFY2.A429C66SYZ.SB2VSFF4TP",
+              "description": "First 1,000,000 Amazon SQS Requests per month are free",
+              "beginRange": "0",
+              "endRange": "1000000",
+              "unit": "Requests",
+              "pricePerUnit": {
+                "USD": "0.0000000000"
+              }
+            }
+          },
+          "termAttributes": {
+            "Restriction": "Limited SKU Usage"
+          }
+        }
+      }
+    }
+  }
+}
