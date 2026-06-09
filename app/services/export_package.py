@@ -6,6 +6,7 @@ import asyncio
 import copy
 import json
 
+from app.core.config import get_settings
 from app.core.logging import AuditLogger, hash_payload, read_session_logs
 from app.db.session_store import SessionStore
 from app.models.domain import ExportBundle
@@ -16,6 +17,7 @@ from app.services.deep_dossier import DeepDossierService
 from app.services.golden_regression import GoldenRegressionExportService
 from app.services.jobs import job_manager
 from app.services.llm.telemetry import llm_telemetry_store
+from app.services.mcp_security import mcp_security_status
 
 
 class ExportPackageService:
@@ -110,6 +112,7 @@ class ExportPackageService:
             "architecture_revisions": architecture_revisions,
             "diagram_gallery": diagrams,
             "diagnostics": logs,
+            "mcp_security": mcp_security_status(get_settings()),
             "build_status": build_status,
             "golden_regression_summary": golden_regression,
             "job_telemetry": job_telemetry,

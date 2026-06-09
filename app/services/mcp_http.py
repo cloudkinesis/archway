@@ -4,8 +4,14 @@ import json
 
 import httpx
 
+from app.core.config import get_settings
 from app.core.logging import AuditLogger, hash_payload
 from app.models.domain import EvidenceItem
+from app.services.mcp_security import (
+    McpEndpointBlocked,
+    evaluate_mcp_endpoint,
+    sanitize_mcp_url,
+)
 
 
 class MCPHTTPClient:
@@ -15,8 +21,28 @@ class MCPHTTPClient:
         self.server_name = server_name
         self.session_id = session_id
         self._mcp_session_id: str | None = None
+        # Validate trust eagerly (no network). Credentials are only ever attached to a
+        # trusted endpoint; an untrusted endpoint fails closed in call_tool().
+        self.validation = evaluate_mcp_endpoint(server_url, get_settings())
+
+    def _ensure_endpoint_trusted(self) -> None:
+        if not self.validation.credentials_allowed:
+            # Token-safe warning: sanitized URL, host, reason — never the token itself.
+            AuditLogger(self.session_id).event(
+                "research",
+                "mcp_endpoint_blocked",
+                server_name=self.server_name,
+                endpoint=sanitize_mcp_url(self.server_url),
+                host=self.validation.host,
+                classification=self.validation.classification,
+                reason=self.validation.reason,
+                credentials_sent=False,
+            )
+            raise McpEndpointBlocked(self.validation)
 
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        # Fail closed BEFORE building headers or making any network call.
+        self._ensure_endpoint_trusted()
         request_payload = {
             "jsonrpc": "2.0",
             "id": uuid4().hex,
@@ -53,7 +79,8 @@ class MCPHTTPClient:
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
-        if self.auth_token:
+        # Defense in depth: only ever attach the bearer token to a trusted endpoint.
+        if self.auth_token and self.validation.credentials_allowed:
             headers["Authorization"] = f"Bearer {self.auth_token}"
         if self._mcp_session_id:
             headers["Mcp-Session-Id"] = self._mcp_session_id
