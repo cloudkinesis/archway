@@ -199,6 +199,8 @@ def build_pilot_trace(use_case_profile: dict | None) -> dict | None:
             "snapshot_source": estimate.snapshot_source,
             "snapshot_authoritative": True,
             "source_hash": (estimate.snapshot_provenance or {}).get("source_hash"),
+            "upstream_source": (estimate.snapshot_provenance or {}).get("upstream_source"),
+            "version_hash": estimate.snapshot_version_hash,
             "estimate_input_hash": estimate.estimate_input_hash,
             "sku_backed_subtotal": str(estimate.sku_backed_subtotal),
             "directional_subtotal": str(estimate.directional_subtotal),

@@ -6,6 +6,7 @@ import asyncio
 import copy
 import json
 
+from app.core.config import get_settings
 from app.core.logging import AuditLogger, hash_payload, read_session_logs
 from app.db.session_store import SessionStore
 from app.models.domain import ExportBundle
@@ -13,9 +14,12 @@ from app.services.artifacts import ArtifactStore
 from app.services.build_status import BuildStatusService
 from app.services.convergence.golden_convergence_orchestrator import GoldenConvergenceOrchestrator, quality_summary_markdown
 from app.services.deep_dossier import DeepDossierService
+from app.services.dossier_manifest import MANIFEST_FILENAME, build_dossier_manifest, manifest_markdown
 from app.services.golden_regression import GoldenRegressionExportService
 from app.services.jobs import job_manager
 from app.services.llm.telemetry import llm_telemetry_store
+from app.services.sku_pricing.export_trace import build_pilot_trace_files, pilot_trace_hash
+from app.services.sku_pricing.official_snapshot_builder import UNSUPPORTED_OFFICIAL_DIMENSIONS
 
 
 class ExportPackageService:
@@ -163,6 +167,13 @@ class ExportPackageService:
         manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         included_artifacts.append(f"exports/{export_name}/manifest.json")
 
+        progress(84, "Building verifiable dossier manifest.")
+        self._write_dossier_layer(
+            export_dir, export_name, session, brief, report, pricing,
+            architectures, architecture_revisions, diagrams, convergence_result,
+            warnings, included_artifacts,
+        )
+
         progress(88, "Building ZIP package.")
         zip_path = root / "exports" / f"{export_name}.zip"
         with ZipFile(zip_path, "w", ZIP_DEFLATED) as archive:
@@ -204,6 +215,105 @@ class ExportPackageService:
             "- Diagram gallery index and diagram files when available",
             "- Evidence appendix",
             "- Diagnostics summary",
+            "",
+        ])
+
+    def _write_dossier_layer(
+        self, export_dir: Path, export_name: str, session, brief, report, pricing,
+        architectures, architecture_revisions, diagrams, convergence_result,
+        warnings: list[str], included_artifacts: list[str],
+    ) -> None:
+        """Write supplemental SKU trace files + the verifiable dossier manifest.
+
+        Purely additive. Never changes legacy totals or global readiness; the SKU
+        trace files appear only when SKU pilot metadata is present.
+        """
+        settings = get_settings()
+        pilot = ((pricing or {}).get("metadata") or {}).get("sku_pricing_pilot")
+        sku_trace_hash = None
+        if pilot:
+            pricing_dir = export_dir / "pricing"
+            pricing_dir.mkdir(exist_ok=True)
+            trace_files = build_pilot_trace_files(pilot)
+            for name, key in (
+                ("sku_pricing_pilot_trace.json", "json"),
+                ("sku_pricing_pilot_trace.csv", "csv"),
+                ("sku_pricing_pilot_summary.md", "md"),
+            ):
+                (pricing_dir / name).write_text(trace_files[key], encoding="utf-8")
+                included_artifacts.append(f"exports/{export_name}/pricing/{name}")
+            sku_trace_hash = pilot_trace_hash(pilot)
+
+        (export_dir / "README_DOSSIER.md").write_text(self._readme_dossier(), encoding="utf-8")
+        included_artifacts.append(f"exports/{export_name}/README_DOSSIER.md")
+
+        feature_flags = {
+            "enable_sku_pricing_pilot": settings.enable_sku_pricing_pilot,
+            "sku_pricing_snapshot_configured": bool(settings.sku_pricing_snapshot_path),
+            "llm_provider": settings.llm_provider,
+        }
+        dossier = build_dossier_manifest(
+            export_dir,
+            session_id=session.id,
+            export_name=export_name,
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            session_input=getattr(session, "initial_use_case", None),
+            brief=brief,
+            report=report,
+            pricing=pricing,
+            architectures=architectures,
+            architecture_revisions=architecture_revisions,
+            diagrams=diagrams,
+            warnings=warnings,
+            feature_flags=feature_flags,
+            convergence_status=getattr(convergence_result, "final_status", None),
+            sku_trace_hash=sku_trace_hash,
+            unsupported_dimensions=dict(UNSUPPORTED_OFFICIAL_DIMENSIONS),
+        )
+        (export_dir / MANIFEST_FILENAME).write_text(
+            json.dumps(dossier, indent=2, sort_keys=True, default=str), encoding="utf-8"
+        )
+        (export_dir / "dossier_manifest.md").write_text(manifest_markdown(dossier), encoding="utf-8")
+        included_artifacts.append(f"exports/{export_name}/{MANIFEST_FILENAME}")
+        included_artifacts.append(f"exports/{export_name}/dossier_manifest.md")
+
+    def _readme_dossier(self) -> str:
+        return "\n".join([
+            "# Verifiable Solution Dossier",
+            "",
+            "This package ships a `dossier_manifest.json` — the trust spine of the export.",
+            "It records, for this solution, what is verified, what is directional, what is",
+            "missing, what failed closed, what can be reproduced, and what is NOT",
+            "procurement-ready.",
+            "",
+            "## How to verify this package",
+            "```",
+            "python scripts/verify_solution_dossier.py /path/to/this/export",
+            "```",
+            "The verifier recomputes every artifact hash in the manifest inventory and checks",
+            "required artifacts exist. It performs NO network calls and NO regeneration.",
+            "",
+            "## What SKU-backed pilot pricing means",
+            "When present, `pricing/sku_pricing_pilot_*` is a SUPPLEMENTAL SKU-backed trace",
+            "for a narrow service set. It does NOT replace the legacy estimate and does NOT",
+            "change global headline/procurement readiness.",
+            "",
+            "## Why rate authority and quantity confirmation are separate",
+            "- `rate_authoritative` means the rate was bound to an official-source-backed",
+            "  snapshot. Fixture-backed rates are never authoritative.",
+            "- `quantities_confirmed` means the workload quantities were explicitly confirmed.",
+            "- Procurement-ready requires BOTH. Authoritative rates with assumed quantities are",
+            "  NOT procurement-ready.",
+            "",
+            "## Why EventBridge may be 'not estimated'",
+            "AWS bills EventBridge custom events per 64KB chunk, not per raw event. Until a",
+            "chunk-quantity model exists, EventBridge fails closed rather than guessing.",
+            "",
+            "## Terms",
+            "- Directional: indicative only; not a procurement quote.",
+            "- Procurement-ready: bound to authoritative rates AND confirmed quantities, with",
+            "  every required line bound and no ambiguity. Global procurement-ready is not",
+            "  promoted by the SKU pilot.",
             "",
         ])
 
