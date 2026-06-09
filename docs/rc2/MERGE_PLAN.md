@@ -65,6 +65,15 @@ Notes:
 - **Expect a possible conflict in `app/services/export_package.py`** with the export-quality artifacts branch (both edit `generate()`). Resolve by PRESERVING BOTH: keep the export-quality markdown/raw artifacts AND the dossier manifest + SKU trace exports (the dossier insert is an additive block before the zip step).
 - UI/export now surface the SKU pilot trace + trust state (KNOWN_ISSUES I9 resolved for surfacing); product-level pricing replacement remains out of scope.
 
+## Stage 5 — Any-usecase capability routing (merge AFTER the Discovery Planner pipeline, BEFORE final validation gates)
+15. `feature/any-usecase-capability-router` (`445c6de`, off baseline `f692c04`) — deterministic `CapabilityRouter` (supported/directional/discovery_needed/unsupported_or_blocked) consuming the existing DiscoveryPlanner as an advisory, quarantined model prior (DECISIONS D15). Frontier prior OFF by default. READY_FOR_CODEX_REVIEW.
+
+Notes:
+- Sequence: merge after the Discovery Planner / synthesis pipeline exists (it does in baseline) and BEFORE final validation/readiness gates — the router's status + `safe_to_generate_*` flags should be available to those gates.
+- **Conflict risks** in `app/services/discovery_planner.py`, `app/services/synthesis.py`, `app/services/use_case_profile.py`, and `app/core/config.py` (the discovery/profile pipeline is also touched by domain-pack branches).
+- During merge, PRESERVE: (a) the **model-prior quarantine** (model influence limited to questions + generic fallback candidate; deterministic anchor in `_merge_plan`), and (b) the **pricing-driver leakage fix** (`discovery_plan.pricing_drivers` is deterministic-only and must not be re-opened to model output). Keep the flag default-off and the deterministic-known dominance gate intact.
+- Additive metadata only (`profile.capability_decision`); no pricing/architecture/governance/diagram behavior change.
+
 ## Deferred — not in this RC2 stabilization line
 - `experiment/domain-pack-interface` (`fe886af`) — DEFER until Codex review.
 - `feature/domain-pack-phase2-pricing-drivers` (`20eea81`) — DEFER until Codex review.

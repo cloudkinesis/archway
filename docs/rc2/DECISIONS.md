@@ -160,3 +160,29 @@ Baseline: `master` @ `f692c04`.
   never change pricing/research ranking, only whether the unsafe call is attempted.
 - Diagnostics/export surface a token-safe `mcp_security` status with a sanitized URL
   (scheme+host+port+path only); tokens and query strings are never logged or exported.
+
+## D15. Any-usecase handling contract
+Implemented by `feature/any-usecase-capability-router` @ `445c6de`.
+- Archway must classify EVERY normal use case into exactly one of:
+  `supported` / `directional` / `discovery_needed` / `unsupported_or_blocked`.
+- The frontier/model prior is ADVISORY ONLY.
+- The EXISTING `DiscoveryPlanner` (via `ModelRouter`) is the model-prior layer — do NOT
+  create a parallel prior subsystem and do NOT add a new external model client/egress.
+- The deterministic `CapabilityRouter` owns the FINAL status; the model prior can never
+  set it.
+- The model prior CANNOT drive pricing quantities, architecture service selection,
+  readiness, governance, citations, or diagrams. Its influence is quarantined to
+  interview questions + a generic fallback-family CANDIDATE only (validated against an
+  allowlist). Model-provided pricing-driver names no longer flow into pricing selection.
+- Deterministic-known classifications DOMINATE: when deterministic is high-confidence
+  with a known family + domain, the model prior is not consulted.
+- Unsafe/abusive use cases (phishing, credential/data theft, malware/ransomware/botnet,
+  bypassing security, evading detection, DDoS, etc.) must be `unsupported_or_blocked`
+  with `expected_artifact_level=unsupported_explanation` and
+  `safe_to_generate_{architecture,pricing,diagrams}=false`. Defensive security products
+  are NOT blocked.
+- Sensitive unknown inputs (secret/credential VALUES, or explicit PHI/PII markers like
+  PHI/HIPAA/patient record/MRN/diagnosis) SKIP the model prior and continue with the
+  deterministic fallback — the use case is not blocked.
+- The frontier prior is OFF by default (`ARCHWAY_ENABLE_FRONTIER_DOMAIN_PRIOR=false`,
+  per-session cap `=1`); default behavior is fully deterministic and reproducible.

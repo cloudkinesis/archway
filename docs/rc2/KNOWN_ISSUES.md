@@ -29,6 +29,9 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
 - **Blocks internal pilot:** no.
 - **Next action:** confirm on a clean `f692c04` run; if real, scope a focused
   metric-extraction fix branch (do NOT fold into unrelated branches).
+- **Update:** re-confirmed pre-existing on a clean `f692c04` stash during the
+  `feature/any-usecase-capability-router` work; still OPEN and deliberately NOT chased
+  in that branch (excluded from its green run).
 
 ## I3. Audit-log robustness (`read_session_logs`) — FIXED (`db77e0c`)
 - **What:** `app/core/logging.py` `json.loads(line)` over `audit.jsonl` had no
@@ -194,3 +197,17 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
 - **Next action:** run the offline verifier (`python scripts/verify_solution_dossier.py
   <export>`, optionally `--strict`) for actual hash verification. A future option could
   embed a verifier result into the UI to flip the badge to "verified".
+
+## I13. Capability routing is directional/generic for unknown domains
+- **What:** the any-usecase handling contract (DECISIONS D15) is implemented by
+  `feature/any-usecase-capability-router` @ `445c6de`: every normal use case is routed
+  to `supported` / `directional` / `discovery_needed` / `unsupported_or_blocked`. For
+  domains without a specialized pack, routing is `directional`/`discovery_needed` mapped
+  to a GENERIC fallback family — it does NOT mean every domain has a specialized
+  domain pack or deep modeling (related to I7).
+- **Status:** by-design honesty (not a defect). The router widens *handling*, not depth.
+- **Severity:** low (expectation-setting).
+- **Blocks internal pilot:** no.
+- **Next action:** treat unknown-domain output as directional; invest in specialized
+  packs per vertical over time (I7). The frontier model prior is advisory-only and
+  cannot upgrade an unknown domain to `supported`.

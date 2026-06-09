@@ -190,3 +190,33 @@ NOT independently on master. Review/merge bottom-up (foundation first).
   - Before merge: delete/reset the branch; no master impact.
   - To revert the commit directly: `git revert b6a51d7`.
   - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.
+
+### feature/any-usecase-capability-router — `445c6de` (base: master baseline `f692c04`)
+- **Purpose:** the any-usecase handling contract (DECISIONS D15). Adds the deterministic
+  `CapabilityRouter` (supported / directional / discovery_needed / unsupported_or_blocked)
+  and reuses the EXISTING `DiscoveryPlanner` (via `ModelRouter`) as a quarantined,
+  advisory model prior — no parallel prior subsystem, no new external model client.
+- **Files:** new `app/services/capability_router.py` (router + deterministic abuse
+  blocker + sensitivity screen + per-session budget/cache), new
+  `tests/test_capability_router.py`; edits to `app/services/discovery_planner.py`
+  (flag-gating + quarantined merge + provenance), `app/services/synthesis.py` (router
+  wiring), `app/services/use_case_profile.py` (`capability_decision` metadata),
+  `app/core/config.py` (2 flags), and `tests/test_discovery_planner.py` (1 test updated
+  to the opt-in/dominance behavior). No pricing-calc / architecture / governance /
+  diagram / frontend / SKU / dossier / MCP / audit files touched.
+- **Safety:** frontier prior OFF by default (`ARCHWAY_ENABLE_FRONTIER_DOMAIN_PRIOR=false`,
+  cap 1); model influence quarantined to questions + generic fallback candidate;
+  model pricing-driver names no longer reach pricing; deterministic-known dominates;
+  unsafe/abusive → `unsupported_or_blocked` (no fake architecture); sensitive unknown
+  (secrets / PHI-HIPAA markers) skips the model prior, deterministic fallback continues.
+  No new egress; `ModelRouter` (Bedrock/Ollama) only.
+- **Tests:** capability_router + discovery 24; healthcare anti-drift + scenario matrix
+  15; pricing trio 21; export + session 6 (66 total). Pre-existing I2 synthesis failure
+  excluded/not chased.
+- **Merge status:** READY_FOR_CODEX_REVIEW — off baseline `f692c04`; not on master.
+  Stage 5 in MERGE_PLAN. Conflict risk in discovery_planner/synthesis/use_case_profile/
+  config; preserve the model-prior quarantine + pricing-driver leakage fix on merge.
+- **Rollback:**
+  - Before merge: delete/reset the branch; no master impact.
+  - To revert the commit directly: `git revert 445c6de`.
+  - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.
