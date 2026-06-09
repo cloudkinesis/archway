@@ -88,3 +88,32 @@ Rollback conventions:
 - **Tests:** domain-pack 18 / pricing suites green flag off; 39 passed flag on; golden/anti-drift parity.
 - **Merge status:** DEFER until Codex review; built on the experiment branch; not on master.
 - **Rollback:** discard branch (no master impact).
+
+---
+
+## SKU-backed pricing stack (stacked branches)
+
+These three branches form a dependency chain; each is stacked on the previous,
+NOT independently on master. Review/merge bottom-up (foundation first).
+
+### feature/sku-backed-pricing-foundation — `9b168d7` (base: `f692c04`)
+- **Purpose:** standalone SKU-backed pricing foundation — versioned snapshot abstraction, fail-closed rate binding, reproducible estimate input hash, evidence-classed traces, static fixture support. Not wired into live pricing.
+- **Files:** `app/services/sku_pricing/{__init__,snapshot,binding,estimate}.py`, `tests/fixtures/sku_pricing/snapshot_us_east_1_fixture.json`, `tests/test_sku_backed_pricing.py` (all new).
+- **Tests:** 17 new passed; existing pricing suites unchanged (21).
+- **Merge status:** standalone; not on master. Foundation of the SKU stack.
+- **Rollback:** discard branch (no master/live impact).
+
+### feature/sku-pricing-local-cache-adapter — `efe0849` (base: `feature/sku-backed-pricing-foundation` @ `9b168d7`)
+- **Purpose:** local-cache adapter for official AWS Price List-derived snapshots — provenance validation, reduced Price List parser, source authority classification. A `local_cache` snapshot can unlock procurement-ready line items only with valid upstream provenance + exact binding.
+- **Files:** new `app/services/sku_pricing/{provenance,price_list_parser,cache}.py`; small additive edits to `app/services/sku_pricing/{__init__,snapshot,estimate}.py`; `tests/fixtures/sku_pricing/{aws_price_list_reduced_us_east_1,local_cache_snapshot_us_east_1}.json`; `tests/test_sku_pricing_local_cache.py`.
+- **Tests:** 29 passed (17 foundation + 12 local-cache); existing pricing suites unchanged (21).
+- **Merge status:** stacked on `9b168d7`; not on master. Foundation branch unchanged.
+- **Rollback:** discard branch (no master/live impact).
+
+### feature/sku-pricing-source-truth-pilot — `c301362` (base: `feature/sku-pricing-local-cache-adapter` @ `efe0849`)
+- **Purpose:** first controlled, flag-gated bridge from the SKU module into live pricing — a SUPPLEMENTAL SKU-backed trace for legal/document RAG only. Does not change PricingAnalysis totals or global headline/procurement readiness.
+- **Files:** `app/core/config.py` (2 new flags, default off), `app/services/pricing.py` (3-line flag-gated hook), new `app/services/sku_pricing/pilot.py`, `tests/test_sku_pricing_source_truth_pilot.py`.
+- **Flags:** `ARCHWAY_ENABLE_SKU_PRICING_PILOT` (default false), `ARCHWAY_SKU_PRICING_SNAPSHOT_PATH` (default unset).
+- **Tests:** 9 pilot + 29 SKU module + 21 existing pricing passed; flag-off behavior byte/behavior-equivalent.
+- **Merge status:** stacked on `efe0849`; not on master. Base SKU branches unchanged.
+- **Rollback:** discard branch (no master impact). With the flag off there is no live effect even if merged.

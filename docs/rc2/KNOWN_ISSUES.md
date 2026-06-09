@@ -97,3 +97,22 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
 - **Next action:** product decision — state the ladder honestly (directional is
   the default ceiling), and decide whether to invest in live SKU/rate binding to
   make the top rungs reachable.
+- **Update:** an SKU-backed pricing stack now exists (foundation `9b168d7`,
+  local-cache adapter `efe0849`, supplemental pilot `c301362`) that can produce
+  reproducible, SKU-traceable, provenance-gated estimates for a narrow service set.
+  It is standalone/flag-gated and does not yet change live readiness (see I9).
+
+## I9. SKU pricing pilot trace not surfaced in live UI / export
+- **What:** the SKU-backed pilot trace (`metadata["sku_pricing_pilot"]`, branch
+  `feature/sku-pricing-source-truth-pilot` @ `c301362`) is attached to pricing
+  metadata when the flag is on, but the frontend UI and the export package do not
+  yet render or include it. Export integration was intentionally out of scope for
+  the pilot branch (no `export_package`/frontend changes).
+- **Status:** open (by design for the pilot; surfacing is a future branch).
+- **Severity:** low (additive metadata exists; just not presented).
+- **Branch if fixed:** none yet.
+- **Blocks internal pilot:** no.
+- **Next action:** a future branch to (a) include the SKU pilot trace in the export
+  raw payloads / a dedicated pricing-trace artifact, and (b) optionally surface a
+  read-only "SKU-backed (pilot)" panel in the UI — keeping it clearly supplemental
+  and never promoting global readiness (DECISIONS D10).

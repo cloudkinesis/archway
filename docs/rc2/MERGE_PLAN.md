@@ -34,6 +34,18 @@ and `tests/test_export_quality_artifacts.py` after resolving.
 9. MCP URL allowlist (KNOWN_ISSUES I4) — when a branch exists.
 Neither blocks the internal pilot; merge when ready.
 
+## Stage 4 — SKU-backed pricing stack (stacked; merge bottom-up, after Codex review)
+This is a dependency chain — review/merge in order, each onto the previous:
+10. `feature/sku-backed-pricing-foundation` (`9b168d7`) — standalone SKU foundation; no live impact.
+11. `feature/sku-pricing-local-cache-adapter` (`efe0849`, on `9b168d7`) — provenance-gated local-cache adapter; no live impact.
+12. `feature/sku-pricing-source-truth-pilot` (`c301362`, on `efe0849`) — supplemental flag-gated pilot trace (legal/document RAG only).
+
+Notes:
+- All three are standalone/flag-gated; with `ARCHWAY_ENABLE_SKU_PRICING_PILOT` off (default) there is no live pricing change even after merge.
+- Do NOT merge the pilot (12) without its bases (10, 11) — it imports them.
+- The pilot must remain supplemental: it must not promote global `headline_safe`/`procurement_ready` (DECISIONS D10).
+- Live UI/export do not yet surface the SKU pilot trace (KNOWN_ISSUES I9) — a future branch.
+
 ## Deferred — not in this RC2 stabilization line
 - `experiment/domain-pack-interface` (`fe886af`) — DEFER until Codex review.
 - `feature/domain-pack-phase2-pricing-drivers` (`20eea81`) — DEFER until Codex review.

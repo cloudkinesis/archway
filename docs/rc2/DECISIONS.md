@@ -69,3 +69,19 @@ Baseline: `master` @ `f692c04`.
   non-sensitive use cases. No real customer PII/PHI/secrets in pilot sessions.
 - The app remains local-first with no endpoint auth; it must never be exposed on
   a public/`0.0.0.0` interface without an auth layer.
+
+## D10. SKU pricing pilot is SUPPLEMENTAL and FLAG-GATED
+- The SKU-backed pricing pilot (`feature/sku-pricing-source-truth-pilot`) attaches
+  a supplemental `sku_pricing_pilot` trace to pricing metadata. It must NOT replace
+  the heuristic/source-truth totals (`low/expected/high`) and must NOT promote the
+  global `headline_safe` / `procurement_ready`. Pilot readiness is exposed only via
+  the separate `sku_pilot_procurement_ready`.
+- Gated by `ARCHWAY_ENABLE_SKU_PRICING_PILOT` (default false). With the flag off,
+  pricing behavior is byte/behavior-equivalent to baseline.
+- Snapshot authority: a `static_fixture` snapshot is NEVER authoritative. Only a
+  `local_cache` (or `price_list_api` / `mcp`) snapshot with valid upstream
+  provenance (upstream source + source hash + region + rates with SKU/price
+  dimension) may unlock pilot-scoped procurement-ready line items — and even then
+  only when every required line binds exactly with a confirmed quantity.
+- Missing/ambiguous/unit-mismatch binding fails closed; non-authoritative or
+  unconfigured snapshots yield `skipped`/`failed_closed`, never readiness.
