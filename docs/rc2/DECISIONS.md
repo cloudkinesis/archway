@@ -142,3 +142,21 @@ Baseline: `master` @ `f692c04`.
 - Exception: a FUTURE explicit compliance mode could require audit completeness and
   promote audit degradation to a blocker. No such mode exists today; do NOT invent one
   in the hardening branch.
+
+## D14. MCP endpoints are privileged trust boundaries
+- MCP endpoints are privileged integration points (fixed by `fix/mcp-url-allowlist`
+  @ `b6a51d7`). Credentials (bearer/API tokens) must NEVER be sent to an untrusted or
+  arbitrary external MCP host.
+- localhost and private-network endpoints are trusted by default
+  (`ARCHWAY_MCP_ALLOW_LOCALHOST` / `ARCHWAY_MCP_ALLOW_PRIVATE_NETWORK`).
+- `.api.aws` (AWS-managed MCP) is trusted by default to preserve existing AWS-managed
+  MCP behavior — the one built-in external suffix allowlist.
+- Any other external MCP host is BLOCKED unless explicitly allowlisted
+  (`ARCHWAY_MCP_ALLOWED_HOSTS`, exact host match) or external opt-in is enabled
+  (`ARCHWAY_MCP_ALLOW_EXTERNAL=true`). Unsupported schemes, malformed URLs, and
+  URLs with embedded credentials are blocked.
+- When an endpoint is untrusted the client fails closed (no token, no call) and the
+  existing fallback (official web / heuristic / snapshot) continues — MCP safety must
+  never change pricing/research ranking, only whether the unsafe call is attempted.
+- Diagnostics/export surface a token-safe `mcp_security` status with a sanitized URL
+  (scheme+host+port+path only); tokens and query strings are never logged or exported.

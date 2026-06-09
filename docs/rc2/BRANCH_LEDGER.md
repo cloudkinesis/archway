@@ -162,3 +162,31 @@ NOT independently on master. Review/merge bottom-up (foundation first).
   - Before merge: delete/reset the branch; no master impact.
   - To revert the commit directly: `git revert db77e0c`.
   - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.
+
+### fix/mcp-url-allowlist — `b6a51d7` (base: master baseline `f692c04`)
+- **Purpose:** security/trust hardening — MCP endpoints are privileged integration
+  points (DECISIONS D14). Bearer/API tokens are never sent to arbitrary/untrusted
+  external MCP hosts. localhost + private network trusted by default; external hosts
+  require explicit allowlist or global opt-in; AWS-managed `.api.aws` trusted by
+  default; unsupported schemes / malformed URLs / embedded credentials blocked.
+  Untrusted endpoints fail closed (no token, no call) into existing fallbacks.
+- **Files:** new `app/services/mcp_security.py` (`validate_mcp_endpoint_url`,
+  `McpUrlValidationResult`, `mcp_security_status`, `sanitize_mcp_url`), new
+  `tests/test_mcp_url_allowlist.py`; edits to `app/core/config.py` (4 trust flags),
+  `app/services/mcp_http.py` (validate + fail-closed + token guard), `app/api/routes.py`
+  + `app/services/export_package.py` (token-safe `mcp_security` diagnostics/export).
+  No pricing-calc / research-ranking / frontend / architecture / discovery / diagram /
+  governance / domain-pack / SKU / dossier files touched.
+- **Safety:** no token egress to untrusted hosts; diagnostics/export sanitize URLs
+  (no userinfo/query/fragment) and never expose tokens; pricing/research ranking
+  unchanged — only whether the unsafe MCP call is attempted; no live network in tests.
+- **Tests:** MCP allowlist 19 passed; mcp_http+aws_research+health 9; keyword-mcp 26;
+  pricing 21; export+session 6; anti-drift 20 (101 total).
+- **Merge status:** READY_FOR_CODEX_REVIEW — off baseline `f692c04`; not on master.
+  Stage 3 in MERGE_PLAN. Conflict expected in `export_package.py` + `routes.py` with
+  the audit (item 8) and dossier/export (item 14) branches — preserve `mcp_security`
+  alongside `audit_log` and dossier/SKU export payloads.
+- **Rollback:**
+  - Before merge: delete/reset the branch; no master impact.
+  - To revert the commit directly: `git revert b6a51d7`.
+  - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.

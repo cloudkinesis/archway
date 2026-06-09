@@ -37,7 +37,16 @@ and `tests/test_export_quality_artifacts.py` after resolving.
      conflict with the dossier/export branch (Stage 4 item 14) and any export-quality
      branch**; resolve by PRESERVING BOTH the `audit_log` payload and the dossier
      manifest / SKU trace exports.
-9. MCP URL allowlist (KNOWN_ISSUES I4) — when a branch exists.
+9. `fix/mcp-url-allowlist` (`b6a51d7`, off baseline `f692c04`) — MCP endpoint trust
+   boundary: untrusted external MCP hosts are blocked and never receive credentials;
+   localhost/private allowed by default; `.api.aws` trusted; explicit allowlist /
+   external opt-in supported (KNOWN_ISSUES I4 FIXED, DECISIONS D14). READY_FOR_CODEX_REVIEW.
+   - Touches `app/core/config.py`, `app/api/routes.py`, `app/services/export_package.py`,
+     `app/services/mcp_http.py`. **Expect conflicts with the audit branch (item 8) and
+     the dossier/export branch (Stage 4 item 14)** — all add raw payloads in
+     `export_package.py` and edit `routes.py`. Resolve by PRESERVING the `mcp_security`
+     diagnostics/export payloads ALONGSIDE the `audit_log` payload and the dossier
+     manifest / SKU trace exports.
 Neither blocks the internal pilot; merge when ready.
 
 ## Stage 4 — SKU-backed pricing stack (stacked; merge bottom-up, after Codex review)

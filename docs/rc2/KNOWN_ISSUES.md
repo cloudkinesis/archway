@@ -52,16 +52,32 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
   touch export generation (KNOWN_ISSUES I9 / DECISIONS D12) — resolve by PRESERVING
   BOTH the `audit_log` payload and the dossier manifest / SKU trace exports.
 
-## I4. MCP URL allowlist / token egress
-- **What:** `aws_docs_mcp_url` / `aws_pricing_mcp_url` are taken from env and
+## I4. MCP URL allowlist / token egress — FIXED (`b6a51d7`)
+- **What:** `aws_docs_mcp_url` / `aws_pricing_mcp_url` were taken from env and
   POSTed to with the Bearer token attached, with no hostname allowlist
-  (`aws_research_tools.py`). Only the web fallback results are allowlisted.
-- **Status:** open.
-- **Severity:** low (operator-trust; config-controlled, local-first).
-- **Branch if fixed:** none.
-- **Blocks internal pilot:** no (pilot does not require live MCP).
-- **Next action:** add an optional hostname allowlist for MCP endpoints before
-  any networked/multi-user deployment.
+  (`aws_research_tools.py`). Only the web fallback results were allowlisted.
+- **Status:** FIXED by `fix/mcp-url-allowlist` @ `b6a51d7` (off baseline `f692c04`).
+- **Resolution:** centralized `app/services/mcp_security.py`
+  (`validate_mcp_endpoint_url` / `McpUrlValidationResult`) classifies every MCP URL
+  (localhost / private_network / allowed_external / untrusted_external / invalid /
+  unsupported_scheme) using `urllib.parse` + `ipaddress`:
+  - Unsafe external MCP URLs are **blocked by default** (`untrusted_external`).
+  - **localhost / private network** endpoints remain **allowed by default**
+    (`ARCHWAY_MCP_ALLOW_LOCALHOST` / `ARCHWAY_MCP_ALLOW_PRIVATE_NETWORK`, both true).
+  - External hosts require an explicit allowlist (`ARCHWAY_MCP_ALLOWED_HOSTS`) or the
+    global opt-in (`ARCHWAY_MCP_ALLOW_EXTERNAL=true`); AWS-managed `.api.aws` stays
+    trusted by default (DECISIONS D14).
+  - The **bearer/API token is never attached to an untrusted host**: `MCPHTTPClient`
+    fails closed before building headers or making any HTTP call, and `_headers()` is
+    guarded as defense in depth.
+  - Diagnostics/export expose a token-safe `mcp_security` status (sanitized URL — no
+    userinfo/query/fragment); tokens are never logged or exported.
+- **Severity:** low → resolved.
+- **Blocks internal pilot:** no.
+- **Merge note:** touches `config.py`, `routes.py`, `export_package.py`, `mcp_http.py`
+  — expect conflicts with the audit/dossier/export branches; preserve the
+  `mcp_security` diagnostics/export payloads alongside `audit_log` and dossier/SKU
+  exports.
 
 ## I5. Healthcare diagram crossings / placement QA
 - **What:** domain-specific diagram placement/crossing QA findings independent of
