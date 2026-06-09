@@ -108,6 +108,15 @@ class Settings(BaseModel):
     bedrock_temperature_default: float = Field(default_factory=lambda: float(os.getenv("ARCHWAY_BEDROCK_TEMPERATURE_DEFAULT", "0.2")))
     bedrock_enable_structured_output: bool = Field(default_factory=lambda: os.getenv("ARCHWAY_BEDROCK_ENABLE_STRUCTURED_OUTPUT", "true") == "true")
     max_request_bytes: int = 64_000
+    # Frontier-model domain prior (advisory only). Default OFF -> deterministic
+    # Discovery Planner is the default; the model prior is an explicit opt-in and is
+    # quarantined to interview questions + a generic fallback-family candidate only.
+    enable_frontier_domain_prior: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_FRONTIER_DOMAIN_PRIOR", "false") == "true"
+    )
+    frontier_domain_prior_max_calls_per_session: int = Field(
+        default_factory=lambda: max(0, int(os.getenv("ARCHWAY_FRONTIER_DOMAIN_PRIOR_MAX_CALLS_PER_SESSION", "1")))
+    )
 
     @property
     def sessions_dir(self) -> Path:
