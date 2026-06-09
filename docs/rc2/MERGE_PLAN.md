@@ -30,7 +30,13 @@ default (`get(..., False)`) from branch 7. Re-run `tests/test_export_package.py`
 and `tests/test_export_quality_artifacts.py` after resolving.
 
 ## Stage 3 — Audit / MCP hardening (only if completed and reviewed)
-8. Audit-log robustness (KNOWN_ISSUES I3) — when a branch exists.
+8. `fix/audit-log-robustness` (`db77e0c`, off baseline `f692c04`) — crash-safe audit
+   JSONL reader + recursive redaction; malformed logs degrade with structured
+   warnings (KNOWN_ISSUES I3 FIXED). READY_FOR_CODEX_REVIEW.
+   - Edits `app/services/export_package.py` (adds an `audit_log` payload) — **expect a
+     conflict with the dossier/export branch (Stage 4 item 14) and any export-quality
+     branch**; resolve by PRESERVING BOTH the `audit_log` payload and the dossier
+     manifest / SKU trace exports.
 9. MCP URL allowlist (KNOWN_ISSUES I4) — when a branch exists.
 Neither blocks the internal pilot; merge when ready.
 

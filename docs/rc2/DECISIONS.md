@@ -126,3 +126,19 @@ Baseline: `master` @ `f692c04`.
 - The dossier is a faithful REPORTER of pricing readiness, not its enforcer:
   enforcement lives in the pricing fail-closed branches, which are a prerequisite for
   a trustworthy `pricing_headline_safe` (see MERGE_PLAN + KNOWN_ISSUES).
+
+## D13. Audit logs are non-blocking diagnostic evidence
+- Audit logs (`audit.jsonl`) are diagnostic EVIDENCE, not a control-plane gate.
+- A corrupt / partially-written / unreadable audit log must NEVER block export,
+  diagnostics, session hydration, dossier generation, or readiness — the flow always
+  produces an honest package (fixed by `fix/audit-log-robustness` @ `db77e0c`).
+- Audit degradation is WARNING-LEVEL: malformed/non-object lines are skipped with
+  structured warnings and a `degraded`/`unreadable` status surfaced in export, but it
+  is never a blocker. (This aligns with the product rule: always produce an honest
+  package; never fake success; never leave the user empty-handed.)
+- Audit data is recursively REDACTED before it is logged, persisted, read, or
+  exported; secrets/tokens/keys never leak through audit evidence, and innocent keys
+  are preserved (allowlist) to avoid over-redaction.
+- Exception: a FUTURE explicit compliance mode could require audit completeness and
+  promote audit degradation to a blocker. No such mode exists today; do NOT invent one
+  in the hardening branch.

@@ -137,3 +137,28 @@ NOT independently on master. Review/merge bottom-up (foundation first).
   - To revert the feature-branch commit directly: `git revert 91ad37d`.
   - To revert a later `--no-ff` merge into master/integration: `git revert -m 1 <merge_commit_sha>`.
   - (Additive/flag-aware; runtime pricing is unchanged regardless.)
+
+### fix/audit-log-robustness — `db77e0c` (base: master baseline `f692c04`)
+- **Purpose:** hardening branch — make audit-log reading/writing robust so a corrupt
+  `audit.jsonl` can never crash diagnostics, export, session hydration, the debug
+  bundle, or readiness. Malformed/non-object/partial lines are skipped with structured
+  warnings (`AuditReadResult`: `ok|degraded|missing|unreadable`); blank lines ignored.
+  Adds recursive secret/token redaction (with an innocent-key allowlist) applied on
+  write AND read; the writer never crashes the main flow on a write error.
+- **Files:** `app/core/logging.py` (safe `read_audit_jsonl`/`read_session_audit`,
+  `redact_sensitive`, hardened writer), `app/services/export_package.py` (adds a
+  `raw/audit_log.json` payload + non-blocking degraded warning), new
+  `tests/test_audit_log_robustness.py`. No pricing/architecture/discovery/frontend/
+  diagram/governance/domain-pack/SKU/dossier files touched.
+- **Safety:** audit degradation is warning-level, never a blocker (DECISIONS D13); no
+  readiness/pricing/governance/diagram gate changed; secrets never leak through audit
+  evidence; innocent keys (`author`/`token_count`/…) preserved.
+- **Tests:** audit robustness 18 passed (incl. export integration); export+session
+  hydration 6 passed; pricing 21 passed; anti-drift 20 passed (65 total).
+- **Merge status:** READY_FOR_CODEX_REVIEW — off baseline `f692c04`; not on master.
+  Stage 3 in MERGE_PLAN. Conflict expected in `export_package.py` with dossier/export
+  branches — preserve both the `audit_log` payload and dossier/SKU exports.
+- **Rollback:**
+  - Before merge: delete/reset the branch; no master impact.
+  - To revert the commit directly: `git revert db77e0c`.
+  - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.

@@ -30,16 +30,27 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
 - **Next action:** confirm on a clean `f692c04` run; if real, scope a focused
   metric-extraction fix branch (do NOT fold into unrelated branches).
 
-## I3. Audit-log robustness (`read_session_logs`)
-- **What:** `app/core/logging.py` `json.loads(line)` over `audit.jsonl` has no
-  per-line guard; a single corrupt/interrupted line can 500 `/diagnostics`,
-  `/export`, and hydration. Append writes are unlocked.
-- **Status:** open (not fixed on any branch).
-- **Severity:** medium (availability of diagnostics/export/hydration).
-- **Branch if fixed:** none.
-- **Blocks internal pilot:** no (low probability locally), but recommended.
-- **Next action:** focused branch — wrap line parsing in try/except and skip bad
-  lines; consider write locking. Out of scope for the merged fix branches.
+## I3. Audit-log robustness (`read_session_logs`) — FIXED (`db77e0c`)
+- **What:** `app/core/logging.py` `json.loads(line)` over `audit.jsonl` had no
+  per-line guard; a single corrupt/interrupted line could 500 `/diagnostics`,
+  `/export`, and hydration. Append writes were unlocked.
+- **Status:** FIXED by `fix/audit-log-robustness` @ `db77e0c` (off baseline `f692c04`).
+- **Resolution:** a centralized crash-safe reader (`read_audit_jsonl` →
+  `AuditReadResult`) skips malformed / non-object / partially-written lines with
+  STRUCTURED warnings (`malformed_json` / `non_object_json` / `read_error`) and a
+  `status` of `ok|degraded|missing|unreadable`; blank lines are ignored. Diagnostics,
+  export, hydration, and the debug bundle now complete on a corrupt log. Events are
+  recursively REDACTED (secrets/tokens/keys → `<redacted>`, with an allowlist so
+  innocent keys like `author`/`token_count` survive); the writer redacts before
+  persisting and never crashes the main flow on a write error. Export records
+  `audit_log_status` / `audit_log_warnings` in `raw/audit_log.json` and surfaces a
+  non-blocking warning when degraded.
+- **Severity:** medium → resolved.
+- **Blocks internal pilot:** no.
+- **Merge note:** `app/services/export_package.py` is edited by this branch (adds the
+  `audit_log` payload). Expect a conflict with the dossier/export branches that also
+  touch export generation (KNOWN_ISSUES I9 / DECISIONS D12) — resolve by PRESERVING
+  BOTH the `audit_log` payload and the dossier manifest / SKU trace exports.
 
 ## I4. MCP URL allowlist / token egress
 - **What:** `aws_docs_mcp_url` / `aws_pricing_mcp_url` are taken from env and
