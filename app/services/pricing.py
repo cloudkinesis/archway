@@ -132,7 +132,17 @@ class PricingEngine:
             evidence_items=evidence,
             metadata=validation,
         )
-        return SourceTruthPricingCompiler().compile(profile=profile, drivers=drivers, pricing=analysis)
+        compiled = SourceTruthPricingCompiler().compile(profile=profile, drivers=drivers, pricing=analysis)
+        # Pilot (flag-gated, default off): attach a supplemental SKU-backed trace for
+        # legal/document RAG only. Additive metadata; never changes totals or global
+        # headline/procurement readiness; never raises into the pricing path.
+        try:
+            from app.services.sku_pricing.pilot import attach_sku_pricing_pilot
+
+            attach_sku_pricing_pilot(compiled, brief)
+        except Exception:
+            pass
+        return compiled
 
 
 def derive_pricing_drivers(profile: UseCaseProfile, pricing_driver_overrides: dict[str, Any] | None = None) -> PricingDrivers:

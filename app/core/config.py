@@ -108,6 +108,15 @@ class Settings(BaseModel):
     bedrock_temperature_default: float = Field(default_factory=lambda: float(os.getenv("ARCHWAY_BEDROCK_TEMPERATURE_DEFAULT", "0.2")))
     bedrock_enable_structured_output: bool = Field(default_factory=lambda: os.getenv("ARCHWAY_BEDROCK_ENABLE_STRUCTURED_OUTPUT", "true") == "true")
     max_request_bytes: int = 64_000
+    # Pilot: attach a supplemental SKU-backed pricing trace (legal/document RAG only).
+    # Default OFF. When off, pricing behavior is byte/behavior equivalent to baseline.
+    # Does NOT reuse the domain-pack registry flag.
+    enable_sku_pricing_pilot: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_SKU_PRICING_PILOT", "false") == "true"
+    )
+    sku_pricing_snapshot_path: str | None = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_SKU_PRICING_SNAPSHOT_PATH") or None
+    )
 
     @property
     def sessions_dir(self) -> Path:
