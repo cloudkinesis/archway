@@ -39,11 +39,12 @@ This is a dependency chain — review/merge in order, each onto the previous:
 10. `feature/sku-backed-pricing-foundation` (`9b168d7`) — standalone SKU foundation; no live impact.
 11. `feature/sku-pricing-local-cache-adapter` (`efe0849`, on `9b168d7`) — provenance-gated local-cache adapter; no live impact.
 12. `feature/sku-pricing-source-truth-pilot` (`c301362`, on `efe0849`) — supplemental flag-gated pilot trace (legal/document RAG only).
+13. `feature/sku-pricing-official-snapshot-builder` (`b92b98f`, on `c301362`) — offline official AWS Price List snapshot builder; raw-byte provenance (D11); splits rate authority from quantity confidence; EventBridge unsupported (I10). No live impact (flag-gated; builder/CLI run manually).
 
 Notes:
-- All three are standalone/flag-gated; with `ARCHWAY_ENABLE_SKU_PRICING_PILOT` off (default) there is no live pricing change even after merge.
-- Do NOT merge the pilot (12) without its bases (10, 11) — it imports them.
-- The pilot must remain supplemental: it must not promote global `headline_safe`/`procurement_ready` (DECISIONS D10).
+- All four are standalone/flag-gated; with `ARCHWAY_ENABLE_SKU_PRICING_PILOT` off (default) there is no live pricing change even after merge.
+- Do NOT merge the pilot (12) without its bases (10, 11), and do NOT merge the official builder (13) without 10–12 — each imports the previous.
+- The pilot must remain supplemental: it must not promote global `headline_safe`/`procurement_ready` (DECISIONS D10); the builder reinforces this by splitting `rate_authoritative` from `quantities_confirmed` (D11).
 - Live UI/export do not yet surface the SKU pilot trace (KNOWN_ISSUES I9) — a future branch.
 
 ## Deferred — not in this RC2 stabilization line

@@ -85,3 +85,22 @@ Baseline: `master` @ `f692c04`.
   only when every required line binds exactly with a confirmed quantity.
 - Missing/ambiguous/unit-mismatch binding fails closed; non-authoritative or
   unconfigured snapshots yield `skipped`/`failed_closed`, never readiness.
+
+## D11. Official snapshot builder must hash RAW official offer bytes
+- The official AWS Price List snapshot builder
+  (`feature/sku-pricing-official-snapshot-builder` @ `b92b98f`) must compute
+  `source_hash` (and per-file `source_file_hashes`) over the **raw official
+  offer-file bytes**, NOT over a hand-reduced intermediate. Authority comes from
+  the official source, not from a transformed file — otherwise `local_cache`
+  authority is provenance theater.
+- The builder ingests operator-provided official offer files from local disk
+  (offline; no runtime network, no AWS credentials), maps them deterministically
+  to Archway dimension keys via EXACT usagetype matching (region-prefix aware), and
+  fails closed on ambiguity / unit mismatch / region mismatch / unclear tier /
+  free-tier-only / non-USD. It splits rate authority (`rate_authoritative`) from
+  quantity confidence (`quantities_confirmed`); assumed quantities can never reach
+  `sku_pilot_procurement_ready` (reinforces D10).
+- Validated 2026-06 against the real us-east-1 offer files for the supported
+  services: real offer codes differ from friendly names (SQS = `AWSQueueService`,
+  EventBridge = `AWSEvents`); the builder maps 9 of 10 dimensions, with EventBridge
+  intentionally unsupported (see KNOWN_ISSUES I10).

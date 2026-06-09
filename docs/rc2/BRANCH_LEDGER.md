@@ -117,3 +117,11 @@ NOT independently on master. Review/merge bottom-up (foundation first).
 - **Tests:** 9 pilot + 29 SKU module + 21 existing pricing passed; flag-off behavior byte/behavior-equivalent.
 - **Merge status:** stacked on `efe0849`; not on master. Base SKU branches unchanged.
 - **Rollback:** discard branch (no master impact). With the flag off there is no live effect even if merged.
+
+### feature/sku-pricing-official-snapshot-builder — `b92b98f` (base: `feature/sku-pricing-source-truth-pilot` @ `c301362`)
+- **Purpose:** convert the SKU stack from fixture-demonstrated to OFFICIAL-source-backed. An offline builder ingests operator-provided official AWS Price List offer files, hashes the RAW official bytes (DECISIONS D11), deterministically maps them to Archway dimension keys (exact usagetype, region-prefix aware), and fails closed on ambiguity/unit/region/tier. Also splits rate authority from quantity confidence so assumed quantities can never reach pilot procurement-ready.
+- **Files:** new `app/services/sku_pricing/official_snapshot_builder.py`, `scripts/build_sku_price_snapshot.py`, `tests/test_sku_pricing_official_snapshot_builder.py`, `tests/fixtures/sku_pricing/official_offer_slices/*` (small real-shape slices, ≤7 KB); edits to `app/services/sku_pricing/{__init__,cache,pilot,provenance}.py` and `tests/test_sku_pricing_source_truth_pilot.py`. No frontend/export/routes/global-pricing changes.
+- **Validation:** run against the REAL us-east-1 offer files (downloaded, NOT committed). Maps **9 of 10** supported dimensions with correct real rates; EventBridge intentionally unsupported (KNOWN_ISSUES I10). Output loads via `load_local_cache_snapshot` and is consumed by the source-truth pilot; assumed quantities keep `sku_pilot_procurement_ready=false`.
+- **Tests:** 19 builder + 38 SKU stack + 21 existing pricing passed (78 total). Flag-off behavior unchanged.
+- **Merge status:** stacked on `c301362`; not on master. Base SKU branches unchanged.
+- **Rollback:** discard branch (no master/live impact). Builder/CLI are invoked manually; runtime only reads a pre-built cache.

@@ -98,9 +98,12 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
   the default ceiling), and decide whether to invest in live SKU/rate binding to
   make the top rungs reachable.
 - **Update:** an SKU-backed pricing stack now exists (foundation `9b168d7`,
-  local-cache adapter `efe0849`, supplemental pilot `c301362`) that can produce
-  reproducible, SKU-traceable, provenance-gated estimates for a narrow service set.
-  It is standalone/flag-gated and does not yet change live readiness (see I9).
+  local-cache adapter `efe0849`, supplemental pilot `c301362`, official snapshot
+  builder `b92b98f`) that can produce reproducible, SKU-traceable, provenance-gated
+  estimates for a narrow service set. As of the official snapshot builder these
+  rates can be backed by REAL AWS Price List offer-file data (validated us-east-1,
+  9 of 10 supported dimensions; see I10), hashed over raw official bytes (DECISIONS
+  D11). It is standalone/flag-gated and does not yet change live readiness (see I9).
 
 ## I9. SKU pricing pilot trace not surfaced in live UI / export
 - **What:** the SKU-backed pilot trace (`metadata["sku_pricing_pilot"]`, branch
@@ -116,3 +119,24 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
   raw payloads / a dedicated pricing-trace artifact, and (b) optionally surface a
   read-only "SKU-backed (pilot)" panel in the UI — keeping it clearly supplemental
   and never promoting global readiness (DECISIONS D10).
+- **Update:** the official snapshot builder (`b92b98f`) does not change this — UI/
+  export surfacing is still a future branch, now also responsible for showing the
+  `rate_authoritative` vs `quantities_confirmed` split honestly.
+
+## I10. EventBridge custom events unsupported in SKU-backed pilot pricing
+- **What:** the official snapshot builder
+  (`feature/sku-pricing-official-snapshot-builder` @ `b92b98f`) intentionally does
+  NOT emit a rate for `eventbridge_custom_events`. Real AWS EventBridge billing
+  (offerCode `AWSEvents`) prices custom events per **`64K-Chunks`** (per 64 KB), not
+  per raw **`Events`** as the pilot models. Equating them needs an unverified
+  event-size/chunk assumption, so the dimension fails closed
+  (`UNSUPPORTED_OFFICIAL_DIMENSIONS`).
+- **Status:** open / by-design fail-closed (validated against real us-east-1 data).
+- **Severity:** low (one optional pilot dimension; everything else maps).
+- **Branch if fixed:** none yet.
+- **Blocks internal pilot:** no.
+- **Next action:** do NOT estimate EventBridge until event-size → 64KB-chunk
+  quantity modeling exists (chunks = ceil(event_bytes / 65536) × events). Then add
+  a `64K-Chunks` dimension and a documented conversion; until then keep it
+  unsupported. Honesty note: the builder maps **9 of 10** supported dimensions —
+  not "all 10".
