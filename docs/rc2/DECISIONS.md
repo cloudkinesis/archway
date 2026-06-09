@@ -104,3 +104,25 @@ Baseline: `master` @ `f692c04`.
   services: real offer codes differ from friendly names (SQS = `AWSQueueService`,
   EventBridge = `AWSEvents`); the builder maps 9 of 10 dimensions, with EventBridge
   intentionally unsupported (see KNOWN_ISSUES I10).
+
+## D12. Verifiable solution dossier is the artifact truth spine
+- `dossier_manifest.json` (branch `feature/verifiable-dossier-sku-export-ux` @ `91ad37d`)
+  is the CANONICAL export trust spine. Every export artifact, the SKU pilot trace,
+  pricing provenance, readiness gates, and the UI trust state must map back to the
+  manifest — no new artifact or UI panel is allowed that does not.
+- The manifest records a deterministic, content-hashed artifact inventory (stable
+  canonicalization: sorted keys, UTF-8, normalized newlines, SHA-256) and excludes
+  itself from its own inventory (no self-recursion).
+- The TrustPanel RENDERS trust metadata only; it must not invent trust state.
+  Verification must NOT be inferred from manifest presence alone — "verified" is shown
+  only when an actual `verify_solution_dossier.py` result is supplied.
+- SKU pilot readiness (`pricing.sku_pilot`) stays SEPARATE from global readiness
+  (`pricing.global`); the dossier never promotes global `headline_safe`/
+  `procurement_ready`, and assumed quantities can never read procurement-ready
+  (reinforces D10/D11).
+- Authoritative SKU rates must carry `upstream_source` + `version_hash`
+  (`provenance_status: complete`); when missing, `provenance_status: partial` and the
+  verifier warns (fails under `--strict`).
+- The dossier is a faithful REPORTER of pricing readiness, not its enforcer:
+  enforcement lives in the pricing fail-closed branches, which are a prerequisite for
+  a trustworthy `pricing_headline_safe` (see MERGE_PLAN + KNOWN_ISSUES).

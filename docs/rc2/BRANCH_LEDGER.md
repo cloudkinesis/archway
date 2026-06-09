@@ -125,3 +125,15 @@ NOT independently on master. Review/merge bottom-up (foundation first).
 - **Tests:** 19 builder + 38 SKU stack + 21 existing pricing passed (78 total). Flag-off behavior unchanged.
 - **Merge status:** stacked on `c301362`; not on master. Base SKU branches unchanged.
 - **Rollback:** discard branch (no master/live impact). Builder/CLI are invoked manually; runtime only reads a pre-built cache.
+
+### feature/verifiable-dossier-sku-export-ux — `91ad37d` (base: `feature/sku-pricing-official-snapshot-builder` @ `b92b98f`)
+- **Purpose:** the anti-bloat trust spine. Adds a verifiable dossier manifest (`dossier_manifest.json`), supplemental SKU pilot trace export (JSON/CSV/Markdown), an offline verifier script, an offline diff script, and a read-only TrustPanel UI. Every export artifact + UI trust signal maps back to the manifest (DECISIONS D12).
+- **Files:** new `app/services/dossier_manifest.py`, `app/services/sku_pricing/export_trace.py`, `scripts/verify_solution_dossier.py`, `scripts/diff_solution_dossiers.py`, `frontend/src/components/TrustPanel.tsx`, `docs/dossier_integration_notes.md`, and 4 test files; additive edits to `app/services/export_package.py`, `app/services/sku_pricing/pilot.py` (emits `upstream_source`/`version_hash`), `frontend/src/components/App.tsx` (one import + one render line).
+- **Safety:** does not change legacy pricing totals; does not promote global `headline_safe`/`procurement_ready` (manifest keeps `pricing.global` separate from `pricing.sku_pilot`); SKU pilot stays supplemental; fixture-backed rates never shown authoritative; no runtime network (only a local `git` subprocess for commit/branch). TrustPanel never claims verification from manifest presence; verifier warns on partial SKU provenance and fails under `--strict`.
+- **Tests:** dossier suites 25 passed, SKU stack 57 passed, export/pricing 26 passed, anti-drift 20 passed, offline socket-blocked proof 23 passed; frontend build passed (`tsc -b && vite build`).
+- **Merge status:** READY_FOR_CODEX_REVIEW — stacked on `b92b98f`; not on master.
+- **Rollback:**
+  - Before merge: delete/reset the feature branch; no master impact.
+  - To revert the feature-branch commit directly: `git revert 91ad37d`.
+  - To revert a later `--no-ff` merge into master/integration: `git revert -m 1 <merge_commit_sha>`.
+  - (Additive/flag-aware; runtime pricing is unchanged regardless.)

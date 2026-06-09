@@ -119,9 +119,13 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
   raw payloads / a dedicated pricing-trace artifact, and (b) optionally surface a
   read-only "SKU-backed (pilot)" panel in the UI — keeping it clearly supplemental
   and never promoting global readiness (DECISIONS D10).
-- **Update:** the official snapshot builder (`b92b98f`) does not change this — UI/
-  export surfacing is still a future branch, now also responsible for showing the
-  `rate_authoritative` vs `quantities_confirmed` split honestly.
+- **Update (`91ad37d`):** RESOLVED for surfacing. The verifiable dossier branch
+  (`feature/verifiable-dossier-sku-export-ux`) now surfaces the SKU pilot trace in
+  the export package (`pricing/sku_pricing_pilot_trace.json|.csv|.md`,
+  `dossier_manifest.json`) and a read-only TrustPanel in the UI, honestly showing the
+  `rate_authoritative` vs `quantities_confirmed` split. **Still open:** product-level
+  pricing *replacement* (SKU-backed totals superseding the legacy headline) is NOT
+  done and is deliberately out of scope — the SKU pilot remains supplemental.
 
 ## I10. EventBridge custom events unsupported in SKU-backed pilot pricing
 - **What:** the official snapshot builder
@@ -140,3 +144,26 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
   a `64K-Chunks` dimension and a documented conversion; until then keep it
   unsupported. Honesty note: the builder maps **9 of 10** supported dimensions —
   not "all 10".
+
+## I11. Dossier diff is manifest/artifact-level only
+- **What:** `scripts/diff_solution_dossiers.py` (branch `91ad37d`) compares manifest
+  fields and artifact hashes (inputs, pricing totals, SKU subtotal, snapshot/trace
+  hashes, architecture/diagram hashes, readiness/blockers). It does NOT recompute
+  scenarios or perform a semantic architecture/diagram diff.
+- **Status:** open / by-design scope limit.
+- **Severity:** low.
+- **Blocks internal pilot:** no.
+- **Next action:** semantic scenario recomputation + diff is future work (a separate
+  branch); keep the manifest-level diff as the fast, deterministic baseline.
+
+## I12. TrustPanel shows trust state but does not itself verify hashes
+- **What:** the UI TrustPanel (branch `91ad37d`) renders manifest/pricing trust state
+  (manifest present/missing, pricing mode, rate authority, quantity confirmation,
+  known gaps). It does NOT recompute artifact hashes; it never claims "verified" from
+  manifest presence alone.
+- **Status:** open / by-design (in-browser hash verification is out of scope).
+- **Severity:** low.
+- **Blocks internal pilot:** no.
+- **Next action:** run the offline verifier (`python scripts/verify_solution_dossier.py
+  <export>`, optionally `--strict`) for actual hash verification. A future option could
+  embed a verifier result into the UI to flip the badge to "verified".

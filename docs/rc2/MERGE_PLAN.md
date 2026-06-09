@@ -40,12 +40,15 @@ This is a dependency chain — review/merge in order, each onto the previous:
 11. `feature/sku-pricing-local-cache-adapter` (`efe0849`, on `9b168d7`) — provenance-gated local-cache adapter; no live impact.
 12. `feature/sku-pricing-source-truth-pilot` (`c301362`, on `efe0849`) — supplemental flag-gated pilot trace (legal/document RAG only).
 13. `feature/sku-pricing-official-snapshot-builder` (`b92b98f`, on `c301362`) — offline official AWS Price List snapshot builder; raw-byte provenance (D11); splits rate authority from quantity confidence; EventBridge unsupported (I10). No live impact (flag-gated; builder/CLI run manually).
+14. `feature/verifiable-dossier-sku-export-ux` (`91ad37d`, on `b92b98f`) — verifiable dossier manifest + SKU pilot trace export + verifier/diff scripts + read-only TrustPanel (DECISIONS D12). Additive; no live pricing change.
 
 Notes:
-- All four are standalone/flag-gated; with `ARCHWAY_ENABLE_SKU_PRICING_PILOT` off (default) there is no live pricing change even after merge.
-- Do NOT merge the pilot (12) without its bases (10, 11), and do NOT merge the official builder (13) without 10–12 — each imports the previous.
-- The pilot must remain supplemental: it must not promote global `headline_safe`/`procurement_ready` (DECISIONS D10); the builder reinforces this by splitting `rate_authoritative` from `quantities_confirmed` (D11).
-- Live UI/export do not yet surface the SKU pilot trace (KNOWN_ISSUES I9) — a future branch.
+- All five are standalone/flag-gated; with `ARCHWAY_ENABLE_SKU_PRICING_PILOT` off (default) there is no live pricing change even after merge.
+- Do NOT merge the pilot (12) without its bases (10, 11); the official builder (13) without 10–12; or the dossier (14) without 10–13 — each imports the previous.
+- The pilot must remain supplemental: it must not promote global `headline_safe`/`procurement_ready` (DECISIONS D10); the builder reinforces this by splitting `rate_authoritative` from `quantities_confirmed` (D11); the dossier keeps `pricing.sku_pilot` separate from `pricing.global` (D12).
+- **Merge the pricing fail-closed branches BEFORE or ALONGSIDE the dossier (14):** the dossier REPORTS the legacy global `headline_safe` and does not enforce it. Without the fail-closed gates merged, the manifest could echo `pricing_headline_safe=true` for directional pricing (see `docs/dossier_integration_notes.md` + KNOWN_ISSUES).
+- **Expect a possible conflict in `app/services/export_package.py`** with the export-quality artifacts branch (both edit `generate()`). Resolve by PRESERVING BOTH: keep the export-quality markdown/raw artifacts AND the dossier manifest + SKU trace exports (the dossier insert is an additive block before the zip step).
+- UI/export now surface the SKU pilot trace + trust state (KNOWN_ISSUES I9 resolved for surfacing); product-level pricing replacement remains out of scope.
 
 ## Deferred — not in this RC2 stabilization line
 - `experiment/domain-pack-interface` (`fe886af`) — DEFER until Codex review.
