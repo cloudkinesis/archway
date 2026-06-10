@@ -74,23 +74,42 @@ Notes:
 - During merge, PRESERVE: (a) the **model-prior quarantine** (model influence limited to questions + generic fallback candidate; deterministic anchor in `_merge_plan`), and (b) the **pricing-driver leakage fix** (`discovery_plan.pricing_drivers` is deterministic-only and must not be re-opened to model output). Keep the flag default-off and the deterministic-known dominance gate intact.
 - Additive metadata only (`profile.capability_decision`); no pricing/architecture/governance/diagram behavior change.
 
-## Stage 6 — Diagram quality (domain-aware lane adapters; BEFORE final validation / golden export)
-16. `fix/healthcare-diagram-crossings` (`8d07ac0`, off baseline `f692c04`) — reusable
+## Stage 6 — Diagram platform + quality (internalize compiler FIRST, then lane adapters; BEFORE final validation / golden export)
+16. `chore/internalize-diagram-compiler` (`4368266`, off baseline `f692c04`) — vendors
+    `archway_diagram_compiler` into `packages/archway_diagram_compiler/` (working-tree
+    snapshot at external HEAD `c9a8031`; provenance in SOURCE.md; DECISIONS D17). Default
+    runtime imports the internal package; `ARCHWAY_DIAGRAM_COMPILER_PATH` becomes an
+    explicit debug override only. Migration-only; no compiler logic or thresholds changed.
+    READY_FOR_CODEX_REVIEW.
+17. `fix/healthcare-diagram-crossings` (`8d07ac0`, off baseline `f692c04`) — reusable
     `DomainLaneModel` framework + healthcare OR lane adapter; the production logical
     service-flow diagram passes the unchanged 8-crossing gate (14 → ≤8) without weakening
     QA (DECISIONS D16). Generic lane fallback unchanged. READY_FOR_CODEX_REVIEW.
 
 Notes:
-- Sequence: merge AFTER core discovery/pattern changes (Stage 5 + any domain-pack work,
-  which also touch `pattern_catalog.py`) and BEFORE the final golden export validation /
-  integration rehearsal — so the cleaner diagrams are what the golden export validates.
-- **Conflict risk** in `app/services/pattern_catalog.py` (also edited by Stage 1 item 5
+- **Order within Stage 6: merge the internalize-compiler branch (16) BEFORE the healthcare
+  lane adapter (17)** — the lane adapter depends on compiler behavior (the
+  `semantic_archway` lane machinery) that is now vendored internally; merging 16 first
+  means every later diagram fix is validated against the in-repo compiler source, not an
+  external path.
+- Sequence overall: merge AFTER core discovery/pattern changes (Stage 5 + any domain-pack
+  work, which also touch `pattern_catalog.py`) and BEFORE the final golden export
+  validation / integration rehearsal — so the cleaner diagrams are what the golden export
+  validates.
+- **Conflict risk (16):** `app/services/diagram_compiler_adapter.py`, `app/core/config.py`,
+  `.env.example`, `.gitignore` (config.py is also touched by the capability-router, SKU
+  pilot, and MCP branches). Resolve by PRESERVING the internal default import +
+  `compiler_source` reporting, the explicit-external-override-only semantics, the
+  SOURCE.md provenance, and the unchanged threshold.
+- **Conflict risk (17):** `app/services/pattern_catalog.py` (also edited by Stage 1 item 5
   `fix/typed-effectful-flow-detection` and the capability-router / domain-pack branches)
   and the new `app/services/lane_planner.py`. Resolve by PRESERVING the `DomainLaneModel`
   framework + healthcare adapter AND the healthcare governance detail-only routing.
-- Do NOT loosen the external compiler thresholds. The external diagram compiler remains a
-  SEPARATE package for now — unless a later internalization branch is explicitly accepted.
-- No generated SVG/PNG/D2/export artifacts may be committed.
+- Do NOT loosen the compiler thresholds (`logical_edge_crossing_max` stays 8). The
+  compiler is now vendored internally (D17); the external repo is no longer a runtime
+  dependency and must not be reintroduced as one.
+- No generated SVG/PNG/D2/export artifacts may be committed; `.tools/d2/d2` stays
+  gitignored (KNOWN_ISSUES I15).
 
 ## Deferred — not in this RC2 stabilization line
 - `experiment/domain-pack-interface` (`fe886af`) — DEFER until Codex review.

@@ -239,3 +239,27 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
 - **Next action:** add domain lane adapters per vertical over time (start with
   `aml_graph`), each mapping to recognized compiler lanes; never loosen the compiler gate.
   Unknown domains continue to use the generic lane fallback.
+
+## I15. D2 renderer binary remains a local tool dependency
+- **Context — hidden external/iCloud compiler dependency FIXED/REDUCED (`4368266`):**
+  Archway previously depended on `~/Documents/Archway Diagram Compiler` (iCloud-synced,
+  dirty working tree, sys.path-injected) for ALL diagram compilation — invisible to repo
+  review and unreproducible across machines. `chore/internalize-diagram-compiler`
+  @ `4368266` vendors the compiler source into `packages/archway_diagram_compiler/`
+  (provenance in its SOURCE.md; DECISIONS D17), so the default runtime and tests no longer
+  require the external path at all.
+- **What remains:** SVG rendering shells out to the `d2` CLI (~44 MB Mach-O binary).
+  `.tools/d2/d2` is INTENTIONALLY not committed (gitignored here, as it was in the external
+  repo — it is a tool, not source). A fresh clone needs `d2` on PATH or a binary copied to
+  `<repo>/.tools/d2/`; the compiler's `find_d2_executable()` resolves both.
+- **Degradation behavior:** without the binary, diagram compilation degrades HONESTLY —
+  `.d2` text artifacts are still produced and QA reports `d2_executable_not_found` /
+  `missing_render_artifact`; SVG-based checks (crossing counts etc.) cannot run, and
+  nothing is silently faked.
+- **Status:** open / by-design (binaries do not belong in git).
+- **Severity:** low (machine-setup concern; current machine has the binary installed at
+  `~/Developer/Archway/.tools/d2/d2`).
+- **Blocks internal pilot:** no (binary present locally).
+- **Next action:** optionally add a small setup script / README note that downloads or
+  copies a pinned `d2` version into `.tools/d2/`; pin the d2 version in SOURCE.md if
+  renderer output ever needs byte-stable reproducibility across machines.

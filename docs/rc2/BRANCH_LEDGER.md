@@ -250,3 +250,42 @@ NOT independently on master. Review/merge bottom-up (foundation first).
   - Before merge: delete/reset the feature branch; no master impact.
   - To revert the commit directly: `git revert 8d07ac0`.
   - To revert a later `--no-ff` merge into master/integration: `git revert -m 1 <merge_commit_sha>`.
+
+### chore/internalize-diagram-compiler — `4368266` (base: master baseline `f692c04`)
+- **Purpose:** vendors `archway_diagram_compiler` into `packages/archway_diagram_compiler/`
+  as a first-class internal package; the default runtime no longer depends on the external
+  iCloud path `~/Documents/Archway Diagram Compiler`. Migration-only — no compiler logic
+  rewritten, no diagram-quality change (the healthcare crossing issue still reproduces on
+  this branch by design; the fix lives in `fix/healthcare-diagram-crossings`).
+- **Source provenance** (full record in `packages/archway_diagram_compiler/SOURCE.md`):
+  - External path: `~/Documents/Archway Diagram Compiler`.
+  - External HEAD: `c9a8031` ("Initial archway diagram compiler" — the only commit in that
+    repo's history).
+  - Source type: **working-tree snapshot, NOT clean HEAD**; SOURCE.md lists all 12 dirty
+    files copied (+223/−26 vs HEAD).
+  - Reason: the Archway runtime always imported the working tree via sys.path injection —
+    including the `semantic_archway` lane machinery, which does not exist in HEAD; vendoring
+    HEAD-only would have changed compiler behavior and broken the healthcare lane adapter.
+- **Files:** new `packages/archway_diagram_compiler/**` (93 files: compiler src, icon SVG
+  package data, tests, pyproject, README, SOURCE.md); edits to
+  `app/services/diagram_compiler_adapter.py` (internal-first import + `compiler_source`
+  reporting), `app/core/config.py` (`diagram_compiler_path` is explicit-override-only,
+  no iCloud default), new `tests/test_internal_diagram_compiler_import.py`,
+  `.env.example` (documents override as optional/debug), `.gitignore` (adds `.tools/`).
+- **Safety:** external compiler repo NOT modified (read-only source; no gc/prune/fsck run
+  anywhere); no QA thresholds changed — `logical_edge_crossing_max` remains 8; external
+  override is explicit/debug-only and warns `diagram_compiler_source = external_override`
+  (never silent); the local renderer binary `.tools/d2/d2` (~44 MB) is gitignored and NOT
+  committed; without the d2 binary, compilation degrades honestly (`.d2` artifacts +
+  `d2_executable_not_found` QA failure — nothing faked).
+- **Tests** (run with `ARCHWAY_DIAGRAM_COMPILER_PATH` blanked to prove iCloud independence):
+  internal import suite 6 passed; diagram/lane/crossing selection 19 passed; healthcare
+  anti-drift + scenario matrix 15 passed; export/session 6 passed; post-commit smoke 16
+  passed. Behavior equivalence proven: baseline healthcare OR reproduces exactly
+  "14 visible edge crossing(s); limit is 8" through the internal compiler.
+- **Merge status:** READY_FOR_CODEX_REVIEW — off baseline `f692c04`; not on master.
+  Stage 6 item 16 in MERGE_PLAN — merge BEFORE `fix/healthcare-diagram-crossings`.
+- **Rollback:**
+  - Before merge: delete/reset the feature branch; no master impact.
+  - To revert the commit directly: `git revert 4368266`.
+  - To revert a later `--no-ff` merge into master/integration: `git revert -m 1 <merge_commit_sha>`.

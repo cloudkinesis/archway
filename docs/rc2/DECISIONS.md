@@ -205,3 +205,27 @@ Implemented by `fix/healthcare-diagram-crossings` @ `8d07ac0`.
   (`logical_detail_only`) — never silently dropped.
 - A diagram that cannot pass must degrade HONESTLY (report the QA finding / missing view
   with a reason), not hide warnings.
+
+## D17. Diagram compiler is an internal vendored package; external path is explicit fallback only
+Implemented by `chore/internalize-diagram-compiler` @ `4368266`.
+- `archway_diagram_compiler` is part of Archway's PRODUCT BOUNDARY — it lives in the
+  Archway repository at `packages/archway_diagram_compiler/` so the app is self-contained,
+  reproducible, and reviewable (by Codex or anyone) without any external or iCloud-synced
+  path.
+- The DEFAULT runtime imports the vendored internal package
+  (`packages/archway_diagram_compiler/src`). `ARCHWAY_DIAGRAM_COMPILER_PATH` is an
+  EXPLICIT debug/override path only — used solely when the internal package cannot be
+  imported AND the variable is explicitly set, and then loudly
+  (`diagram_compiler_source = external_override` warning + health metadata). There is NO
+  silent dependency on iCloud paths.
+- QA gates such as `logical_edge_crossing_max = 8` remain COMPILER-OWNED and unchanged by
+  vendoring (reinforces D6/D16). Vendoring copies compiler logic verbatim; it never
+  rewrites it or adjusts thresholds.
+- Vendored compiler provenance MUST be recorded in
+  `packages/archway_diagram_compiler/SOURCE.md` (original path, external HEAD, clean-vs-
+  dirty source type, dirty files copied, snapshot date, rationale). Current record:
+  working-tree snapshot at external HEAD `c9a8031` with 12 dirty files listed.
+- The local `d2` renderer binary is a TOOL dependency, not committed source
+  (`.tools/d2/d2`, gitignored — as it was in the external repo). Its absence must degrade
+  HONESTLY: `.d2` artifacts are still produced and QA reports `d2_executable_not_found` /
+  `missing_render_artifact`; nothing is silently faked (see KNOWN_ISSUES I15).
