@@ -106,13 +106,18 @@ def test_partial_binding_remains_directional(monkeypatch):
     assert est.metadata.get("pricing_can_be_displayed_as_headline") is False
 
 
-# Test 5 — all required pilot lines bound can mark pilot ready only
+# Test 5 — all required pilot lines bound => estimate-ready, but assumed quantities
+# do NOT reach pilot procurement-ready (rate authority != quantity confidence).
 def test_all_required_lines_bound_marks_pilot_ready_only(monkeypatch):
     brief = _brief({"historical_contract_count": 10000, "average_mb_per_contract": 2, "rag_queries_per_day": 5000})
     est = _estimate(brief, flag=True, snapshot_path=LOCAL_CACHE, monkeypatch=monkeypatch)
     pilot = est.metadata["sku_pricing_pilot"]
     assert pilot["status"] == "completed"
-    assert pilot["sku_pilot_procurement_ready"] is True
+    assert pilot["rate_authoritative"] is True
+    assert pilot["sku_pilot_estimate_ready"] is True
+    # Quantities are assumed (not confirmed) -> NOT procurement-ready.
+    assert pilot["quantities_confirmed"] is False
+    assert pilot["sku_pilot_procurement_ready"] is False
     # Global PricingAnalysis readiness is NOT promoted by the pilot.
     assert est.metadata.get("pricing_can_be_displayed_as_headline") is False
     assert est.metadata.get("source_truth_pricing_compiler", {}).get("procurement_ready") in (None, False)

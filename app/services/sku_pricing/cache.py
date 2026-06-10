@@ -59,6 +59,10 @@ def _snapshot_from_cache_dict(data: dict) -> PriceSnapshot:
         "source_hash": data.get("source_hash"),
         "schema_version": data.get("schema_version", LOCAL_CACHE_SCHEMA_VERSION),
     }
+    # Preserve optional builder provenance (offer-file-derived caches) when present.
+    for optional_key in ("source_file_hashes", "builder_version", "mapping_version"):
+        if data.get(optional_key) is not None:
+            provenance[optional_key] = data.get(optional_key)
     snapshot = PriceSnapshot(
         snapshot_id=str(data.get("snapshot_id")),
         generated_at=str(data.get("generated_at", "")),

@@ -1,0 +1,191 @@
+{
+  "formatVersion": "v1.0",
+  "disclaimer": "INFORMATIONAL TEST SLICE - small real-shape excerpt of the official AWS Price List offer file; NOT authoritative and NOT the full offer. Public rate data, us-east-1.",
+  "publicationDate": "2026-06-08T23:44:28Z",
+  "version": "20260608234428",
+  "offerCode": "AmazonDynamoDB",
+  "products": {
+    "4W4ZMC46EHE8XTTZ": {
+      "sku": "4W4ZMC46EHE8XTTZ",
+      "productFamily": "Amazon DynamoDB PayPerRequest Throughput",
+      "attributes": {
+        "servicecode": "AmazonDynamoDB",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "group": "DDB-ReadUnits",
+        "groupDescription": "DynamoDB PayPerRequest Read Request Units",
+        "usagetype": "ReadRequestUnits",
+        "operation": "PayPerRequestThroughput",
+        "regionCode": "us-east-1",
+        "servicename": "Amazon DynamoDB"
+      }
+    },
+    "FGXVD96DKJMUASY3": {
+      "sku": "FGXVD96DKJMUASY3",
+      "productFamily": "Amazon DynamoDB PayPerRequest Throughput",
+      "attributes": {
+        "servicecode": "AmazonDynamoDB",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "group": "DDB-WriteUnits",
+        "groupDescription": "DynamoDB PayPerRequest Write Request Units",
+        "usagetype": "WriteRequestUnits",
+        "operation": "PayPerRequestThroughput",
+        "regionCode": "us-east-1",
+        "servicename": "Amazon DynamoDB"
+      }
+    },
+    "F3E2EDSYC6ZNW7XP": {
+      "sku": "F3E2EDSYC6ZNW7XP",
+      "productFamily": "Database Storage",
+      "attributes": {
+        "servicecode": "AmazonDynamoDB",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "volumeType": "Amazon DynamoDB - Indexed DataStore",
+        "usagetype": "TimedStorage-ByteHrs",
+        "operation": "",
+        "regionCode": "us-east-1",
+        "servicename": "Amazon DynamoDB"
+      }
+    },
+    "YR9NFVSXEN3QWYDU": {
+      "sku": "YR9NFVSXEN3QWYDU",
+      "productFamily": "Amazon DynamoDB PayPerRequest Throughput",
+      "attributes": {
+        "servicecode": "AmazonDynamoDB",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "group": "DDB-ReadUnitsIA",
+        "groupDescription": "DynamoDB PayPerRequest Read Request Units IA",
+        "usagetype": "IA-ReadRequestUnits",
+        "operation": "PayPerRequestThroughput",
+        "regionCode": "us-east-1",
+        "servicename": "Amazon DynamoDB"
+      }
+    },
+    "DUA7FNC8NKEMZ7AA": {
+      "sku": "DUA7FNC8NKEMZ7AA",
+      "productFamily": "Database Storage",
+      "attributes": {
+        "servicecode": "AmazonDynamoDB",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "volumeType": "Amazon DynamoDB - Indexed DataStore - IA",
+        "usagetype": "IA-TimedStorage-ByteHrs",
+        "operation": "",
+        "regionCode": "us-east-1",
+        "servicename": "Amazon DynamoDB"
+      }
+    }
+  },
+  "terms": {
+    "OnDemand": {
+      "4W4ZMC46EHE8XTTZ": {
+        "4W4ZMC46EHE8XTTZ.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "4W4ZMC46EHE8XTTZ",
+          "priceDimensions": {
+            "4W4ZMC46EHE8XTTZ.JRTCKXETXF.6YS6EN2CT7": {
+              "rateCode": "4W4ZMC46EHE8XTTZ.JRTCKXETXF.6YS6EN2CT7",
+              "description": "$0.125 per million read request units (N. Virginia)",
+              "beginRange": "0",
+              "endRange": "Inf",
+              "unit": "ReadRequestUnits",
+              "pricePerUnit": {
+                "USD": "0.0000001250"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      },
+      "FGXVD96DKJMUASY3": {
+        "FGXVD96DKJMUASY3.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "FGXVD96DKJMUASY3",
+          "priceDimensions": {
+            "FGXVD96DKJMUASY3.JRTCKXETXF.6YS6EN2CT7": {
+              "rateCode": "FGXVD96DKJMUASY3.JRTCKXETXF.6YS6EN2CT7",
+              "description": "$0.625 per million write request units (N. Virginia)",
+              "beginRange": "0",
+              "endRange": "Inf",
+              "unit": "WriteRequestUnits",
+              "pricePerUnit": {
+                "USD": "0.0000006250"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      },
+      "F3E2EDSYC6ZNW7XP": {
+        "F3E2EDSYC6ZNW7XP.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "F3E2EDSYC6ZNW7XP",
+          "priceDimensions": {
+            "F3E2EDSYC6ZNW7XP.JRTCKXETXF.G2A93NZ7DT": {
+              "rateCode": "F3E2EDSYC6ZNW7XP.JRTCKXETXF.G2A93NZ7DT",
+              "description": "$0.00 per GB-Month of storage for first 25 free GB-Months",
+              "beginRange": "0",
+              "endRange": "25",
+              "unit": "GB-Mo",
+              "pricePerUnit": {
+                "USD": "0.0000000000"
+              }
+            },
+            "F3E2EDSYC6ZNW7XP.JRTCKXETXF.VYAP54KATQ": {
+              "rateCode": "F3E2EDSYC6ZNW7XP.JRTCKXETXF.VYAP54KATQ",
+              "description": "$0.25 per GB-Month of storage used beyond first 25 free GB-Months",
+              "beginRange": "25",
+              "endRange": "Inf",
+              "unit": "GB-Mo",
+              "pricePerUnit": {
+                "USD": "0.2500000000"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      },
+      "YR9NFVSXEN3QWYDU": {
+        "YR9NFVSXEN3QWYDU.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "YR9NFVSXEN3QWYDU",
+          "priceDimensions": {
+            "YR9NFVSXEN3QWYDU.JRTCKXETXF.6YS6EN2CT7": {
+              "rateCode": "YR9NFVSXEN3QWYDU.JRTCKXETXF.6YS6EN2CT7",
+              "description": "$0.155 per million IA read request units in US East (N. Virginia)",
+              "beginRange": "0",
+              "endRange": "Inf",
+              "unit": "ReadRequestUnits",
+              "pricePerUnit": {
+                "USD": "0.0000001550"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      },
+      "DUA7FNC8NKEMZ7AA": {
+        "DUA7FNC8NKEMZ7AA.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "DUA7FNC8NKEMZ7AA",
+          "priceDimensions": {
+            "DUA7FNC8NKEMZ7AA.JRTCKXETXF.6YS6EN2CT7": {
+              "rateCode": "DUA7FNC8NKEMZ7AA.JRTCKXETXF.6YS6EN2CT7",
+              "description": "$0.10000 per GB-Month of IA storage in US East (N. Virginia)",
+              "beginRange": "0",
+              "endRange": "Inf",
+              "unit": "GB-Mo",
+              "pricePerUnit": {
+                "USD": "0.1000000000"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "formatVersion": "v1.0",
+  "disclaimer": "INFORMATIONAL TEST SLICE - small real-shape excerpt of the official AWS Price List offer file; NOT authoritative and NOT the full offer. Public rate data, us-east-1.",
+  "publicationDate": "2026-05-29T20:53:01Z",
+  "version": "20260529205301",
+  "offerCode": "AWSEvents",
+  "products": {
+    "ZA92ERYNKX457AJD": {
+      "sku": "ZA92ERYNKX457AJD",
+      "productFamily": "EventBridge",
+      "attributes": {
+        "servicecode": "AWSEvents",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "usagetype": "USE1-Event-64K-Chunks",
+        "operation": "PutEvents",
+        "eventType": "Custom Event",
+        "regionCode": "us-east-1",
+        "servicename": "CloudWatch Events"
+      }
+    },
+    "JZ3V56NNG67MV8ZS": {
+      "sku": "JZ3V56NNG67MV8ZS",
+      "productFamily": "EventBridge",
+      "attributes": {
+        "servicecode": "AWSEvents",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "usagetype": "USE1-Event-64K-Chunks",
+        "operation": "ReceivedPartnerEvents",
+        "eventType": "Partner Event",
+        "regionCode": "us-east-1",
+        "servicename": "CloudWatch Events"
+      }
+    }
+  },
+  "terms": {
+    "OnDemand": {
+      "ZA92ERYNKX457AJD": {
+        "ZA92ERYNKX457AJD.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "ZA92ERYNKX457AJD",
+          "priceDimensions": {
+            "ZA92ERYNKX457AJD.JRTCKXETXF.6YS6EN2CT7": {
+              "rateCode": "ZA92ERYNKX457AJD.JRTCKXETXF.6YS6EN2CT7",
+              "description": "$1.00 per million EventBridge custom events received in US East (N. Virginia)",
+              "beginRange": "0",
+              "endRange": "Inf",
+              "unit": "64K-Chunks",
+              "pricePerUnit": {
+                "USD": "0.0000010000"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      },
+      "JZ3V56NNG67MV8ZS": {
+        "JZ3V56NNG67MV8ZS.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "JZ3V56NNG67MV8ZS",
+          "priceDimensions": {
+            "JZ3V56NNG67MV8ZS.JRTCKXETXF.6YS6EN2CT7": {
+              "rateCode": "JZ3V56NNG67MV8ZS.JRTCKXETXF.6YS6EN2CT7",
+              "description": "$1.00 per million EventBridge partner events received in US East (N. Virginia)",
+              "beginRange": "0",
+              "endRange": "Inf",
+              "unit": "64K-Chunks",
+              "pricePerUnit": {
+                "USD": "0.0000010000"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      }
+    }
+  }
+}
