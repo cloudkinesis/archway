@@ -7,31 +7,63 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
 
 ---
 
-## I1. Pre-existing e2e citation-coverage failure (flaky / state-sensitive)
+## I1. Pre-existing e2e citation-coverage failure (flaky / state-sensitive) — FIXED (`6081c76`)
 - **What:** `tests/test_end_to_end_flow.py::test_utility_grid_flow_is_not_misclassified_as_rag_assistant`
-  asserts `citation_coverage.passed is False`, but the run often yields `True`.
-- **Status:** open. Present on baseline `f692c04`; unrelated to any fix branch
-  (research does not import the job system / governance / pricing-presentation).
-  Also sensitive to leftover `.archway` state.
-- **Severity:** low (test-only; no product impact).
-- **Branch if fixed:** none.
+  asserted `citation_coverage.passed is False`, but the run often yielded `True`.
+- **Status:** FIXED by `fix/utility-grid-e2e-citation-determinism` @ `6081c76` (off
+  baseline `f692c04`).
+- **Root cause:** PRODUCT BEHAVIOR WAS NOT WRONG. The test was under-isolated and used
+  citation coverage / research-quality as an ENVIRONMENT-SENSITIVE PROXY for
+  classification: with AWS Docs MCP evidence configured in the local `.env`, research
+  legitimately cited all claims ("Official MCP Evidence", `passed=True`); offline it
+  failed closed ("Limited", `passed=False`). The test pinned `ARCHWAY_DATA_DIR` but not
+  the evidence-source configuration, so its result tracked `.env`/network, never
+  classification — the entire "flaky/state-sensitive" history.
+- **Resolution:** the test now PINS all evidence sources off (MCP/web/Tavily disabled
+  per-test; settings cache cleared and restored via try/finally), making the offline
+  honesty invariant (no evidence → coverage fails closed + "Limited") deterministic on
+  any machine, with no live network calls in tests. The actual anti-RAG classification
+  invariant is asserted directly and STRENGTHENED: utility grid is never
+  `rag_assistant` / `document_rag_assistant` / `document_intelligence`, and the pricing
+  family is `INDUSTRIAL_IOT_STREAMING`, not document RAG. No assertion was blindly
+  flipped; no app source changed.
+- **Severity:** low → resolved.
 - **Blocks internal pilot:** no.
-- **Next action:** triage once — make the assertion deterministic or quarantine
-  it — then wire CI so it is not re-proven by hand on every branch.
+- **RC2 rehearsal note (2026-06-10):** on `integration/rc2-golden-rehearsal @ ee534db`
+  (all reviewed branches merged) the full suite showed **exactly two failures — I1 and
+  I2 only; zero new failures** — accepted known exceptions at that time, surfaced via
+  READY_WITH_KNOWN_ISSUES rather than laundered green.
+- **Cleanup status:** with BOTH fix branches merged — `6081c76` (I1, test-only) and
+  `1138849` (I2, see below) — the previous full-suite known failures should be CLEARED
+  and a v2 integration candidate is expected to run fully green.
 
-## I2. Utility metric label failure (`outage_reduction_target_percent`)
+## I2. Utility metric label failure (`outage_reduction_target_percent`) — FIXED (`1138849`)
 - **What:** `tests/test_synthesis.py::test_utility_metrics_and_business_goals_are_structured`
-  raised `KeyError: 'outage_reduction_target_percent'` in earlier runs.
-- **Status:** open if still present on a clean baseline run (verify; it was a
-  pre-existing baseline failure, not introduced by any fix branch).
-- **Severity:** low (metric label/extraction expectation; test-only signal).
-- **Branch if fixed:** none.
+  raised `KeyError: 'outage_reduction_target_percent'`.
+- **Status:** FIXED by `fix/utility-metric-structuring` @ `1138849` (off baseline
+  `f692c04`).
+- **Root cause:** metric-extractor consolidation drift — the value was always extracted
+  correctly (45.0, percent), but the profile-level public label drifted from
+  `outage_reduction_target_percent` to the structured extractor's
+  `unplanned_outage_reduction_percent` when the profile layer became a compatibility
+  view over the shared extractor (the exact two-extractor drift mode flagged in
+  DECISIONS D1).
+- **Resolution:** backward-compatible alias at the compatibility-view boundary restores
+  the profile-level public label; the structured-extractor key is UNCHANGED for its
+  direct consumers (golden metric-extraction tests still pass). Phrasing made
+  deterministic across `reduce|reduces|reducing`, mirrored in BOTH extractors so they
+  stay in agreement. Regression test added (alias stability, no structured-key leak,
+  JSON-serializable output).
+- **Severity:** low → resolved.
 - **Blocks internal pilot:** no.
-- **Next action:** confirm on a clean `f692c04` run; if real, scope a focused
-  metric-extraction fix branch (do NOT fold into unrelated branches).
-- **Update:** re-confirmed pre-existing on a clean `f692c04` stash during the
-  `feature/any-usecase-capability-router` work; still OPEN and deliberately NOT chased
-  in that branch (excluded from its green run).
+- **Earlier history:** re-confirmed pre-existing on clean `f692c04` stashes during the
+  capability-router work and on `integration/rc2-golden-rehearsal @ ee534db` (where it
+  was one of the only two full-suite failures, accepted as a known exception).
+- **Post-fix note:** with `1138849`, the full suite on a baseline-based branch shows
+  **144 passed / 1 failed — only I1 remains** from the previous known failures.
+- **Merge note:** `use_case_profile.py` is also edited by
+  `feature/any-usecase-capability-router` — on merge preserve BOTH the
+  `capability_decision` metadata and the outage metric alias.
 
 ## I3. Audit-log robustness (`read_session_logs`) — FIXED (`db77e0c`)
 - **What:** `app/core/logging.py` `json.loads(line)` over `audit.jsonl` had no
@@ -222,6 +254,12 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
 - **Next action:** treat unknown-domain output as directional; invest in specialized
   packs per vertical over time (I7). The frontier model prior is advisory-only and
   cannot upgrade an unknown domain to `supported`.
+- **Accelerator-pack note (`1fc93de`, next-wave — NOT a blocker):** capability
+  accelerator packs (`network_security_observability`, `hcm_payroll_workforce`;
+  DECISIONS D18) are advisory INTAKE improvements — better questions and fallback
+  hints only. They are NOT proof of full domain specialization: unknown domains still
+  route to directional/generic unless a real domain pack or deterministic pattern
+  exists. I13 remains intact and by-design.
 
 ## I14. Additional domain lane adapters are future work
 - **What:** the `DomainLaneModel` framework (DECISIONS D16,

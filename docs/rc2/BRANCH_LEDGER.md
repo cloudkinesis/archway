@@ -289,3 +289,174 @@ NOT independently on master. Review/merge bottom-up (foundation first).
   - Before merge: delete/reset the feature branch; no master impact.
   - To revert the commit directly: `git revert 4368266`.
   - To revert a later `--no-ff` merge into master/integration: `git revert -m 1 <merge_commit_sha>`.
+
+### integration/rc2-golden-rehearsal — `ee534db` (base: master baseline `f692c04`)
+- **Purpose:** RC2 golden rehearsal — merges ALL reviewed branches in the documented
+  MERGE_PLAN order to prove the stack integrates cleanly and is a viable Codex merge
+  candidate. Merge/rehearsal branch only; not a feature branch; NOT merged to master.
+- **Merge order executed** (15 `--no-ff` merges, 2026-06-10):
+  1. `integration/rc2-stabilization-claude` (tip `068d5ca` = `a23e676` + its docs-only
+     integration review note — no code delta vs the recorded hash)
+  2. `fix/pricing-headline-fail-closed` (`f39852b`)
+  3. `fix/export-pricing-headline-fail-closed` (`439b73b`)
+  4. `feature/rc2-validation-harness` (`47782f1`)
+  5. `fix/audit-log-robustness` (`db77e0c`)
+  6. `fix/mcp-url-allowlist` (`b6a51d7`)
+  7. `chore/internalize-diagram-compiler` (`4368266`)
+  8. `feature/any-usecase-capability-router` (`445c6de`)
+  9. `fix/healthcare-diagram-crossings` (`8d07ac0`)
+  10–13. SKU stack bottom-up: `9b168d7` → `efe0849` → `c301362` → `b92b98f`
+  14. `feature/verifiable-dossier-sku-export-ux` (`91ad37d`)
+  15. `docs/rc2-decision-log` (`d050ce8`)
+  Deferred branches (domain-pack experiment/phase2) were NOT merged.
+- **Conflicts (resolved keep-both per MERGE_PLAN rules; no gate loosened, nothing dropped):**
+  - `export_package.py` (audit merge): crash-safe `read_session_audit` + degraded warning
+    PLUS Stage-1 loop-safe `_collect_async` build-status collection.
+  - `export_package.py` (MCP merge): raw payloads carry BOTH `audit_log` AND `mcp_security`.
+  - `config.py` (capability-router merge): job-TTL fields PLUS frontier-prior flags (default off, cap 1).
+  - `config.py` (SKU pilot merge): all prior fields PLUS SKU pilot flags (default off).
+  - `export_package.py` (dossier merge): imports only — audit + MCP + dossier/SKU-trace
+    imports coexist; body auto-merged. Final file preserves export-quality artifacts,
+    fail-closed pricing (`get(..., False)`), `audit_log`, `mcp_security`,
+    `dossier_manifest.json`/`.md`, `README_DOSSIER.md`, SKU pilot trace files, and the
+    legacy `manifest.json`.
+- **Tests:** focused battery 196 passed; pricing trio 21; discovery/healthcare/matrix 20;
+  export/hydration 11; diagram selection (external compiler path blanked) 32. Full suite:
+  **363 passed / 2 failed — only the documented known failures I1 + I2; zero new failures.**
+  Harness: focused **READY**; stabilization+frontend **READY** (62); golden+frontend
+  **READY_WITH_KNOWN_ISSUES** (363 / 2 known / 0 new). Frontend build passed.
+- **Golden export validation** (real end-to-end runs, isolated data dir): legal contract
+  RAG, healthcare OR, telecom HBase/HDFS — all exported with zero blockers; WARNs were
+  honest by-design statuses (info-level enrichment diagnostics; directional pricing per
+  D3). Healthcare logical view rendered with **0 crossing violations**; no IoT leakage in
+  the healthcare architecture (IoT strings appear only in the cross-scenario
+  `golden_regression_summary.json` baseline). **Verifier VALID on all three packages**
+  (89/85/75 artifacts checked, 0 mismatched, 0 missing; SKU pilot honestly recorded
+  absent with the flag off). No tokens/secrets in exports; no generated artifacts staged.
+- **Known failures:** I1 (e2e citation coverage) and I2 (`outage_reduction_target_percent`)
+  only — accepted known exceptions for the rehearsal (see KNOWN_ISSUES).
+- **Merge status:** READY_FOR_CODEX_REVIEW — recommended Codex review candidate for the
+  master merge. Not on master.
+- **Rollback:** delete/reset the rehearsal branch (no master impact), or
+  `git revert -m 1 <merge_commit>` for any individual stage on the branch.
+
+### chore/untrack-frontend-tsbuildinfo — `d338790` (base: master baseline `f692c04`)
+- **Purpose:** tiny hygiene branch — stop frontend builds from dirtying the working tree.
+  `frontend/tsconfig.tsbuildinfo` is a TypeScript incremental-build cache that was tracked
+  in git; every `npm run build` (`tsc -b && vite build`) regenerated it, which tripped the
+  RC2 validation harness's dirty-tree READY-downgrade guard and required manual restores
+  (twice during the golden rehearsal).
+- **Files:** `.gitignore` (adds `*.tsbuildinfo`), `frontend/tsconfig.tsbuildinfo`
+  (untracked via `git rm --cached` only — the local build cache file is kept on disk).
+  No app source, frontend source, or tests changed.
+- **Safety:** no behavior change; no generated outputs committed (`frontend/dist/` was
+  already ignored). Verified by building the frontend after untracking AND again after
+  the commit — `git status` stays clean of the file both times.
+- **Tests/build:** frontend build passed twice (pre- and post-commit proof).
+- **Merge status:** READY_FOR_CODEX_REVIEW — off baseline `f692c04`; not on master.
+  Merge BEFORE final harness/frontend build validation (see MERGE_PLAN). Merging into the
+  rehearsal stack simply deletes the tracked copy; the ignore rule takes over — no
+  conflict expected.
+- **Rollback:**
+  - Before merge: delete/reset the branch; no master impact.
+  - To revert the commit directly: `git revert d338790`.
+  - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.
+
+### fix/utility-metric-structuring — `1138849` (base: master baseline `f692c04`)
+- **Purpose:** fixes KNOWN_ISSUES **I2** — the utility outage-reduction profile metric
+  alias drift. The value was always extracted correctly (45.0, percent), but the
+  metric-extractor consolidation drifted the profile-level public label from
+  `outage_reduction_target_percent` to the structured extractor's
+  `unplanned_outage_reduction_percent`, causing the synthesis test KeyError. The fix
+  restores the historical public label via a backward-compatible alias at the
+  documented compatibility-view boundary, plus a minimal regex widening
+  (`reduce|reduces|reducing`) mirrored in BOTH extractors so they stay in agreement
+  (DECISIONS D1 doctrine).
+- **Files:** `app/services/metric_extractor.py` (1-line regex widening),
+  `app/services/use_case_profile.py` (`_PROFILE_BUSINESS_TARGET_ALIASES` + translation
+  at the compatibility boundary + mirrored regex), `tests/test_synthesis.py` (new
+  regression test: both phrasings, alias stability, no structured-key leak,
+  JSON-serializable).
+- **Safety:** the structured-extractor key `unplanned_outage_reduction_percent` is
+  UNCHANGED (its golden test still passes); only the profile compatibility view is
+  restored. No pricing / discovery-planner / frontend / diagram / SKU / dossier / MCP /
+  audit / domain-pack changes; neither label is consumed by name anywhere else in `app/`.
+- **Tests:** synthesis + golden metric extraction 10 passed; discovery/pricing trio 26
+  passed; healthcare anti-drift + scenario matrix 15 passed; **full suite now
+  144 passed / 1 failed — only I1 remains** (I2 eliminated; zero new failures).
+- **Merge status:** READY_FOR_CODEX_REVIEW — off baseline `f692c04`; not on master.
+  Known-failure cleanup branch (see MERGE_PLAN). Conflict watch: `use_case_profile.py`
+  is also edited by `feature/any-usecase-capability-router` — preserve BOTH the
+  `capability_decision` metadata and the outage metric alias on merge.
+- **Rollback:**
+  - Before merge: delete/reset the branch; no master impact.
+  - To revert the commit directly: `git revert 1138849`.
+  - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.
+
+### fix/utility-grid-e2e-citation-determinism — `6081c76` (base: master baseline `f692c04`)
+- **Purpose:** fixes KNOWN_ISSUES **I1** by making the utility-grid e2e citation-coverage
+  test deterministic and asserting the actual anti-RAG invariant. Root cause: the test's
+  `citation_coverage.passed is False` / `research_quality == "Limited"` assertions were
+  ENVIRONMENT-SENSITIVE PROXIES — with the AWS Docs MCP enabled in the local `.env`,
+  research legitimately gathered evidence (live MCP calls inside the test), fully cited
+  all claims, and reported "Official MCP Evidence", so the test failed; offline it
+  passed. Product behavior was correct in BOTH modes.
+- **Files:** `tests/test_end_to_end_flow.py` only (test-only branch).
+- **Safety:** no app source changed; no pricing/research/product behavior changed; no
+  assertion blindly flipped (the offline honesty invariant — no evidence sources →
+  coverage fails closed + "Limited" — is preserved, now under a PINNED deterministic
+  offline mode: all MCP/web/Tavily evidence sources disabled per-test, settings cache
+  cleared and restored via try/finally so nothing leaks to later tests). Classification
+  invariant STRENGTHENED: utility grid never `rag_assistant` / `document_rag_assistant` /
+  `document_intelligence`; pricing family asserted `INDUSTRIAL_IOT_STREAMING` (not
+  document RAG); existing energy-domain / IoT-services / no-RAG-components / dispatch
+  assertions retained. Tests no longer make live network calls (~14s → ~5s).
+- **Tests:** target passed repeatedly (5× incl. 2× at commit); full e2e file 2 passed;
+  discovery/anti-drift/matrix 20 passed; pricing trio 21 passed; full suite on baseline
+  now 143 passed / 1 failed — ONLY I2 remains there, and I2 is fixed by `1138849`.
+- **Merge status:** READY_FOR_CODEX_REVIEW — off baseline `f692c04`; not on master.
+  Known-failure cleanup stage in MERGE_PLAN, alongside `1138849`. Test-only; no expected
+  app-source conflict.
+- **Rollback:**
+  - Before merge: delete/reset the branch; no master impact.
+  - To revert the commit directly: `git revert 6081c76`.
+  - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.
+
+### feature/capability-accelerator-packs-network-hcm — `1fc93de` (base: feature/any-usecase-capability-router @ `445c6de`)
+- **Purpose:** adds ADVISORY capability accelerator packs for intake/question quality —
+  `network_security_observability` (network telemetry / security ops / observability /
+  collaboration analytics) and `hcm_payroll_workforce` (HCM / payroll / time-and-
+  attendance / workforce management). Post-RC2 NEXT-WAVE branch; NOT part of
+  `integration/rc2-golden-rehearsal-v2`. Implements DECISIONS D18 (accelerators vs
+  domain packs vs lane models).
+- **Files:** new `app/services/capability_accelerator_packs.py` (frozen-dataclass
+  schema, 2 packs, weighted deterministic matcher with negative guards, import-time
+  validation of fallback families) and `tests/test_capability_accelerator_packs.py`
+  (17 tests); edits to `app/services/capability_router.py` (record-level HCM
+  sensitivity markers, additive `capability_accelerators` decision field, flag-gated
+  enrichment inside `route()` only) and `app/core/config.py` (1 flag).
+- **Safety:**
+  - `ARCHWAY_ENABLE_CAPABILITY_ACCELERATOR_PACKS` default OFF; flag-off serialized
+    route output is byte/shape equivalent (empty accelerator list stripped).
+  - Company names (Cisco/ADP/Workday/Meraki/…) are CONTEXT VOCABULARY only — pack
+    identities are capability domains, never companies.
+  - All fallback families validated against `GENERIC_FALLBACK_FAMILIES` at import time;
+    a pack declaring an unknown family fails loudly.
+  - Advisory-only metadata/questions: fallback candidate fills the void ONLY when the
+    deterministic fallback is `unknown_directional` (deterministic > pack > model-prior
+    > default); no pricing quantities/readiness changes; no architecture
+    service-selection changes; no known-domain overrides (healthcare/IoT/payment/legal
+    proven identical flag-on/off); record-level HCM markers (pay statement / payroll
+    record / employee SSN / direct deposit / …) skip the model prior, bare topic words
+    do not block valid HCM use cases.
+- **Tests:** accelerators + router + discovery 41 passed; healthcare anti-drift +
+  scenario matrix 15 passed; pricing trio 21 passed; full suite on this ancestry
+  178 passed / 2 pre-existing failures (I1/I2 — fixed on their own branches outside
+  this ancestry).
+- **Merge status:** READY_FOR_CODEX_REVIEW — stacked branch; merge ONLY after
+  `feature/any-usecase-capability-router @ 445c6de`. Review after the RC2 Golden
+  candidate is stable (see MERGE_PLAN next-wave section).
+- **Rollback:**
+  - Before merge: delete/reset the branch; no master impact.
+  - To revert the commit directly: `git revert 1fc93de`.
+  - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.

@@ -111,6 +111,84 @@ Notes:
 - No generated SVG/PNG/D2/export artifacts may be committed; `.tools/d2/d2` stays
   gitignored (KNOWN_ISSUES I15).
 
+## RC2 golden rehearsal — COMPLETED (2026-06-10)
+The documented merge order above was EXECUTED end-to-end on
+`integration/rc2-golden-rehearsal @ ee534db` (15 `--no-ff` merges off `f692c04`;
+full record in BRANCH_LEDGER).
+- All stages merged in the documented order; deferred domain-pack branches excluded.
+- `export_package.py` conflicts were resolved PRESERVING ALL OF: export-quality/loop-safe
+  collection (Stage 1), fail-closed pricing headline defaults (Stage 2), the `audit_log`
+  payload (Stage 3), the `mcp_security` payload (Stage 3), the dossier manifest /
+  `README_DOSSIER.md` / legacy `manifest.json`, and the SKU pilot trace exports (Stage 4).
+  `config.py` conflicts were resolved keep-both (job TTL + frontier-prior + SKU pilot
+  flags, all defaults unchanged).
+- Validation: full suite 363 passed / 2 known failures (I1+I2 only, zero new); harness
+  golden profile READY_WITH_KNOWN_ISSUES; frontend build passed; golden export validation
+  passed for legal/healthcare/telecom with the dossier verifier VALID on all three
+  packages; healthcare crossing gate passed; pricing fail-closed preserved.
+- **`integration/rc2-golden-rehearsal @ ee534db` is the recommended Codex review
+  candidate** for the master merge. Do not merge to master before that review
+  (Golden Gate posture checkpoint).
+
+## Stage 7 — Repo hygiene (merge BEFORE final harness/frontend build validation)
+18. `chore/untrack-frontend-tsbuildinfo` (`d338790`, off baseline `f692c04`) — adds
+    `*.tsbuildinfo` to `.gitignore` and untracks `frontend/tsconfig.tsbuildinfo`
+    (`git rm --cached`; local cache file kept). READY_FOR_CODEX_REVIEW.
+
+Notes:
+- Merge BEFORE the final harness/frontend build validation pass so frontend builds no
+  longer dirty the working tree — during the golden rehearsal, every `npm run build`
+  regenerated this tracked cache file and tripped the harness's dirty-tree
+  READY-downgrade guard (required two manual restores).
+- Merging into/after the rehearsal stack simply deletes the tracked copy and the ignore
+  rule takes over — no conflict expected. Docs-only `.gitignore` overlap with
+  `chore/internalize-diagram-compiler` (which appended `.tools/`) resolves trivially
+  keep-both.
+
+## Stage 8 — Known-failure cleanup (pre-v2; merge with or after the rehearsal stack)
+19. `fix/utility-metric-structuring` (`1138849`, off baseline `f692c04`) — fixes
+    KNOWN_ISSUES I2 (utility outage-reduction profile metric alias drift). Restores the
+    profile-level public label `outage_reduction_target_percent` via a
+    backward-compatible alias; structured-extractor key unchanged. READY_FOR_CODEX_REVIEW.
+20. `fix/utility-grid-e2e-citation-determinism` (`6081c76`, off baseline `f692c04`) —
+    fixes KNOWN_ISSUES I1. Test-only branch (`tests/test_end_to_end_flow.py`): pins all
+    evidence sources off for a deterministic offline run, asserts the anti-RAG
+    classification invariant directly, preserves the offline fail-closed coverage
+    invariant. No app-source change. READY_FOR_CODEX_REVIEW.
+
+Notes:
+- Merge order: AFTER the `ee534db` rehearsal stack plus the Stage 7 hygiene branch
+  (`d338790`). **Together, `1138849` + `6081c76` enable the v2 full-green candidate**
+  (`integration/rc2-golden-rehearsal-v2`) — the full suite is expected to pass with zero
+  known failures for the first time.
+- **Conflict watch (19):** `app/services/use_case_profile.py` is also edited by
+  `feature/any-usecase-capability-router` (Stage 5 item 15). On merge, PRESERVE BOTH the
+  `capability_decision` metadata and the outage metric alias
+  (`_PROFILE_BUSINESS_TARGET_ALIASES` + the translation in `_extract_metrics`).
+- **Conflict watch (20):** none expected — test-only; `tests/test_end_to_end_flow.py` is
+  not edited by any other pending branch.
+- `metric_extractor.py` regex widening must stay mirrored with the
+  `_detect_business_targets` pattern in `use_case_profile.py` (the two extractors must
+  agree — DECISIONS D1).
+
+## Next wave — post-RC2 accelerators (NOT part of integration/rc2-golden-rehearsal-v2)
+- `feature/capability-accelerator-packs-network-hcm` (`1fc93de`, stacked on
+  `feature/any-usecase-capability-router @ 445c6de`) — advisory capability accelerator
+  packs for network/security/observability and HCM/payroll/workforce intake
+  (DECISIONS D18). READY_FOR_CODEX_REVIEW.
+  - **Do NOT include in `integration/rc2-golden-rehearsal-v2`.** The v2 candidate is
+    stabilization-only (full-green suite); this is new product intelligence. Review
+    after the RC2 Golden candidate is stable.
+  - Merge ONLY after `feature/any-usecase-capability-router @ 445c6de` (stacked — it
+    imports the router's `GENERIC_FALLBACK_FAMILIES` and `route()` integration).
+  - **Conflict watch:** `app/core/config.py` (flag-heavy file also touched by SKU/MCP/
+    router branches — keep-both) and `app/services/capability_router.py` (also the
+    router branch's own file; stacked ancestry resolves this naturally).
+  - **Preserve on merge:** flag default OFF; advisory-only metadata (flag-off route
+    output byte/shape equivalent); import-time-validated fallback families; the
+    deterministic > pack > model-prior > default fallback ranking; no pricing/
+    readiness/architecture leakage (the flag-on/off equality tests are the proof).
+
 ## Deferred — not in this RC2 stabilization line
 - `experiment/domain-pack-interface` (`fe886af`) — DEFER until Codex review.
 - `feature/domain-pack-phase2-pricing-drivers` (`20eea81`) — DEFER until Codex review.
