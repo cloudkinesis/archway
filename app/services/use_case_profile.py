@@ -441,10 +441,19 @@ _BUSINESS_TARGET_KINDS = {
     "refresh_cadence_minutes": "frequency",
     "scheduled_surgeries_per_day": "event_volume",
     "country_count": "coverage",
-    "unplanned_outage_reduction_percent": "target_percent",
+    "outage_reduction_target_percent": "target_percent",
     "current_mttr_hours": "current_duration",
     "target_mttr_minutes": "target_duration",
     "target_timeline_months": "timeline",
+}
+
+# Profile-level public labels for structured-extractor business-target keys.
+# The structured extractor key stays unchanged (consumed directly by
+# tests/golden_scenarios and any structured callers); the profile view keeps
+# the historical public label that synthesis exposes (see also the
+# outage_reduction_target_percent dedupe rule in _dedupe_metrics).
+_PROFILE_BUSINESS_TARGET_ALIASES = {
+    "unplanned_outage_reduction_percent": "outage_reduction_target_percent",
 }
 
 
@@ -465,6 +474,7 @@ def _extract_metrics(structured_metrics) -> list[ExtractedMetric]:
     for label, value in structured_metrics.business_targets.items():
         if value.derived:
             continue
+        label = _PROFILE_BUSINESS_TARGET_ALIASES.get(label, label)
         metrics.append(
             ExtractedMetric(
                 label=label,
@@ -499,7 +509,7 @@ def _detect_business_targets(text: str) -> list[str]:
     fraud_reduction = re.search(r"(?:reduce|reducing|cut)\s+false[- ]positives?\s+by\s+(?P<value>\d+(?:\.\d+)?)\s*(?:percent|%)", text, flags=re.I)
     if fraud_reduction:
         targets.append(f"Reduce false positives by {_format_number(_number(fraud_reduction.group('value')))}%.")
-    outage = re.search(r"reducing? unplanned outages by (?P<value>\d+(?:\.\d+)?)%", text, flags=re.I)
+    outage = re.search(r"reduc(?:e|es|ing)\s+unplanned outages by (?P<value>\d+(?:\.\d+)?)%", text, flags=re.I)
     if outage:
         targets.append(f"Reduce unplanned outages by {_format_number(_number(outage.group('value')))}%.")
     mttr = re.search(r"cutting? mean[- ]time[- ]to[- ]restore from (?P<current>\d+(?:\.\d+)?)\s+hours? to under (?P<target>\d+(?:\.\d+)?)\s+minutes?", text, flags=re.I)

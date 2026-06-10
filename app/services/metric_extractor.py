@@ -81,7 +81,7 @@ def extract_metrics(text: str) -> ExtractedMetrics:
     _put_match(result.asset_counts, "distribution_transformers", "count", text, r"(?P<value>\d[\d,]*)\s+distribution transformers?")
     if "distribution_transformers" not in result.asset_counts:
         _put_match(result.asset_counts, "transformers", "count", text, r"(?P<value>\d[\d,]*)\s+transformers?")
-    _put_match(result.business_targets, "unplanned_outage_reduction_percent", "percent", text, r"reducing? unplanned outages by (?P<value>\d+(?:\.\d+)?)%")
+    _put_match(result.business_targets, "unplanned_outage_reduction_percent", "percent", text, r"reduc(?:e|es|ing)\s+unplanned outages by (?P<value>\d+(?:\.\d+)?)%")
     _put_match(result.business_targets, "current_mttr_hours", "hours", text, r"mean[- ]time[- ]to[- ]restore from (?P<value>\d+(?:\.\d+)?)\s+hours?")
     _put_match(result.business_targets, "target_mttr_minutes", "minutes", text, r"under (?P<value>\d+(?:\.\d+)?)\s+minutes?")
     _put_match(result.business_targets, "target_timeline_months", "months", text, r"within the first (?P<value>\d+(?:\.\d+)?)\s+months?")
