@@ -1,0 +1,39 @@
+# Machine-readable source of truth for KNOWN failing tests (RC2).
+#
+# The validation harness (scripts/rc2_validate.py) reads THIS file to classify a
+# failing test as FAIL_KNOWN instead of FAIL_NEW. docs/rc2/KNOWN_ISSUES.md remains
+# the human narrative; this file is the machine contract.
+#
+# Rules:
+# - A failing test listed here is reported as FAIL_KNOWN (a documented exception),
+#   never silently treated as success. It downgrades the headline to
+#   READY_WITH_KNOWN_ISSUES, not READY.
+# - A failing test NOT listed here is FAIL_NEW and BLOCKS the report.
+# - A listed test that now PASSES is reported as KNOWN_FAIL_NOW_PASSING so this
+#   file can be cleaned up (stale metadata).
+#
+# Adding an entry here is auditable: every entry must reference an issue_id in
+# KNOWN_ISSUES.md, a reason, and an added_date. Do not add entries to launder
+# real regressions.
+
+schema: rc2_known_failures_v1
+known_failures:
+  - test_id: "tests/test_end_to_end_flow.py::test_utility_grid_flow_is_not_misclassified_as_rag_assistant"
+    issue_id: "I1"
+    reason: "Citation-coverage assertion is non-deterministic / sensitive to leftover .archway state; expected False but often yields True. Present on baseline f692c04; unrelated to fix branches."
+    severity: low
+    blocks_internal_pilot: false
+    added_date: "2026-06-08"
+    status: open
+    expected_behavior: "Test-only flake. Triage once (make deterministic or quarantine); no product impact."
+    next_action: "Stabilize the assertion or isolate the data dir, then remove this entry."
+
+  - test_id: "tests/test_synthesis.py::test_utility_metrics_and_business_goals_are_structured"
+    issue_id: "I2"
+    reason: "KeyError: 'outage_reduction_target_percent' — metric label/extraction expectation. Pre-existing on baseline; verify it is still present."
+    severity: low
+    blocks_internal_pilot: false
+    added_date: "2026-06-08"
+    status: open
+    expected_behavior: "If it fails as documented, report FAIL_KNOWN. If it now passes, report KNOWN_FAIL_NOW_PASSING and remove this entry."
+    next_action: "Confirm on a clean baseline run; if real, scope a focused metric-extraction fix branch."
