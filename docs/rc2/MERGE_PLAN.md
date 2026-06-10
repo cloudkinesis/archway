@@ -188,6 +188,23 @@ Notes:
     output byte/shape equivalent); import-time-validated fallback families; the
     deterministic > pack > model-prior > default fallback ranking; no pricing/
     readiness/architecture leakage (the flag-on/off equality tests are the proof).
+- `feature/capability-accelerator-packs-security-banking-spaces` (`d3d7242`, stacked on
+  `feature/capability-accelerator-packs-network-hcm @ 1fc93de`) — wave-2 accelerators:
+  firewall/security operations, smart spaces/location IoT, open banking/payments,
+  financial-crime/risk operations + HCM delta + context word-boundary fix.
+  READY_FOR_CODEX_REVIEW.
+  - **Do NOT include in `integration/rc2-golden-rehearsal-v2`.** Review after the RC2
+    Golden candidate is stable.
+  - Merge ONLY after `feature/capability-accelerator-packs-network-hcm @ 1fc93de`
+    (stacked — extends the same packs module and registry).
+  - **Conflict watch:** `app/services/capability_accelerator_packs.py` and
+    `app/services/capability_router.py` (both also edited by the wave-1 branch;
+    stacked ancestry resolves this naturally).
+  - **Preserve on merge:** the D18 taxonomy; advisory-only accelerators;
+    capability-domain pack identities (never company names); validated fallback
+    families; word-boundary context matching; RECORD-level-only sensitivity markers
+    (topic words never skip the model prior); no pricing/readiness/architecture
+    leakage.
 
 ## Deferred — not in this RC2 stabilization line
 - `experiment/domain-pack-interface` (`fe886af`) — DEFER until Codex review.

@@ -460,3 +460,44 @@ NOT independently on master. Review/merge bottom-up (foundation first).
   - Before merge: delete/reset the branch; no master impact.
   - To revert the commit directly: `git revert 1fc93de`.
   - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.
+
+### feature/capability-accelerator-packs-security-banking-spaces — `d3d7242` (base: feature/capability-accelerator-packs-network-hcm @ `1fc93de`)
+- **Purpose:** wave-2 accelerators — extends advisory capability accelerator coverage
+  with `firewall_security_operations`, `smart_spaces_location_iot`,
+  `banking_open_banking_payments`, and `financial_crime_risk_operations`, plus a small
+  HCM delta (payroll exceptions / absence management / benefits admin / leave of absence /
+  workforce compliance) and a context-vocabulary word-boundary fix ("adp" can no longer
+  match inside "adapted"). Six packs total, all capability-domain-named (DECISIONS D18).
+  Post-RC2 NEXT-WAVE branch; explicitly NOT part of `integration/rc2-golden-rehearsal-v2`.
+- **Files:** `app/services/capability_accelerator_packs.py` (4 packs + HCM delta +
+  context fix), `app/services/capability_router.py` (two new RECORD-level sensitivity
+  groups only: `spaces_location_record`, `financial_record`),
+  `tests/test_capability_accelerator_packs.py` (20 new tests; 37 total).
+- **Safety:**
+  - Flag-gated by the EXISTING accelerator flag — no config change.
+  - No customer-branded pack identities; Cisco/ADP/Barclays/NatWest/Meraki/Firepower
+    etc. are context vocabulary only (word-boundary matched).
+  - All fallback families import-time validated against `GENERIC_FALLBACK_FAMILIES`.
+  - Firewall pack DISAMBIGUATED from the network pack: pure NetFlow/switch telemetry
+    matches network only; policy/rule/triage signals anchor the firewall pack; shared
+    terms (SIEM/SOC/SOAR/VPN) deliberately weak.
+  - Record-level sensitivity markers only: badge IDs / individual location history /
+    surveillance footage and raw account numbers / sort codes / IBAN (incl. IBAN-format
+    value pattern) / card numbers / bank statements skip the model prior; abstract
+    wording (account information service, account onboarding) and topic words (open
+    banking, AML, KYC, sanctions, occupancy analytics) NEVER skip — valid use cases
+    stay fully usable, marked sensitive/governed via advisory concerns.
+  - No pricing/readiness/architecture/governance/diagram authority; financial-crime
+    pack proven not to override the deterministic payment-fraud classification; known
+    healthcare/IoT/payment/legal classifications proven unchanged flag-on/off.
+- **Tests:** pack + router + discovery 61 passed; healthcare anti-drift + scenario
+  matrix 15 passed; pricing trio 21 passed; full suite on this ancestry 198 passed /
+  2 pre-existing failures (I1/I2 — fixed separately in the v2 line, outside this
+  stacked ancestry).
+- **Merge status:** READY_FOR_CODEX_REVIEW — stacked; merge ONLY after
+  `feature/capability-accelerator-packs-network-hcm @ 1fc93de`. Review after the RC2
+  Golden candidate is stable.
+- **Rollback:**
+  - Before merge: delete/reset the branch; no master impact.
+  - To revert the commit directly: `git revert d3d7242`.
+  - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.

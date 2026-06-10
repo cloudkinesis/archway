@@ -264,3 +264,6 @@ below is what prevents them from becoming overlapping bloat:
   The first two accelerators (`network_security_observability`,
   `hcm_payroll_workforce`) are advisory and flag-gated
   (`ARCHWAY_ENABLE_CAPABILITY_ACCELERATOR_PACKS`, default OFF).
+- Wave-2 accelerators (`d3d7242`) extend advisory intake coverage for firewall/SecOps,
+  smart spaces/location IoT, open banking/payments, and financial-crime/risk operations
+  without changing readiness, pricing, governance, or architecture authority.

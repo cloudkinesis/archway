@@ -260,6 +260,11 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
   hints only. They are NOT proof of full domain specialization: unknown domains still
   route to directional/generic unless a real domain pack or deterministic pattern
   exists. I13 remains intact and by-design.
+- **Wave-2 update (`d3d7242`):** accelerator coverage has expanded (firewall/SecOps,
+  smart spaces/location IoT, open banking/payments, financial-crime/risk operations —
+  six packs total), but this still does NOT mean every domain has specialist
+  domain-pack depth. Unknown domains remain directional/generic unless backed by
+  deterministic pattern/domain support.
 
 ## I14. Additional domain lane adapters are future work
 - **What:** the `DomainLaneModel` framework (DECISIONS D16,
