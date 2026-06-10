@@ -7,7 +7,12 @@ from app.models.domain import (
     ObservabilityControl,
     SecurityControl,
 )
-from app.services.lane_planner import lane_label_for_component, plan_lanes
+from app.services.lane_planner import (
+    apply_domain_lane_model,
+    lane_label_for_component,
+    plan_lanes,
+    resolve_domain_lane_model,
+)
 from app.services.use_case_profile import UseCaseProfile
 from app.services.view_planner import compiler_views_for_semantic, plan_semantic_views
 
@@ -589,14 +594,18 @@ def pattern_components(profile: UseCaseProfile, production: bool) -> list[Archit
         if common.id not in seen:
             components.append(common)
             seen.add(common.id)
-    lane_plan = plan_lanes(_capabilities(profile), components)
-    for component in components:
-        label = lane_label_for_component(component, lane_plan)
-        if label:
-            component.logical_group = label
-            component.metadata["lane_id"] = next((lane.lane_id for lane in lane_plan.lanes if lane.label == label), None)
-            component.metadata["lane_label"] = label
-            component.metadata.setdefault("semantic_role", component.logical_group)
+    domain_lane_model = resolve_domain_lane_model(profile.domain, profile.workload_families)
+    if domain_lane_model is not None:
+        apply_domain_lane_model(domain_lane_model, components)
+    else:
+        lane_plan = plan_lanes(_capabilities(profile), components)
+        for component in components:
+            label = lane_label_for_component(component, lane_plan)
+            if label:
+                component.logical_group = label
+                component.metadata["lane_id"] = next((lane.lane_id for lane in lane_plan.lanes if lane.label == label), None)
+                component.metadata["lane_label"] = label
+                component.metadata.setdefault("semantic_role", component.logical_group)
     return components
 
 
@@ -622,11 +631,17 @@ def pattern_flows(profile: UseCaseProfile, production: bool, components: list[Ar
             index += 1
         flows.append(ArchitectureFlow(id=f"f{index}", source="waf", target="api", label="Allowed requests", protocol="HTTPS", metadata={"classification": "request"}))
         index += 1
+    healthcare_or = "healthcare_operations_scheduling" in profile.workload_families
     for target, label, classification in (("logs", "Emit metrics and logs", ""), ("kms", "Encrypt data and artifacts", ""), ("audit", "Record audit events", "")):
         if target not in component_ids:
             continue
         for source in _operational_sources(component_ids):
             metadata = {"classification": classification} if classification else {}
+            # Healthcare OR: keep governance/observability fan-out as a sidecar so it
+            # does not crisscross the primary logical service flow. The edge is
+            # preserved (recorded in metadata) and surfaced in governance/detail views.
+            if healthcare_or:
+                metadata["logical_detail_only"] = True
             flows.append(ArchitectureFlow(id=f"f{index}", source=source, target=target, label=label, metadata=metadata))
             index += 1
             break
@@ -755,6 +770,7 @@ def _healthcare_logical_detail_only(source: str, target: str, classification: st
         or (source == "private_connectivity" and target == "ehr")
         or (source == "writeback_adapter" and target == "command_center")
         or (source == "adapter" and target == "state")
+        or (source == "workflow" and target == "audit_lake")
         or classification in {"auth"}
     )
 
