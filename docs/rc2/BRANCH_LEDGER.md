@@ -289,3 +289,53 @@ NOT independently on master. Review/merge bottom-up (foundation first).
   - Before merge: delete/reset the feature branch; no master impact.
   - To revert the commit directly: `git revert 4368266`.
   - To revert a later `--no-ff` merge into master/integration: `git revert -m 1 <merge_commit_sha>`.
+
+### integration/rc2-golden-rehearsal — `ee534db` (base: master baseline `f692c04`)
+- **Purpose:** RC2 golden rehearsal — merges ALL reviewed branches in the documented
+  MERGE_PLAN order to prove the stack integrates cleanly and is a viable Codex merge
+  candidate. Merge/rehearsal branch only; not a feature branch; NOT merged to master.
+- **Merge order executed** (15 `--no-ff` merges, 2026-06-10):
+  1. `integration/rc2-stabilization-claude` (tip `068d5ca` = `a23e676` + its docs-only
+     integration review note — no code delta vs the recorded hash)
+  2. `fix/pricing-headline-fail-closed` (`f39852b`)
+  3. `fix/export-pricing-headline-fail-closed` (`439b73b`)
+  4. `feature/rc2-validation-harness` (`47782f1`)
+  5. `fix/audit-log-robustness` (`db77e0c`)
+  6. `fix/mcp-url-allowlist` (`b6a51d7`)
+  7. `chore/internalize-diagram-compiler` (`4368266`)
+  8. `feature/any-usecase-capability-router` (`445c6de`)
+  9. `fix/healthcare-diagram-crossings` (`8d07ac0`)
+  10–13. SKU stack bottom-up: `9b168d7` → `efe0849` → `c301362` → `b92b98f`
+  14. `feature/verifiable-dossier-sku-export-ux` (`91ad37d`)
+  15. `docs/rc2-decision-log` (`d050ce8`)
+  Deferred branches (domain-pack experiment/phase2) were NOT merged.
+- **Conflicts (resolved keep-both per MERGE_PLAN rules; no gate loosened, nothing dropped):**
+  - `export_package.py` (audit merge): crash-safe `read_session_audit` + degraded warning
+    PLUS Stage-1 loop-safe `_collect_async` build-status collection.
+  - `export_package.py` (MCP merge): raw payloads carry BOTH `audit_log` AND `mcp_security`.
+  - `config.py` (capability-router merge): job-TTL fields PLUS frontier-prior flags (default off, cap 1).
+  - `config.py` (SKU pilot merge): all prior fields PLUS SKU pilot flags (default off).
+  - `export_package.py` (dossier merge): imports only — audit + MCP + dossier/SKU-trace
+    imports coexist; body auto-merged. Final file preserves export-quality artifacts,
+    fail-closed pricing (`get(..., False)`), `audit_log`, `mcp_security`,
+    `dossier_manifest.json`/`.md`, `README_DOSSIER.md`, SKU pilot trace files, and the
+    legacy `manifest.json`.
+- **Tests:** focused battery 196 passed; pricing trio 21; discovery/healthcare/matrix 20;
+  export/hydration 11; diagram selection (external compiler path blanked) 32. Full suite:
+  **363 passed / 2 failed — only the documented known failures I1 + I2; zero new failures.**
+  Harness: focused **READY**; stabilization+frontend **READY** (62); golden+frontend
+  **READY_WITH_KNOWN_ISSUES** (363 / 2 known / 0 new). Frontend build passed.
+- **Golden export validation** (real end-to-end runs, isolated data dir): legal contract
+  RAG, healthcare OR, telecom HBase/HDFS — all exported with zero blockers; WARNs were
+  honest by-design statuses (info-level enrichment diagnostics; directional pricing per
+  D3). Healthcare logical view rendered with **0 crossing violations**; no IoT leakage in
+  the healthcare architecture (IoT strings appear only in the cross-scenario
+  `golden_regression_summary.json` baseline). **Verifier VALID on all three packages**
+  (89/85/75 artifacts checked, 0 mismatched, 0 missing; SKU pilot honestly recorded
+  absent with the flag off). No tokens/secrets in exports; no generated artifacts staged.
+- **Known failures:** I1 (e2e citation coverage) and I2 (`outage_reduction_target_percent`)
+  only — accepted known exceptions for the rehearsal (see KNOWN_ISSUES).
+- **Merge status:** READY_FOR_CODEX_REVIEW — recommended Codex review candidate for the
+  master merge. Not on master.
+- **Rollback:** delete/reset the rehearsal branch (no master impact), or
+  `git revert -m 1 <merge_commit>` for any individual stage on the branch.

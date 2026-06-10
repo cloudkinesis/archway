@@ -18,6 +18,11 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
 - **Blocks internal pilot:** no.
 - **Next action:** triage once — make the assertion deterministic or quarantine
   it — then wire CI so it is not re-proven by hand on every branch.
+- **RC2 rehearsal note (2026-06-10):** on `integration/rc2-golden-rehearsal @ ee534db`
+  (all reviewed branches merged) the full suite shows **exactly two failures — I1 and
+  I2 only; zero new failures.** I1 remains OPEN (NOT fixed) and is an ACCEPTED KNOWN
+  EXCEPTION for the RC2 rehearsal posture; the harness reports it via
+  READY_WITH_KNOWN_ISSUES rather than laundering it green.
 
 ## I2. Utility metric label failure (`outage_reduction_target_percent`)
 - **What:** `tests/test_synthesis.py::test_utility_metrics_and_business_goals_are_structured`
@@ -32,6 +37,11 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
 - **Update:** re-confirmed pre-existing on a clean `f692c04` stash during the
   `feature/any-usecase-capability-router` work; still OPEN and deliberately NOT chased
   in that branch (excluded from its green run).
+- **RC2 rehearsal note (2026-06-10):** still failing on
+  `integration/rc2-golden-rehearsal @ ee534db` — together with I1 these are the ONLY
+  two full-suite failures (363 passed / 2 failed / 0 new). I2 remains OPEN (NOT fixed)
+  and is an ACCEPTED KNOWN EXCEPTION for the RC2 rehearsal posture, pending the focused
+  metric-extraction fix branch.
 
 ## I3. Audit-log robustness (`read_session_logs`) — FIXED (`db77e0c`)
 - **What:** `app/core/logging.py` `json.loads(line)` over `audit.jsonl` had no

@@ -111,6 +111,25 @@ Notes:
 - No generated SVG/PNG/D2/export artifacts may be committed; `.tools/d2/d2` stays
   gitignored (KNOWN_ISSUES I15).
 
+## RC2 golden rehearsal — COMPLETED (2026-06-10)
+The documented merge order above was EXECUTED end-to-end on
+`integration/rc2-golden-rehearsal @ ee534db` (15 `--no-ff` merges off `f692c04`;
+full record in BRANCH_LEDGER).
+- All stages merged in the documented order; deferred domain-pack branches excluded.
+- `export_package.py` conflicts were resolved PRESERVING ALL OF: export-quality/loop-safe
+  collection (Stage 1), fail-closed pricing headline defaults (Stage 2), the `audit_log`
+  payload (Stage 3), the `mcp_security` payload (Stage 3), the dossier manifest /
+  `README_DOSSIER.md` / legacy `manifest.json`, and the SKU pilot trace exports (Stage 4).
+  `config.py` conflicts were resolved keep-both (job TTL + frontier-prior + SKU pilot
+  flags, all defaults unchanged).
+- Validation: full suite 363 passed / 2 known failures (I1+I2 only, zero new); harness
+  golden profile READY_WITH_KNOWN_ISSUES; frontend build passed; golden export validation
+  passed for legal/healthcare/telecom with the dossier verifier VALID on all three
+  packages; healthcare crossing gate passed; pricing fail-closed preserved.
+- **`integration/rc2-golden-rehearsal @ ee534db` is the recommended Codex review
+  candidate** for the master merge. Do not merge to master before that review
+  (Golden Gate posture checkpoint).
+
 ## Deferred — not in this RC2 stabilization line
 - `experiment/domain-pack-interface` (`fe886af`) — DEFER until Codex review.
 - `feature/domain-pack-phase2-pricing-drivers` (`20eea81`) — DEFER until Codex review.
