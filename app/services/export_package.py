@@ -19,6 +19,11 @@ from app.services.dossier_manifest import MANIFEST_FILENAME, build_dossier_manif
 from app.services.golden_regression import GoldenRegressionExportService
 from app.services.jobs import job_manager
 from app.services.llm.telemetry import llm_telemetry_store
+from app.services.architecture_decision_records import (
+    build_decision_records,
+    decision_records_markdown,
+    decision_records_summary,
+)
 from app.services.mcp_security import mcp_security_status
 from app.services.sku_pricing.export_trace import build_pilot_trace_files, pilot_trace_hash
 from app.services.sku_pricing.official_snapshot_builder import UNSUPPORTED_OFFICIAL_DIMENSIONS
@@ -337,6 +342,32 @@ class ExportPackageService:
                 included_artifacts.append(f"exports/{export_name}/pricing/{name}")
             sku_trace_hash = pilot_trace_hash(pilot)
 
+        # Architecture Decision Records — deterministic export trust artifacts only
+        # (no runtime/pricing/readiness influence; see architecture_decision_records.py).
+        decision_records = build_decision_records(architectures, pricing, report, diagrams)
+        adr_summary = decision_records_summary(decision_records)
+        if decision_records:
+            adr_payload = json.dumps(
+                [record.model_dump(mode="json") for record in decision_records],
+                indent=2,
+                sort_keys=True,
+            )
+            adr_dir = export_dir / "architecture"
+            adr_dir.mkdir(exist_ok=True)
+            (adr_dir / "decision_records.json").write_text(adr_payload, encoding="utf-8")
+            (adr_dir / "decision_records.md").write_text(decision_records_markdown(decision_records), encoding="utf-8")
+            raw_dir = export_dir / "raw"
+            raw_dir.mkdir(exist_ok=True)
+            (raw_dir / "architecture_decision_records.json").write_text(adr_payload, encoding="utf-8")
+            included_artifacts.extend(
+                f"exports/{export_name}/{rel}"
+                for rel in (
+                    "architecture/decision_records.json",
+                    "architecture/decision_records.md",
+                    "raw/architecture_decision_records.json",
+                )
+            )
+
         (export_dir / "README_DOSSIER.md").write_text(self._readme_dossier(), encoding="utf-8")
         included_artifacts.append(f"exports/{export_name}/README_DOSSIER.md")
 
@@ -362,6 +393,7 @@ class ExportPackageService:
             convergence_status=getattr(convergence_result, "final_status", None),
             sku_trace_hash=sku_trace_hash,
             unsupported_dimensions=dict(UNSUPPORTED_OFFICIAL_DIMENSIONS),
+            decision_records_summary=adr_summary,
         )
         (export_dir / MANIFEST_FILENAME).write_text(
             json.dumps(dossier, indent=2, sort_keys=True, default=str), encoding="utf-8"

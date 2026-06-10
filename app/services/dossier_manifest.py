@@ -382,6 +382,7 @@ def build_dossier_manifest(
     sku_trace_hash: str | None = None,
     unsupported_dimensions: dict | None = None,
     app_version: str | None = None,
+    decision_records_summary: dict | None = None,
 ) -> dict:
     """Assemble the dossier manifest dict. Reads files already written under ``export_dir``."""
     export_dir = Path(export_dir)
@@ -397,7 +398,7 @@ def build_dossier_manifest(
                              diagrams_section, inventory, warnings)
     overall = _overall_status(gates, research_section, pricing_section, convergence_status)
 
-    return {
+    manifest = {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "dossier_id": export_name,
         "generated_at": generated_at,
@@ -419,6 +420,11 @@ def build_dossier_manifest(
         "overall_status": overall,
         "artifact_inventory": inventory,
     }
+    # Additive: ADR summary (absent for callers that do not supply one, keeping
+    # older manifest/verifier behavior byte-identical).
+    if decision_records_summary is not None:
+        manifest["decision_records"] = dict(decision_records_summary)
+    return manifest
 
 
 def manifest_markdown(manifest: dict) -> str:
