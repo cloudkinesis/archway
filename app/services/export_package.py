@@ -7,7 +7,7 @@ import copy
 import json
 import threading
 
-from app.core.logging import AuditLogger, hash_payload, read_session_logs
+from app.core.logging import AuditLogger, hash_payload, read_session_audit
 from app.db.session_store import SessionStore
 from app.models.domain import ExportBundle
 from app.services.artifacts import ArtifactStore
@@ -51,7 +51,13 @@ class ExportPackageService:
         architectures = _read_known_json(root, "architecture/specs.json", warnings)
         architecture_revisions = _read_known_json(root, "architecture/revisions.json", warnings)
         diagrams = _read_known_json(root, "diagrams/gallery.json", warnings)
-        logs = read_session_logs(session_id)
+        audit = read_session_audit(session_id)
+        logs = audit.events
+        if audit.status in {"degraded", "unreadable"}:
+            _warn_once(
+                warnings,
+                f"Audit log {audit.status}: {audit.malformed_count} malformed / {audit.skipped_count} skipped line(s) were dropped.",
+            )
         build_status, build_status_status, build_status_reason = _collect_async(
             lambda: BuildStatusService().status(),
             "build status",
@@ -136,6 +142,7 @@ class ExportPackageService:
             "architecture_revisions": architecture_revisions,
             "diagram_gallery": diagrams,
             "diagnostics": logs,
+            "audit_log": audit.to_dict(),
             "build_status": build_status,
             "golden_regression_summary": golden_regression,
             "job_telemetry": job_telemetry,
