@@ -130,6 +130,21 @@ full record in BRANCH_LEDGER).
   candidate** for the master merge. Do not merge to master before that review
   (Golden Gate posture checkpoint).
 
+## Stage 7 — Repo hygiene (merge BEFORE final harness/frontend build validation)
+18. `chore/untrack-frontend-tsbuildinfo` (`d338790`, off baseline `f692c04`) — adds
+    `*.tsbuildinfo` to `.gitignore` and untracks `frontend/tsconfig.tsbuildinfo`
+    (`git rm --cached`; local cache file kept). READY_FOR_CODEX_REVIEW.
+
+Notes:
+- Merge BEFORE the final harness/frontend build validation pass so frontend builds no
+  longer dirty the working tree — during the golden rehearsal, every `npm run build`
+  regenerated this tracked cache file and tripped the harness's dirty-tree
+  READY-downgrade guard (required two manual restores).
+- Merging into/after the rehearsal stack simply deletes the tracked copy and the ignore
+  rule takes over — no conflict expected. Docs-only `.gitignore` overlap with
+  `chore/internalize-diagram-compiler` (which appended `.tools/`) resolves trivially
+  keep-both.
+
 ## Deferred — not in this RC2 stabilization line
 - `experiment/domain-pack-interface` (`fe886af`) — DEFER until Codex review.
 - `feature/domain-pack-phase2-pricing-drivers` (`20eea81`) — DEFER until Codex review.

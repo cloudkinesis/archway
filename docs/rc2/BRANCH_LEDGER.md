@@ -339,3 +339,25 @@ NOT independently on master. Review/merge bottom-up (foundation first).
   master merge. Not on master.
 - **Rollback:** delete/reset the rehearsal branch (no master impact), or
   `git revert -m 1 <merge_commit>` for any individual stage on the branch.
+
+### chore/untrack-frontend-tsbuildinfo — `d338790` (base: master baseline `f692c04`)
+- **Purpose:** tiny hygiene branch — stop frontend builds from dirtying the working tree.
+  `frontend/tsconfig.tsbuildinfo` is a TypeScript incremental-build cache that was tracked
+  in git; every `npm run build` (`tsc -b && vite build`) regenerated it, which tripped the
+  RC2 validation harness's dirty-tree READY-downgrade guard and required manual restores
+  (twice during the golden rehearsal).
+- **Files:** `.gitignore` (adds `*.tsbuildinfo`), `frontend/tsconfig.tsbuildinfo`
+  (untracked via `git rm --cached` only — the local build cache file is kept on disk).
+  No app source, frontend source, or tests changed.
+- **Safety:** no behavior change; no generated outputs committed (`frontend/dist/` was
+  already ignored). Verified by building the frontend after untracking AND again after
+  the commit — `git status` stays clean of the file both times.
+- **Tests/build:** frontend build passed twice (pre- and post-commit proof).
+- **Merge status:** READY_FOR_CODEX_REVIEW — off baseline `f692c04`; not on master.
+  Merge BEFORE final harness/frontend build validation (see MERGE_PLAN). Merging into the
+  rehearsal stack simply deletes the tracked copy; the ignore rule takes over — no
+  conflict expected.
+- **Rollback:**
+  - Before merge: delete/reset the branch; no master impact.
+  - To revert the commit directly: `git revert d338790`.
+  - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.
