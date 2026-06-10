@@ -113,9 +113,14 @@ class PriceSnapshot:
     services: tuple[str, ...]
     rates: tuple[RateRecord, ...]
     version_hash: str = ""
+    # Optional upstream provenance for local_cache / api / mcp snapshots:
+    # {upstream_source, upstream_source_url, source_hash, schema_version}.
+    provenance: dict | None = None
 
     @property
     def is_authoritative(self) -> bool:
+        # Source-level authority (structural). Provenance-aware authority for
+        # local_cache snapshots is enforced by sku_pricing.provenance.
         return self.source in AUTHORITATIVE_SOURCES
 
     def rates_for(self, dimension_key: str) -> list[RateRecord]:
@@ -131,6 +136,7 @@ class PriceSnapshot:
             "services": list(self.services),
             "version_hash": self.version_hash,
             "is_authoritative": self.is_authoritative,
+            "provenance": dict(self.provenance) if self.provenance else None,
         }
 
 
@@ -145,6 +151,7 @@ def _finalize(snapshot: PriceSnapshot) -> PriceSnapshot:
         services=snapshot.services,
         rates=snapshot.rates,
         version_hash=version,
+        provenance=snapshot.provenance,
     )
 
 

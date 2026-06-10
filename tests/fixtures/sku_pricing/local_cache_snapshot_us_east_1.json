@@ -1,0 +1,25 @@
+{
+  "_note": "Example local_cache snapshot derived from an official AWS Price List source. Representative rates for tests; refresh from a live snapshot before procurement use.",
+  "snapshot_id": "aws-price-list-us-east-1-2026-06-08-example",
+  "generated_at": "2026-06-08T00:00:00Z",
+  "region": "us-east-1",
+  "currency": "USD",
+  "source": "local_cache",
+  "upstream_source": "aws_price_list_api",
+  "upstream_source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/index.json",
+  "source_hash": "sha256:examplelocalcacheprovenancehash000000000000000000000000000000",
+  "schema_version": "1.0",
+  "services_included": ["Amazon S3", "AWS Lambda", "Amazon SQS", "Amazon EventBridge", "Amazon DynamoDB", "Amazon CloudWatch Logs"],
+  "rates": [
+    {"service_name": "Amazon S3", "service_code": "AmazonS3", "region": "us-east-1", "dimension_key": "s3_standard_storage_gb_month", "usage_type": "TimedStorage-ByteHrs", "operation": "StandardStorage", "sku": "S3STD-USE1", "price_dimension_id": "S3STD-USE1.JRTCKXETXF.6YS6EN2CT7", "unit": "GB-Mo", "rate": "0.023", "currency": "USD"},
+    {"service_name": "AWS Lambda", "service_code": "AWSLambda", "region": "us-east-1", "dimension_key": "lambda_requests", "usage_type": "Request", "operation": "Invoke", "sku": "LAMBDA-REQ-USE1", "price_dimension_id": "LAMBDA-REQ-USE1.dim", "unit": "Requests", "rate": "0.0000002", "currency": "USD"},
+    {"service_name": "AWS Lambda", "service_code": "AWSLambda", "region": "us-east-1", "dimension_key": "lambda_gb_seconds", "usage_type": "Lambda-GB-Second", "operation": "Invoke", "sku": "LAMBDA-DUR-USE1", "price_dimension_id": "LAMBDA-DUR-USE1.dim", "unit": "GB-Second", "rate": "0.0000166667", "currency": "USD"},
+    {"service_name": "Amazon SQS", "service_code": "AmazonSQS", "region": "us-east-1", "dimension_key": "sqs_requests", "usage_type": "Requests-Tier1", "operation": "Standard", "sku": "SQS-REQ-USE1", "price_dimension_id": "SQS-REQ-USE1.dim", "unit": "Requests", "rate": "0.0000004", "currency": "USD"},
+    {"service_name": "Amazon EventBridge", "service_code": "AmazonEventBridge", "region": "us-east-1", "dimension_key": "eventbridge_custom_events", "usage_type": "Event-64K-Chunks", "operation": "PutEvents", "sku": "EB-EVT-USE1", "price_dimension_id": "EB-EVT-USE1.dim", "unit": "Events", "rate": "0.000001", "currency": "USD"},
+    {"service_name": "Amazon DynamoDB", "service_code": "AmazonDynamoDB", "region": "us-east-1", "dimension_key": "dynamodb_write_request_units", "usage_type": "WriteRequestUnits", "operation": "PayPerRequestThroughput", "sku": "DDB-WRU-USE1", "price_dimension_id": "DDB-WRU-USE1.dim", "unit": "WriteRequestUnits", "rate": "0.00000125", "currency": "USD"},
+    {"service_name": "Amazon DynamoDB", "service_code": "AmazonDynamoDB", "region": "us-east-1", "dimension_key": "dynamodb_read_request_units", "usage_type": "ReadRequestUnits", "operation": "PayPerRequestThroughput", "sku": "DDB-RRU-USE1", "price_dimension_id": "DDB-RRU-USE1.dim", "unit": "ReadRequestUnits", "rate": "0.00000025", "currency": "USD"},
+    {"service_name": "Amazon DynamoDB", "service_code": "AmazonDynamoDB", "region": "us-east-1", "dimension_key": "dynamodb_storage_gb_month", "usage_type": "TimedStorage-ByteHrs", "operation": "StandardStorage", "sku": "DDB-STORE-USE1", "price_dimension_id": "DDB-STORE-USE1.dim", "unit": "GB-Mo", "rate": "0.25", "currency": "USD"},
+    {"service_name": "Amazon CloudWatch Logs", "service_code": "AmazonCloudWatch", "region": "us-east-1", "dimension_key": "cwl_ingestion_gb", "usage_type": "DataProcessing-Bytes", "operation": "PutLogEvents", "sku": "CWL-ING-USE1", "price_dimension_id": "CWL-ING-USE1.dim", "unit": "GB", "rate": "0.50", "currency": "USD"},
+    {"service_name": "Amazon CloudWatch Logs", "service_code": "AmazonCloudWatch", "region": "us-east-1", "dimension_key": "cwl_storage_gb_month", "usage_type": "TimedStorage-ByteHrs", "operation": "StandardStorage", "sku": "CWL-STORE-USE1", "price_dimension_id": "CWL-STORE-USE1.dim", "unit": "GB-Mo", "rate": "0.03", "currency": "USD"}
+  ]
+}

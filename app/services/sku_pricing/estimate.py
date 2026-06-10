@@ -96,6 +96,8 @@ class SkuBackedEstimate:
     region: str
     currency: str
     estimate_input_hash: str
+    snapshot_generated_at: str = ""
+    snapshot_provenance: dict = field(default_factory=dict)
     lines: list[SkuBackedLine] = field(default_factory=list)
     sku_backed_subtotal: Decimal = Decimal("0.00")
     directional_subtotal: Decimal = Decimal("0.00")   # catalog_referenced
@@ -111,6 +113,10 @@ class SkuBackedEstimate:
                 "snapshot_id": self.snapshot_id,
                 "source": self.snapshot_source,
                 "version_hash": self.snapshot_version_hash,
+                "generated_at": self.snapshot_generated_at,
+                "upstream_source": (self.snapshot_provenance or {}).get("upstream_source"),
+                "upstream_source_url": (self.snapshot_provenance or {}).get("upstream_source_url"),
+                "source_hash": (self.snapshot_provenance or {}).get("source_hash"),
                 "is_authoritative": self.snapshot_source in {"local_cache", "price_list_api", "mcp"},
             },
             "region": self.region,
@@ -167,10 +173,13 @@ def build_estimate(
     *,
     workload_drivers: dict | None = None,
     region: str | None = None,
+    authoritative: bool | None = None,
 ) -> SkuBackedEstimate:
     region = region or snapshot.region
     workload_drivers = workload_drivers or {}
-    authoritative = snapshot.is_authoritative
+    # Default to the snapshot's structural authority. Callers (e.g. the local-cache
+    # adapter) may pass the provenance-validated authority for a stricter gate.
+    authoritative = snapshot.is_authoritative if authoritative is None else bool(authoritative)
 
     estimate = SkuBackedEstimate(
         snapshot_id=snapshot.snapshot_id,
@@ -181,6 +190,8 @@ def build_estimate(
         estimate_input_hash=estimate_input_hash(
             workload_drivers=workload_drivers, region=region, snapshot=snapshot, dimensions=dimensions
         ),
+        snapshot_generated_at=snapshot.generated_at,
+        snapshot_provenance=dict(snapshot.provenance) if snapshot.provenance else {},
     )
 
     sku_total = Decimal("0.00")
