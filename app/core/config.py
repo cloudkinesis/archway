@@ -141,6 +141,15 @@ class Settings(BaseModel):
     frontier_domain_prior_max_calls_per_session: int = Field(
         default_factory=lambda: max(0, int(os.getenv("ARCHWAY_FRONTIER_DOMAIN_PRIOR_MAX_CALLS_PER_SESSION", "1")))
     )
+    # Pilot: attach a supplemental SKU-backed pricing trace (legal/document RAG only).
+    # Default OFF. When off, pricing behavior is byte/behavior equivalent to baseline.
+    # Does NOT reuse the domain-pack registry flag.
+    enable_sku_pricing_pilot: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_SKU_PRICING_PILOT", "false") == "true"
+    )
+    sku_pricing_snapshot_path: str | None = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_SKU_PRICING_SNAPSHOT_PATH") or None
+    )
 
     @property
     def sessions_dir(self) -> Path:
