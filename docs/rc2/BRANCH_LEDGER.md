@@ -392,3 +392,32 @@ NOT independently on master. Review/merge bottom-up (foundation first).
   - Before merge: delete/reset the branch; no master impact.
   - To revert the commit directly: `git revert 1138849`.
   - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.
+
+### fix/utility-grid-e2e-citation-determinism — `6081c76` (base: master baseline `f692c04`)
+- **Purpose:** fixes KNOWN_ISSUES **I1** by making the utility-grid e2e citation-coverage
+  test deterministic and asserting the actual anti-RAG invariant. Root cause: the test's
+  `citation_coverage.passed is False` / `research_quality == "Limited"` assertions were
+  ENVIRONMENT-SENSITIVE PROXIES — with the AWS Docs MCP enabled in the local `.env`,
+  research legitimately gathered evidence (live MCP calls inside the test), fully cited
+  all claims, and reported "Official MCP Evidence", so the test failed; offline it
+  passed. Product behavior was correct in BOTH modes.
+- **Files:** `tests/test_end_to_end_flow.py` only (test-only branch).
+- **Safety:** no app source changed; no pricing/research/product behavior changed; no
+  assertion blindly flipped (the offline honesty invariant — no evidence sources →
+  coverage fails closed + "Limited" — is preserved, now under a PINNED deterministic
+  offline mode: all MCP/web/Tavily evidence sources disabled per-test, settings cache
+  cleared and restored via try/finally so nothing leaks to later tests). Classification
+  invariant STRENGTHENED: utility grid never `rag_assistant` / `document_rag_assistant` /
+  `document_intelligence`; pricing family asserted `INDUSTRIAL_IOT_STREAMING` (not
+  document RAG); existing energy-domain / IoT-services / no-RAG-components / dispatch
+  assertions retained. Tests no longer make live network calls (~14s → ~5s).
+- **Tests:** target passed repeatedly (5× incl. 2× at commit); full e2e file 2 passed;
+  discovery/anti-drift/matrix 20 passed; pricing trio 21 passed; full suite on baseline
+  now 143 passed / 1 failed — ONLY I2 remains there, and I2 is fixed by `1138849`.
+- **Merge status:** READY_FOR_CODEX_REVIEW — off baseline `f692c04`; not on master.
+  Known-failure cleanup stage in MERGE_PLAN, alongside `1138849`. Test-only; no expected
+  app-source conflict.
+- **Rollback:**
+  - Before merge: delete/reset the branch; no master impact.
+  - To revert the commit directly: `git revert 6081c76`.
+  - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.

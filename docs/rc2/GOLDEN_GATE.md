@@ -81,8 +81,17 @@ off `f692c04`; see BRANCH_LEDGER + MERGE_PLAN "RC2 golden rehearsal — COMPLETE
 Remaining for full Golden: Codex/human review of `integration/rc2-golden-rehearsal`
 (Posture checkpoint above), and the I1/I2 triage decision (fix or formally quarantine).
 
-**Follow-up (post-rehearsal):** I2 now has a fix branch —
-`fix/utility-metric-structuring @ 1138849` (profile metric alias restored; full suite on
-a baseline-based branch: 144 passed / 1 failed). The `ee534db` rehearsal result above is
-UNCHANGED (it predates this fix and is not retroactively green). **The remaining known
-full-suite failure is I1 only**, still pending its fix-or-quarantine triage.
+**Follow-up (post-rehearsal):** BOTH previous known full-suite failures now have fix
+branches:
+- **I1** → `fix/utility-grid-e2e-citation-determinism @ 6081c76` (test-only: pins
+  evidence sources off for a deterministic offline run; asserts the anti-RAG
+  classification invariant directly; product behavior was not wrong).
+- **I2** → `fix/utility-metric-structuring @ 1138849` (profile metric alias restored;
+  structured-extractor key unchanged).
+
+Once both are merged into an `integration/rc2-golden-rehearsal-v2` candidate (alongside
+the rehearsal stack + hygiene branch), **the full suite is expected to go GREEN for the
+first time**, which would close the "Full backend suite" checklist item above. The
+`ee534db` rehearsal result above is UNCHANGED — it predates these fixes and is NOT
+retroactively green. Remaining for full Golden after that: the Codex/human review
+checkpoint (Posture).

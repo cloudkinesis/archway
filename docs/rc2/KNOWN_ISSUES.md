@@ -7,25 +7,35 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
 
 ---
 
-## I1. Pre-existing e2e citation-coverage failure (flaky / state-sensitive)
+## I1. Pre-existing e2e citation-coverage failure (flaky / state-sensitive) — FIXED (`6081c76`)
 - **What:** `tests/test_end_to_end_flow.py::test_utility_grid_flow_is_not_misclassified_as_rag_assistant`
-  asserts `citation_coverage.passed is False`, but the run often yields `True`.
-- **Status:** open. Present on baseline `f692c04`; unrelated to any fix branch
-  (research does not import the job system / governance / pricing-presentation).
-  Also sensitive to leftover `.archway` state.
-- **Severity:** low (test-only; no product impact).
-- **Branch if fixed:** none.
+  asserted `citation_coverage.passed is False`, but the run often yielded `True`.
+- **Status:** FIXED by `fix/utility-grid-e2e-citation-determinism` @ `6081c76` (off
+  baseline `f692c04`).
+- **Root cause:** PRODUCT BEHAVIOR WAS NOT WRONG. The test was under-isolated and used
+  citation coverage / research-quality as an ENVIRONMENT-SENSITIVE PROXY for
+  classification: with AWS Docs MCP evidence configured in the local `.env`, research
+  legitimately cited all claims ("Official MCP Evidence", `passed=True`); offline it
+  failed closed ("Limited", `passed=False`). The test pinned `ARCHWAY_DATA_DIR` but not
+  the evidence-source configuration, so its result tracked `.env`/network, never
+  classification — the entire "flaky/state-sensitive" history.
+- **Resolution:** the test now PINS all evidence sources off (MCP/web/Tavily disabled
+  per-test; settings cache cleared and restored via try/finally), making the offline
+  honesty invariant (no evidence → coverage fails closed + "Limited") deterministic on
+  any machine, with no live network calls in tests. The actual anti-RAG classification
+  invariant is asserted directly and STRENGTHENED: utility grid is never
+  `rag_assistant` / `document_rag_assistant` / `document_intelligence`, and the pricing
+  family is `INDUSTRIAL_IOT_STREAMING`, not document RAG. No assertion was blindly
+  flipped; no app source changed.
+- **Severity:** low → resolved.
 - **Blocks internal pilot:** no.
-- **Next action:** triage once — make the assertion deterministic or quarantine
-  it — then wire CI so it is not re-proven by hand on every branch.
 - **RC2 rehearsal note (2026-06-10):** on `integration/rc2-golden-rehearsal @ ee534db`
-  (all reviewed branches merged) the full suite shows **exactly two failures — I1 and
-  I2 only; zero new failures.** I1 remains OPEN (NOT fixed) and is an ACCEPTED KNOWN
-  EXCEPTION for the RC2 rehearsal posture; the harness reports it via
-  READY_WITH_KNOWN_ISSUES rather than laundering it green.
-- **Update (post-`1138849`):** I2 now has a fix branch
-  (`fix/utility-metric-structuring @ 1138849`, see I2). **I1 is the ONLY remaining
-  known full-suite failure**, still pending its own fix-or-quarantine triage.
+  (all reviewed branches merged) the full suite showed **exactly two failures — I1 and
+  I2 only; zero new failures** — accepted known exceptions at that time, surfaced via
+  READY_WITH_KNOWN_ISSUES rather than laundered green.
+- **Cleanup status:** with BOTH fix branches merged — `6081c76` (I1, test-only) and
+  `1138849` (I2, see below) — the previous full-suite known failures should be CLEARED
+  and a v2 integration candidate is expected to run fully green.
 
 ## I2. Utility metric label failure (`outage_reduction_target_percent`) — FIXED (`1138849`)
 - **What:** `tests/test_synthesis.py::test_utility_metrics_and_business_goals_are_structured`
