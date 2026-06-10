@@ -132,6 +132,15 @@ class Settings(BaseModel):
     job_completed_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv("ARCHWAY_JOB_COMPLETED_TTL_SECONDS", "3600")))
     job_failed_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv("ARCHWAY_JOB_FAILED_TTL_SECONDS", "21600")))
     job_max_retained: int = Field(default_factory=lambda: int(os.getenv("ARCHWAY_JOB_MAX_RETAINED", "500")))
+    # Frontier-model domain prior (advisory only). Default OFF -> deterministic
+    # Discovery Planner is the default; the model prior is an explicit opt-in and is
+    # quarantined to interview questions + a generic fallback-family candidate only.
+    enable_frontier_domain_prior: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_FRONTIER_DOMAIN_PRIOR", "false") == "true"
+    )
+    frontier_domain_prior_max_calls_per_session: int = Field(
+        default_factory=lambda: max(0, int(os.getenv("ARCHWAY_FRONTIER_DOMAIN_PRIOR_MAX_CALLS_PER_SESSION", "1")))
+    )
 
     @property
     def sessions_dir(self) -> Path:

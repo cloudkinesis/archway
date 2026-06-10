@@ -33,6 +33,7 @@ class UseCaseProfile:
     business_targets: list[str] = field(default_factory=list)
     confidence: str = "medium"
     discovery_plan: dict = field(default_factory=dict)
+    capability_decision: dict = field(default_factory=dict)
 
     @property
     def primary_family(self) -> str:
@@ -90,6 +91,7 @@ def profile_to_metadata(profile: UseCaseProfile) -> dict:
         "business_targets": profile.business_targets,
         "confidence": profile.confidence,
         "discovery_plan": profile.discovery_plan,
+        "capability_decision": profile.capability_decision,
     }
 
 
@@ -116,6 +118,7 @@ def profile_from_metadata(metadata: dict | None, raw_use_case: str) -> UseCasePr
         business_targets=list(values.get("business_targets") or []),
         confidence=values.get("confidence") or "medium",
         discovery_plan=dict(values.get("discovery_plan") or {}),
+        capability_decision=dict(values.get("capability_decision") or {}),
     )
     return refine_profile_with_context(profile, raw_use_case)
 

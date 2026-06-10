@@ -19,9 +19,23 @@ from app.models.domain import (
     UseCaseGap,
     UserPersona,
 )
+from app.services.capability_router import CapabilityRouter
 from app.services.discovery_planner import DiscoveryPlannerService
 from app.services.pattern_catalog import poc_scope, pricing_dimensions, production_scope
 from app.services.use_case_profile import profile_from_metadata, profile_to_metadata, profile_use_case, refine_profile_with_context
+
+
+def _attach_capability_decision(profile, raw_use_case: str) -> None:
+    """Attach the deterministic CapabilityRouter decision to the profile.
+
+    The advisory model prior (discovery_plan) is consumed read-only and can never set
+    the capability status. Never breaks synthesis.
+    """
+    try:
+        decision = CapabilityRouter().route(profile, getattr(profile, "discovery_plan", {}) or {}, raw_use_case=raw_use_case)
+        profile.capability_decision = decision.to_dict()
+    except Exception:  # noqa: BLE001 - routing metadata must never break synthesis
+        profile.capability_decision = {}
 
 
 class SynthesisEngine:
@@ -41,6 +55,7 @@ class SynthesisEngine:
             profile,
             previous_answers=[],
         ).model_dump(mode="json")
+        _attach_capability_decision(profile, raw_use_case)
         industry = profile.domain or _detect_industry(raw_use_case)
         sensitive = _looks_sensitive(raw_use_case, industry)
         title = _title_from_use_case(raw_use_case)
@@ -97,6 +112,7 @@ class SynthesisEngine:
             session_id=session_id,
         )
         profile.discovery_plan = plan.model_dump(mode="json")
+        _attach_capability_decision(profile, brief.raw_use_case)
         brief.use_case_profile = profile_to_metadata(profile)
         brief.open_questions = _questions_for_profile(profile)
         return brief
@@ -148,6 +164,7 @@ class SynthesisEngine:
             rerouted,
             previous_answers=[item.text for item in updated.assumptions if item.user_confirmed],
         ).model_dump(mode="json")
+        _attach_capability_decision(rerouted, updated.raw_use_case)
         profile_metadata = {**profile_to_metadata(rerouted), "interview": interview}
         updated.use_case_profile = profile_metadata
         updated.open_questions = _questions_for_profile(rerouted)

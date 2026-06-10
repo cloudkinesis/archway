@@ -1,5 +1,7 @@
 import pytest
 
+from app.core.config import get_settings
+from app.services.capability_router import reset_frontier_state
 from app.services.discovery_planner import DiscoveryPlan, DiscoveryPlannerService, DiscoveryQuestion, DiscoveryCandidate
 from app.services.llm.base import LLMResult
 from app.services.use_case_profile import UseCaseProfile, profile_use_case
@@ -82,6 +84,13 @@ async def test_async_planner_marks_ambiguity_on_llm_disagreement(monkeypatch):
         "RAG Q&A, clause extraction, obligation tracking, approval workflow, and audit trail."
     )
     profile = profile_use_case(use_case)
+    # The frontier prior is opt-in and only consulted when deterministic is NOT
+    # high-confidence-known (deterministic-known dominates). Enable the flag and force
+    # medium confidence so the advisory prior is consulted and disagreement is exercised.
+    profile.confidence = "medium"
+    monkeypatch.setenv("ARCHWAY_ENABLE_FRONTIER_DOMAIN_PRIOR", "true")
+    get_settings.cache_clear()
+    reset_frontier_state()
 
     async def fake_complete(self, task, messages, response_schema=None, temperature=0.2, max_tokens=None, timeout_seconds=None):
         return LLMResult(

@@ -1,14 +1,28 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.core.config import get_settings
+from app.services.capability_router import (
+    frontier_cache_get,
+    frontier_cache_set,
+    frontier_calls_made,
+    record_frontier_call,
+    screen_sensitivity,
+    stable_hash,
+)
 from app.services.llm.base import LLMMessage, LLMTask, LLMTaskType
 from app.services.llm.model_router import ModelRouter
 from app.services.pattern_catalog import PATTERNS, pricing_dimensions
 from app.services.use_case_profile import UseCaseProfile
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class DiscoveryQuestion(BaseModel):
@@ -42,6 +56,10 @@ class DiscoveryPlan(BaseModel):
     advisory_only: bool = True
     generated_by: str = "deterministic"
     warnings: list[str] = Field(default_factory=list)
+    # Frontier-model domain-prior provenance (advisory-only; quarantined). All model
+    # contributions are limited to questions + a fallback-family candidate.
+    model_prior_unverified: bool = False
+    prior_provenance: dict = Field(default_factory=dict)
 
 
 class DiscoveryPlannerService:
@@ -63,6 +81,49 @@ class DiscoveryPlannerService:
         session_id: str | None = None,
     ) -> DiscoveryPlan:
         fallback = self.plan_sync(raw_use_case, baseline_profile, known_domain_packs, previous_answers)
+        settings = get_settings()
+        input_hash = stable_hash(raw_use_case or "")
+        base_prov = {
+            "source": "deterministic",
+            "status": "disabled",
+            "advisory_only": True,
+            "used_for": "questions_and_fallback_mapping_only",
+            "model_id": None,
+            "sanitized_input_hash": input_hash,
+            "prompt_hash": None,
+            "response_hash": None,
+            "cache_hit": False,
+            "generated_at": _now_iso(),
+            "warnings": [],
+        }
+
+        # Gate 1 — flag OFF: deterministic Discovery Planner only (default).
+        if not settings.enable_frontier_domain_prior:
+            fallback.prior_provenance = base_prov
+            return fallback
+        # Gate 2 — deterministic-known DOMINATES: do not call the model.
+        if baseline_profile.confidence == "high" and baseline_profile.workload_families and baseline_profile.domain:
+            fallback.prior_provenance = {**base_prov, "status": "skipped_deterministic_known"}
+            return fallback
+        # Gate 3 — sensitivity screen: fail closed before any model call.
+        sensitive, reason = screen_sensitivity(raw_use_case)
+        if sensitive:
+            fallback.prior_provenance = {**base_prov, "status": "skipped_due_to_sensitivity",
+                                         "warnings": [f"frontier_domain_prior_skipped_due_to_sensitivity:{reason}"]}
+            fallback.warnings.append("frontier_domain_prior_skipped_due_to_sensitivity")
+            return fallback
+        # Gate 4 — within-session cache (reproducible per sanitized input).
+        cached = frontier_cache_get(session_id, input_hash)
+        if cached is not None:
+            merged = _merge_plan(fallback, DiscoveryPlan(**cached["llm_plan"]), baseline_profile)
+            merged.model_prior_unverified = True
+            merged.prior_provenance = {**cached["provenance"], "cache_hit": True}
+            return merged
+        # Gate 5 — per-session call cap.
+        if frontier_calls_made(session_id) >= settings.frontier_domain_prior_max_calls_per_session:
+            fallback.prior_provenance = {**base_prov, "source": "frontier_model", "status": "skipped_call_cap"}
+            return fallback
+
         payload = {
             "raw_use_case": raw_use_case,
             "deterministic_baseline_profile": {
@@ -86,61 +147,116 @@ class DiscoveryPlannerService:
                 "Prefer workload-specific pricing drivers over telemetry fallback unless the use case explicitly includes sensors, telemetry, logs, devices, or streaming metrics.",
             ],
         }
-        result = await ModelRouter().complete(
-            LLMTask(task_type=LLMTaskType.discovery_planner, session_id=session_id, name="discovery_planner"),
-            [
-                LLMMessage(
-                    role="system",
-                    content=(
-                        "You are Archway's discovery planner. Return JSON only. "
-                        "Use the deterministic baseline as the safety anchor. "
-                        "Your output is advisory and must not override pricing safety, governance, architecture validation, or diagrams. "
-                        "If a new domain appears, propose domain-specific pricing drivers and questions instead of telemetry defaults. "
-                        "If you disagree with the deterministic classifier, mark ambiguity and ask a clarification question."
-                    ),
+        messages = [
+            LLMMessage(
+                role="system",
+                content=(
+                    "You are Archway's discovery planner. Return JSON only. "
+                    "Use the deterministic baseline as the safety anchor. "
+                    "Your output is ADVISORY ONLY and must not override pricing safety, governance, architecture validation, or diagrams. "
+                    "Do not cite sources, do not claim verification, do not invent AWS documentation. "
+                    "Prefer asking for missing facts over assuming them, and state uncertainty explicitly. "
+                    "If you disagree with the deterministic classifier, mark ambiguity and ask a clarification question."
                 ),
-                LLMMessage(role="user", content=json.dumps(payload, default=str)[:22000]),
-            ],
-            response_schema=DiscoveryPlan,
-            temperature=0,
-            max_tokens=1800,
-            timeout_seconds=45,
-        )
+            ),
+            LLMMessage(role="user", content=json.dumps(payload, default=str)[:22000]),
+        ]
+        prompt_hash = stable_hash([m.content for m in messages])
+        try:
+            result = await ModelRouter().complete(
+                LLMTask(task_type=LLMTaskType.discovery_planner, session_id=session_id, name="discovery_planner"),
+                messages,
+                response_schema=DiscoveryPlan,
+                temperature=0,
+                max_tokens=1800,
+                timeout_seconds=45,
+            )
+        except Exception as exc:  # noqa: BLE001 - model failure must never crash synthesis
+            record_frontier_call(session_id)
+            fallback.warnings.append("frontier_domain_prior_failed")
+            fallback.prior_provenance = {
+                **base_prov, "source": "frontier_model", "status": "failed",
+                "prompt_hash": prompt_hash,
+                "warnings": [f"frontier_domain_prior_failed:{type(exc).__name__}"],
+            }
+            return fallback
+        # Only a real provider call counts against the per-session cap (deterministic
+        # no-op provider does not egress and does not consume budget).
+        if result.provider != "deterministic":
+            record_frontier_call(session_id)
+
         if result.validated and isinstance(result.parsed, DiscoveryPlan):
             merged = _merge_plan(fallback, result.parsed, baseline_profile)
             merged.generated_by = result.model_id or result.provider
             merged.warnings.extend(result.warnings)
+            merged.model_prior_unverified = True
+            provenance = {
+                "source": "frontier_model",
+                "status": "generated",
+                "advisory_only": True,
+                "used_for": "questions_and_fallback_mapping_only",
+                "model_id": result.model_id or result.provider,
+                "sanitized_input_hash": input_hash,
+                "prompt_hash": prompt_hash,
+                "response_hash": stable_hash(result.parsed.model_dump(mode="json")),
+                "cache_hit": False,
+                "generated_at": _now_iso(),
+                # Model domain/family guesses live ONLY here (clearly model-sourced),
+                # never in the authoritative deterministic plan fields.
+                "model_domain_candidates": [c.name for c in result.parsed.domain_candidates],
+                "model_workload_family_candidates": [c.name for c in result.parsed.workload_family_candidates],
+                "model_self_confidence_display_only": result.parsed.confidence,
+                "warnings": list(result.warnings),
+            }
+            merged.prior_provenance = provenance
+            frontier_cache_set(session_id, input_hash, {"llm_plan": result.parsed.model_dump(mode="json"), "provenance": provenance})
             return merged
+
         fallback.warnings.extend(result.warnings)
+        fallback.warnings.append("frontier_domain_prior_unavailable")
+        fallback.prior_provenance = {
+            **base_prov,
+            "source": "frontier_model",
+            "status": "unavailable",
+            "model_id": result.model_id,
+            "prompt_hash": prompt_hash,
+            "warnings": list(result.warnings) + ["frontier_domain_prior_unavailable"],
+        }
         return fallback
 
 
 def _merge_plan(fallback: DiscoveryPlan, llm_plan: DiscoveryPlan, baseline_profile: UseCaseProfile) -> DiscoveryPlan:
-    merged = llm_plan.model_copy(deep=True)
+    """Quarantined merge: the deterministic plan is the authoritative anchor.
+
+    The model may influence ONLY the interview questions (and, indirectly, push toward
+    a clarification question on disagreement). All other fields — pricing_drivers,
+    domain/family candidates, governance, data sources, entities, actions — remain
+    DETERMINISTIC so model guesses never become canonical facts or pricing/architecture
+    inputs. The model's own domain/family guesses are carried separately in
+    ``prior_provenance`` (clearly model-sourced) by the caller.
+    """
+    merged = fallback.model_copy(deep=True)
     merged.advisory_only = True
-    merged.pricing_drivers = list(dict.fromkeys(merged.pricing_drivers or fallback.pricing_drivers))
-    merged.primary_entities = merged.primary_entities or fallback.primary_entities
-    merged.primary_actions = merged.primary_actions or fallback.primary_actions
-    merged.data_sources = merged.data_sources or fallback.data_sources
-    merged.integrations = merged.integrations or fallback.integrations
-    merged.governance_concerns = merged.governance_concerns or fallback.governance_concerns
-    merged.not_relevant_patterns = list(dict.fromkeys((merged.not_relevant_patterns or []) + fallback.not_relevant_patterns))
-    merged.assumptions_to_avoid = list(dict.fromkeys((merged.assumptions_to_avoid or []) + fallback.assumptions_to_avoid))
-    if not merged.top_questions:
-        merged.top_questions = fallback.top_questions
+
+    # Allowed model influence: interview questions only.
+    if llm_plan.top_questions:
+        merged.top_questions = llm_plan.top_questions[:5]
+
+    # Ambiguity / disagreement pushes toward MORE caution (a clarification question),
+    # never toward "supported". This never upgrades confidence or classification.
     deterministic_domain = baseline_profile.domain
-    llm_domain = merged.domain_candidates[0].name if merged.domain_candidates else None
+    llm_domain = llm_plan.domain_candidates[0].name if llm_plan.domain_candidates else None
     deterministic_family = baseline_profile.workload_families[0] if baseline_profile.workload_families else None
-    llm_family = merged.workload_family_candidates[0].name if merged.workload_family_candidates else None
+    llm_family = llm_plan.workload_family_candidates[0].name if llm_plan.workload_family_candidates else None
     if (
         (deterministic_domain and llm_domain and deterministic_domain != llm_domain)
         or (deterministic_family and llm_family and deterministic_family != llm_family)
-        or merged.confidence == "low"
+        or llm_plan.confidence == "low"
     ):
         merged.ambiguity_detected = True
         merged.ambiguity_reason = merged.ambiguity_reason or (
             f"Deterministic classification ({deterministic_domain or 'unknown'} / {deterministic_family or 'unknown'}) "
-            f"and discovery planning ({llm_domain or 'unknown'} / {llm_family or 'unknown'}) do not fully agree."
+            f"and the advisory model prior ({llm_domain or 'unknown'} / {llm_family or 'unknown'}) do not fully agree."
         )
         merged.top_questions = [
             DiscoveryQuestion(
