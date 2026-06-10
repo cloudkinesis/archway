@@ -361,3 +361,34 @@ NOT independently on master. Review/merge bottom-up (foundation first).
   - Before merge: delete/reset the branch; no master impact.
   - To revert the commit directly: `git revert d338790`.
   - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.
+
+### fix/utility-metric-structuring — `1138849` (base: master baseline `f692c04`)
+- **Purpose:** fixes KNOWN_ISSUES **I2** — the utility outage-reduction profile metric
+  alias drift. The value was always extracted correctly (45.0, percent), but the
+  metric-extractor consolidation drifted the profile-level public label from
+  `outage_reduction_target_percent` to the structured extractor's
+  `unplanned_outage_reduction_percent`, causing the synthesis test KeyError. The fix
+  restores the historical public label via a backward-compatible alias at the
+  documented compatibility-view boundary, plus a minimal regex widening
+  (`reduce|reduces|reducing`) mirrored in BOTH extractors so they stay in agreement
+  (DECISIONS D1 doctrine).
+- **Files:** `app/services/metric_extractor.py` (1-line regex widening),
+  `app/services/use_case_profile.py` (`_PROFILE_BUSINESS_TARGET_ALIASES` + translation
+  at the compatibility boundary + mirrored regex), `tests/test_synthesis.py` (new
+  regression test: both phrasings, alias stability, no structured-key leak,
+  JSON-serializable).
+- **Safety:** the structured-extractor key `unplanned_outage_reduction_percent` is
+  UNCHANGED (its golden test still passes); only the profile compatibility view is
+  restored. No pricing / discovery-planner / frontend / diagram / SKU / dossier / MCP /
+  audit / domain-pack changes; neither label is consumed by name anywhere else in `app/`.
+- **Tests:** synthesis + golden metric extraction 10 passed; discovery/pricing trio 26
+  passed; healthcare anti-drift + scenario matrix 15 passed; **full suite now
+  144 passed / 1 failed — only I1 remains** (I2 eliminated; zero new failures).
+- **Merge status:** READY_FOR_CODEX_REVIEW — off baseline `f692c04`; not on master.
+  Known-failure cleanup branch (see MERGE_PLAN). Conflict watch: `use_case_profile.py`
+  is also edited by `feature/any-usecase-capability-router` — preserve BOTH the
+  `capability_decision` metadata and the outage metric alias on merge.
+- **Rollback:**
+  - Before merge: delete/reset the branch; no master impact.
+  - To revert the commit directly: `git revert 1138849`.
+  - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.

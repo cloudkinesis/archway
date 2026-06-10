@@ -145,6 +145,22 @@ Notes:
   `chore/internalize-diagram-compiler` (which appended `.tools/`) resolves trivially
   keep-both.
 
+## Stage 8 — Known-failure cleanup (pre-v2; merge with or after the rehearsal stack)
+19. `fix/utility-metric-structuring` (`1138849`, off baseline `f692c04`) — fixes
+    KNOWN_ISSUES I2 (utility outage-reduction profile metric alias drift). Restores the
+    profile-level public label `outage_reduction_target_percent` via a
+    backward-compatible alias; structured-extractor key unchanged. After this branch,
+    the only remaining known full-suite failure is I1. READY_FOR_CODEX_REVIEW.
+
+Notes:
+- **Conflict watch:** `app/services/use_case_profile.py` is also edited by
+  `feature/any-usecase-capability-router` (Stage 5 item 15). On merge, PRESERVE BOTH the
+  `capability_decision` metadata and the outage metric alias
+  (`_PROFILE_BUSINESS_TARGET_ALIASES` + the translation in `_extract_metrics`).
+- `metric_extractor.py` regex widening must stay mirrored with the
+  `_detect_business_targets` pattern in `use_case_profile.py` (the two extractors must
+  agree — DECISIONS D1).
+
 ## Deferred — not in this RC2 stabilization line
 - `experiment/domain-pack-interface` (`fe886af`) — DEFER until Codex review.
 - `feature/domain-pack-phase2-pricing-drivers` (`20eea81`) — DEFER until Codex review.

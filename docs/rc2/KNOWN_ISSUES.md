@@ -23,25 +23,37 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
   I2 only; zero new failures.** I1 remains OPEN (NOT fixed) and is an ACCEPTED KNOWN
   EXCEPTION for the RC2 rehearsal posture; the harness reports it via
   READY_WITH_KNOWN_ISSUES rather than laundering it green.
+- **Update (post-`1138849`):** I2 now has a fix branch
+  (`fix/utility-metric-structuring @ 1138849`, see I2). **I1 is the ONLY remaining
+  known full-suite failure**, still pending its own fix-or-quarantine triage.
 
-## I2. Utility metric label failure (`outage_reduction_target_percent`)
+## I2. Utility metric label failure (`outage_reduction_target_percent`) — FIXED (`1138849`)
 - **What:** `tests/test_synthesis.py::test_utility_metrics_and_business_goals_are_structured`
-  raised `KeyError: 'outage_reduction_target_percent'` in earlier runs.
-- **Status:** open if still present on a clean baseline run (verify; it was a
-  pre-existing baseline failure, not introduced by any fix branch).
-- **Severity:** low (metric label/extraction expectation; test-only signal).
-- **Branch if fixed:** none.
+  raised `KeyError: 'outage_reduction_target_percent'`.
+- **Status:** FIXED by `fix/utility-metric-structuring` @ `1138849` (off baseline
+  `f692c04`).
+- **Root cause:** metric-extractor consolidation drift — the value was always extracted
+  correctly (45.0, percent), but the profile-level public label drifted from
+  `outage_reduction_target_percent` to the structured extractor's
+  `unplanned_outage_reduction_percent` when the profile layer became a compatibility
+  view over the shared extractor (the exact two-extractor drift mode flagged in
+  DECISIONS D1).
+- **Resolution:** backward-compatible alias at the compatibility-view boundary restores
+  the profile-level public label; the structured-extractor key is UNCHANGED for its
+  direct consumers (golden metric-extraction tests still pass). Phrasing made
+  deterministic across `reduce|reduces|reducing`, mirrored in BOTH extractors so they
+  stay in agreement. Regression test added (alias stability, no structured-key leak,
+  JSON-serializable output).
+- **Severity:** low → resolved.
 - **Blocks internal pilot:** no.
-- **Next action:** confirm on a clean `f692c04` run; if real, scope a focused
-  metric-extraction fix branch (do NOT fold into unrelated branches).
-- **Update:** re-confirmed pre-existing on a clean `f692c04` stash during the
-  `feature/any-usecase-capability-router` work; still OPEN and deliberately NOT chased
-  in that branch (excluded from its green run).
-- **RC2 rehearsal note (2026-06-10):** still failing on
-  `integration/rc2-golden-rehearsal @ ee534db` — together with I1 these are the ONLY
-  two full-suite failures (363 passed / 2 failed / 0 new). I2 remains OPEN (NOT fixed)
-  and is an ACCEPTED KNOWN EXCEPTION for the RC2 rehearsal posture, pending the focused
-  metric-extraction fix branch.
+- **Earlier history:** re-confirmed pre-existing on clean `f692c04` stashes during the
+  capability-router work and on `integration/rc2-golden-rehearsal @ ee534db` (where it
+  was one of the only two full-suite failures, accepted as a known exception).
+- **Post-fix note:** with `1138849`, the full suite on a baseline-based branch shows
+  **144 passed / 1 failed — only I1 remains** from the previous known failures.
+- **Merge note:** `use_case_profile.py` is also edited by
+  `feature/any-usecase-capability-router` — on merge preserve BOTH the
+  `capability_decision` metadata and the outage metric alias.
 
 ## I3. Audit-log robustness (`read_session_logs`) — FIXED (`db77e0c`)
 - **What:** `app/core/logging.py` `json.loads(line)` over `audit.jsonl` had no

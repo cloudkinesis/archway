@@ -80,3 +80,9 @@ off `f692c04`; see BRANCH_LEDGER + MERGE_PLAN "RC2 golden rehearsal — COMPLETE
 
 Remaining for full Golden: Codex/human review of `integration/rc2-golden-rehearsal`
 (Posture checkpoint above), and the I1/I2 triage decision (fix or formally quarantine).
+
+**Follow-up (post-rehearsal):** I2 now has a fix branch —
+`fix/utility-metric-structuring @ 1138849` (profile metric alias restored; full suite on
+a baseline-based branch: 144 passed / 1 failed). The `ee534db` rehearsal result above is
+UNCHANGED (it predates this fix and is not retroactively green). **The remaining known
+full-suite failure is I1 only**, still pending its fix-or-quarantine triage.
