@@ -220,3 +220,33 @@ NOT independently on master. Review/merge bottom-up (foundation first).
   - Before merge: delete/reset the branch; no master impact.
   - To revert the commit directly: `git revert 445c6de`.
   - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.
+
+### fix/healthcare-diagram-crossings — `8d07ac0` (base: master baseline `f692c04`)
+- **Purpose:** diagram-quality fix — introduces a reusable `DomainLaneModel` framework
+  and a healthcare OR lane adapter so the production logical service-flow diagram passes
+  the existing crossing gate (14 → ≤8) without weakening QA. Generic IoT/telemetry lane
+  planning stays the unchanged fallback for non-specialized domains.
+- **Files:** `app/services/lane_planner.py` (new domain-aware lane framework +
+  `HEALTHCARE_OPERATIONS_LANE_MODEL`), `app/services/pattern_catalog.py` (select the
+  domain model else generic fallback; route the healthcare governance/observability
+  fan-out to a detail-only sidecar), new `tests/test_healthcare_diagram_crossings.py`. No
+  external diagram-compiler / pricing / research / synthesis / discovery / frontend / SKU /
+  dossier / MCP / audit files touched.
+- **Safety:** no external compiler changes (its crossing/readability gates remain
+  authoritative); crossing threshold remains 8 (`logical_edge_crossing_max`); healthcare
+  semantics preserved (approval write-back, PHI/security, audit/governance sidecar, no IoT
+  leakage); governance fan-out is PRESERVED (moved to detail-only and recorded in flow
+  metadata — never dropped); generic fallback byte-identical for non-healthcare; no
+  generated SVG/PNG/D2/export artifacts committed (DECISIONS D16).
+- **Tests:** 30 focused healthcare/scenario tests passed post-commit (new crossing suite
+  10 + healthcare anti-drift/operations 12 + scenario matrix 8). Full-branch verification:
+  152 passed / 2 pre-existing known failures (KNOWN_ISSUES I1/I2, re-confirmed on a clean
+  `f692c04` stash; not introduced here).
+- **Merge status:** READY_FOR_CODEX_REVIEW — off baseline `f692c04`; not on master.
+  Stage 6 in MERGE_PLAN (before final validation). Conflict risk in `pattern_catalog.py`
+  (also edited by `fix/typed-effectful-flow-detection` and the capability-router/domain-pack
+  branches) and the new `lane_planner.py`.
+- **Rollback:**
+  - Before merge: delete/reset the feature branch; no master impact.
+  - To revert the commit directly: `git revert 8d07ac0`.
+  - To revert a later `--no-ff` merge into master/integration: `git revert -m 1 <merge_commit_sha>`.

@@ -186,3 +186,22 @@ Implemented by `feature/any-usecase-capability-router` @ `445c6de`.
   deterministic fallback — the use case is not blocked.
 - The frontier prior is OFF by default (`ARCHWAY_ENABLE_FRONTIER_DOMAIN_PRIOR=false`,
   per-session cap `=1`); default behavior is fully deterministic and reproducible.
+
+## D16. Diagram quality uses domain-aware lane adapters without loosening compiler gates
+Implemented by `fix/healthcare-diagram-crossings` @ `8d07ac0`.
+- The external diagram compiler's crossing/readability QA gates remain AUTHORITATIVE
+  (`logical_edge_crossing_max = 8`, etc.). Archway improves the semantic PLACEMENT inputs
+  it feeds the compiler; it must NOT weaken QA thresholds or suppress warnings to pass
+  (reinforces D6).
+- `DomainLaneModel` (`app/services/lane_planner.py`) is the adapter point for
+  domain-specific lane placement: it maps a domain's components onto the
+  compiler-recognized semantic lanes in the correct flow order, while preserving friendly
+  semantic-group names for the dossier/metadata. Every lane MUST map to a recognized
+  compiler lane label — no one-off, per-use-case string hacks.
+- Healthcare OR is the FIRST adapter. Unknown / non-specialized domains keep the GENERIC
+  lane fallback unchanged (behavior byte-identical to baseline).
+- Dense governance / audit / observability fan-out may be moved to detail-only / sidecar
+  views ONLY when the flows are PRESERVED and metadata records the detail-only route
+  (`logical_detail_only`) — never silently dropped.
+- A diagram that cannot pass must degrade HONESTLY (report the QA finding / missing view
+  with a reason), not hide warnings.

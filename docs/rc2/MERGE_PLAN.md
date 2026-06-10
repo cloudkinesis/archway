@@ -74,6 +74,24 @@ Notes:
 - During merge, PRESERVE: (a) the **model-prior quarantine** (model influence limited to questions + generic fallback candidate; deterministic anchor in `_merge_plan`), and (b) the **pricing-driver leakage fix** (`discovery_plan.pricing_drivers` is deterministic-only and must not be re-opened to model output). Keep the flag default-off and the deterministic-known dominance gate intact.
 - Additive metadata only (`profile.capability_decision`); no pricing/architecture/governance/diagram behavior change.
 
+## Stage 6 — Diagram quality (domain-aware lane adapters; BEFORE final validation / golden export)
+16. `fix/healthcare-diagram-crossings` (`8d07ac0`, off baseline `f692c04`) — reusable
+    `DomainLaneModel` framework + healthcare OR lane adapter; the production logical
+    service-flow diagram passes the unchanged 8-crossing gate (14 → ≤8) without weakening
+    QA (DECISIONS D16). Generic lane fallback unchanged. READY_FOR_CODEX_REVIEW.
+
+Notes:
+- Sequence: merge AFTER core discovery/pattern changes (Stage 5 + any domain-pack work,
+  which also touch `pattern_catalog.py`) and BEFORE the final golden export validation /
+  integration rehearsal — so the cleaner diagrams are what the golden export validates.
+- **Conflict risk** in `app/services/pattern_catalog.py` (also edited by Stage 1 item 5
+  `fix/typed-effectful-flow-detection` and the capability-router / domain-pack branches)
+  and the new `app/services/lane_planner.py`. Resolve by PRESERVING the `DomainLaneModel`
+  framework + healthcare adapter AND the healthcare governance detail-only routing.
+- Do NOT loosen the external compiler thresholds. The external diagram compiler remains a
+  SEPARATE package for now — unless a later internalization branch is explicitly accepted.
+- No generated SVG/PNG/D2/export artifacts may be committed.
+
 ## Deferred — not in this RC2 stabilization line
 - `experiment/domain-pack-interface` (`fe886af`) — DEFER until Codex review.
 - `feature/domain-pack-phase2-pricing-drivers` (`20eea81`) — DEFER until Codex review.

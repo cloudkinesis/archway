@@ -82,16 +82,27 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
   `mcp_security` diagnostics/export payloads alongside `audit_log` and dossier/SKU
   exports.
 
-## I5. Healthcare diagram crossings / placement QA
-- **What:** domain-specific diagram placement/crossing QA findings independent of
-  icon embedding.
-- **Status:** open.
-- **Severity:** low-medium (presentation quality, not correctness; reported, not
-  masked).
-- **Branch if fixed:** none.
+## I5. Healthcare diagram crossings / placement QA — FIXED (`8d07ac0`)
+- **What:** the healthcare OR production logical service-flow diagram rendered with 14
+  visible edge crossings against a gate of 8 — the generic IoT/telemetry lane planner
+  mis-grouped clinical components and the governance/observability fan-out crisscrossed the
+  primary view. (Domain-specific placement/crossing QA, independent of icon embedding.)
+- **Status:** FIXED by `fix/healthcare-diagram-crossings` @ `8d07ac0` (off baseline
+  `f692c04`).
+- **Resolution:** a reusable `DomainLaneModel` framework (`app/services/lane_planner.py`)
+  with a healthcare OR lane adapter places clinical components into ordered lanes
+  (Clinical Source Systems → Private Integration → PHI-safe Operational State → Decision
+  Intelligence → Approval & Command Center) and routes the governance/observability fan-out
+  into a detail-only sidecar (`logical_detail_only`, flows preserved). The production
+  logical healthcare OR crossing count now PASSES the UNCHANGED 8-crossing gate
+  (DECISIONS D16). Healthcare semantics preserved: approval write-back path, PHI/security
+  posture, audit/governance sidecar, no IoT leakage. The generic lane fallback is unchanged
+  for non-healthcare domains.
+- **Severity:** low-medium → resolved.
 - **Blocks internal pilot:** no.
-- **Next action:** track against the D2 compiler view catalog; ensure missing/
-  degraded views are reported with reasons (they are) rather than silently dropped.
+- **Merge note:** touches `app/services/pattern_catalog.py` (also edited by
+  `fix/typed-effectful-flow-detection` and the capability-router/domain-pack branches) and
+  the new `app/services/lane_planner.py`; see MERGE_PLAN Stage 6.
 
 ## I6. Frontend monolith
 - **What:** ~2,190 lines in `frontend/src/components/App.tsx` (~82% of frontend TS).
@@ -211,3 +222,20 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
 - **Next action:** treat unknown-domain output as directional; invest in specialized
   packs per vertical over time (I7). The frontier model prior is advisory-only and
   cannot upgrade an unknown domain to `supported`.
+
+## I14. Additional domain lane adapters are future work
+- **What:** the `DomainLaneModel` framework (DECISIONS D16,
+  `fix/healthcare-diagram-crossings` @ `8d07ac0`) ships ONE adapter (healthcare OR). Other
+  domains still use the GENERIC lane fallback, so some non-healthcare scenarios can still
+  exceed the crossing gate — e.g. `aml_graph` has a PRE-EXISTING production-logical
+  crossing issue (22 crossings on baseline `f692c04`, unchanged by this branch) and is a
+  natural next adapter candidate.
+- **Status:** open / by-design scope limit (the framework is the reusable path; only the
+  healthcare adapter is implemented in this branch).
+- **Severity:** low-medium (presentation quality for un-adapted domains; reported, not
+  masked).
+- **Branch if fixed:** partial — `fix/healthcare-diagram-crossings` (healthcare only).
+- **Blocks internal pilot:** no.
+- **Next action:** add domain lane adapters per vertical over time (start with
+  `aml_graph`), each mapping to recognized compiler lanes; never loosen the compiler gate.
+  Unknown domains continue to use the generic lane fallback.
