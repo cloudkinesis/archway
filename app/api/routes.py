@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from app.core.config import get_settings
 from app.core.logging import AuditLogger, hash_payload, read_session_logs
 from app.db.session_store import SessionStore
 from app.models.domain import ArchitectureSpec, DiagramGalleryResult, ResearchReport, SessionPhase, SessionStatus
@@ -19,6 +20,7 @@ from app.services.deep_dossier import DeepDossierService
 from app.services.diagram_compiler_adapter import DiagramCompilerAdapter
 from app.services.health import HealthService
 from app.services.jobs import job_manager
+from app.services.mcp_security import mcp_security_status
 from app.services.export_package import ExportPackageService
 from app.services.golden_regression import GoldenRegressionExportService
 from app.services.governance_controls import GovernanceControlEnricher
@@ -128,6 +130,7 @@ async def hydrate_session(session_id: str):
         "diagnostics": {
             "logs": read_session_logs(session_id),
             "latest_export": latest_export,
+            "mcp_security": mcp_security_status(get_settings()),
         },
     }
 
@@ -535,7 +538,8 @@ async def get_artifact(session_id: str, artifact_id: str):
 @router.get("/sessions/{session_id}/diagnostics")
 async def diagnostics(session_id: str):
     _require_session(session_id)
-    return {"logs": read_session_logs(session_id), "health": await HealthService().check()}
+    return {"logs": read_session_logs(session_id), "health": await HealthService().check(),
+            "mcp_security": mcp_security_status(get_settings())}
 
 
 @router.get("/sessions/{session_id}/export")

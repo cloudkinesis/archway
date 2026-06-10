@@ -92,6 +92,25 @@ class Settings(BaseModel):
     enable_aws_official_web_fallback: bool = Field(
         default_factory=lambda: os.getenv("ARCHWAY_ENABLE_AWS_OFFICIAL_WEB_FALLBACK", "false") == "true"
     )
+    # MCP endpoint trust controls. Tokens are only ever attached to trusted endpoints:
+    # localhost + private network by default; external hosts must be explicitly
+    # allowlisted (or globally opted-in). Arbitrary external hosts are fail-closed.
+    mcp_allow_localhost: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_MCP_ALLOW_LOCALHOST", "true") == "true"
+    )
+    mcp_allow_private_network: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_MCP_ALLOW_PRIVATE_NETWORK", "true") == "true"
+    )
+    mcp_allow_external: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_MCP_ALLOW_EXTERNAL", "false") == "true"
+    )
+    mcp_allowed_hosts: list[str] = Field(
+        default_factory=lambda: [
+            item.strip().lower()
+            for item in os.getenv("ARCHWAY_MCP_ALLOWED_HOSTS", "").split(",")
+            if item.strip()
+        ]
+    )
     aws_price_list_bulk_index_url: str = Field(
         default_factory=lambda: os.getenv(
             "ARCHWAY_AWS_PRICE_LIST_BULK_INDEX_URL",
