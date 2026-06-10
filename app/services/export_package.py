@@ -372,7 +372,8 @@ class ExportPackageService:
             return "# Pricing\n\nNo pricing estimate was available at export time.\n"
         metadata = pricing.get("metadata") or {}
         closure = metadata.get("pricing_driver_closure") or {}
-        headline_safe = metadata.get("pricing_can_be_displayed_as_headline", True) is not False
+        # Fail closed: a missing flag must mean "not headline-safe". Explicit True is preserved.
+        headline_safe = metadata.get("pricing_can_be_displayed_as_headline", False) is not False
         if headline_safe:
             headline_lines = [
                 f"Estimated monthly range: ${pricing.get('low_monthly_usd')}-${pricing.get('high_monthly_usd')}",
