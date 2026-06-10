@@ -18,9 +18,26 @@ class ArchitectureRevisionService:
         self.governance = GovernanceControlEnricher()
 
     def initialize(self, session_id: str, specs: list[ArchitectureSpec], reason: str = "Generated architecture specs") -> ArchitectureRevision:
+        """Idempotent first-time setup: create revision 1 only if none exists.
+
+        If a revision already exists this returns the latest one unchanged. Use
+        ``record_generation`` for the architecture-generation flow, which must
+        always append a new revision.
+        """
         revisions = self.list(session_id)
         if revisions:
             return revisions[-1]
+        return self._append(session_id, specs, reason)
+
+    def record_generation(self, session_id: str, specs: list[ArchitectureSpec], reason: str = "Generated architecture revision") -> ArchitectureRevision:
+        """Persist freshly generated specs as a NEW revision (always appends).
+
+        Each call to ``/architecture/generate`` is an explicit user action, so the
+        newly generated specs must become a new, active revision rather than being
+        discarded when a prior revision exists (the previous ``initialize`` bug).
+        Earlier revisions remain accessible via ``list``; ``active_specs`` returns
+        this newest revision so diagrams compile from current specs.
+        """
         return self._append(session_id, specs, reason)
 
     def list(self, session_id: str) -> list[ArchitectureRevision]:
@@ -51,14 +68,28 @@ class ArchitectureRevisionService:
             return revisions[-1] if revisions else None
         return self._append(session_id, enriched, reason)
 
-    def regenerate_from_active(self, session_id: str, reason: str = "Regenerated architecture revision") -> ArchitectureRevision:
+    def duplicate_active_revision(self, session_id: str, reason: str = "Duplicated active architecture revision") -> ArchitectureRevision:
+        """Append a duplicate of the active revision. This is a COPY, not a
+        re-derivation: it deep-copies the current active specs and records them
+        as a new revision tagged ``duplicated_from_active``. It does not re-run
+        the planner, critique, or repair. To re-derive architecture from research,
+        call ``/architecture/generate`` again (which appends a fresh revision).
+        """
         current = self.active_specs(session_id)
         if current is None:
             raise ValueError("Architecture specs are not ready yet.")
-        regenerated = [spec.model_copy(deep=True) for spec in current]
-        for spec in regenerated:
-            spec.metadata = {**spec.metadata, "regenerated_from_user_edits": True}
-        return self._append(session_id, regenerated, reason)
+        duplicated = [spec.model_copy(deep=True) for spec in current]
+        for spec in duplicated:
+            spec.metadata = {**spec.metadata, "duplicated_from_active": True}
+        return self._append(session_id, duplicated, reason)
+
+    def regenerate_from_active(self, session_id: str, reason: str = "Duplicated active architecture revision") -> ArchitectureRevision:
+        """Deprecated alias for ``duplicate_active_revision`` (kept for compatibility).
+
+        The historical name was misleading: this only duplicates the active
+        revision, it does not regenerate from research.
+        """
+        return self.duplicate_active_revision(session_id, reason)
 
     def validate(self, specs: list[ArchitectureSpec]) -> list[ArchitectureValidationIssue]:
         issues: list[ArchitectureValidationIssue] = []

@@ -312,7 +312,7 @@ export interface DiagramGalleryResult {
   qa_reports: Array<{ view_id: string; passed: boolean; diagnostics: unknown[]; metrics: Record<string, unknown> }>;
 }
 
-export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancel_requested";
+export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancel_requested" | "cancelled";
 
 export interface JobRun {
   id: string;
@@ -324,6 +324,8 @@ export interface JobRun {
   duration_seconds?: number | null;
   error?: string | null;
   result_path?: string | null;
+  cancellation_requested?: boolean;
+  cancellation_status?: string | null;
 }
 
 export interface ExportBundle {

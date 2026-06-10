@@ -108,6 +108,10 @@ class Settings(BaseModel):
     bedrock_temperature_default: float = Field(default_factory=lambda: float(os.getenv("ARCHWAY_BEDROCK_TEMPERATURE_DEFAULT", "0.2")))
     bedrock_enable_structured_output: bool = Field(default_factory=lambda: os.getenv("ARCHWAY_BEDROCK_ENABLE_STRUCTURED_OUTPUT", "true") == "true")
     max_request_bytes: int = 64_000
+    # In-memory job lifecycle TTL/eviction (best-effort cleanup of terminal jobs).
+    job_completed_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv("ARCHWAY_JOB_COMPLETED_TTL_SECONDS", "3600")))
+    job_failed_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv("ARCHWAY_JOB_FAILED_TTL_SECONDS", "21600")))
+    job_max_retained: int = Field(default_factory=lambda: int(os.getenv("ARCHWAY_JOB_MAX_RETAINED", "500")))
 
     @property
     def sessions_dir(self) -> Path:
