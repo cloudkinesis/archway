@@ -421,3 +421,42 @@ NOT independently on master. Review/merge bottom-up (foundation first).
   - Before merge: delete/reset the branch; no master impact.
   - To revert the commit directly: `git revert 6081c76`.
   - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.
+
+### feature/capability-accelerator-packs-network-hcm — `1fc93de` (base: feature/any-usecase-capability-router @ `445c6de`)
+- **Purpose:** adds ADVISORY capability accelerator packs for intake/question quality —
+  `network_security_observability` (network telemetry / security ops / observability /
+  collaboration analytics) and `hcm_payroll_workforce` (HCM / payroll / time-and-
+  attendance / workforce management). Post-RC2 NEXT-WAVE branch; NOT part of
+  `integration/rc2-golden-rehearsal-v2`. Implements DECISIONS D18 (accelerators vs
+  domain packs vs lane models).
+- **Files:** new `app/services/capability_accelerator_packs.py` (frozen-dataclass
+  schema, 2 packs, weighted deterministic matcher with negative guards, import-time
+  validation of fallback families) and `tests/test_capability_accelerator_packs.py`
+  (17 tests); edits to `app/services/capability_router.py` (record-level HCM
+  sensitivity markers, additive `capability_accelerators` decision field, flag-gated
+  enrichment inside `route()` only) and `app/core/config.py` (1 flag).
+- **Safety:**
+  - `ARCHWAY_ENABLE_CAPABILITY_ACCELERATOR_PACKS` default OFF; flag-off serialized
+    route output is byte/shape equivalent (empty accelerator list stripped).
+  - Company names (Cisco/ADP/Workday/Meraki/…) are CONTEXT VOCABULARY only — pack
+    identities are capability domains, never companies.
+  - All fallback families validated against `GENERIC_FALLBACK_FAMILIES` at import time;
+    a pack declaring an unknown family fails loudly.
+  - Advisory-only metadata/questions: fallback candidate fills the void ONLY when the
+    deterministic fallback is `unknown_directional` (deterministic > pack > model-prior
+    > default); no pricing quantities/readiness changes; no architecture
+    service-selection changes; no known-domain overrides (healthcare/IoT/payment/legal
+    proven identical flag-on/off); record-level HCM markers (pay statement / payroll
+    record / employee SSN / direct deposit / …) skip the model prior, bare topic words
+    do not block valid HCM use cases.
+- **Tests:** accelerators + router + discovery 41 passed; healthcare anti-drift +
+  scenario matrix 15 passed; pricing trio 21 passed; full suite on this ancestry
+  178 passed / 2 pre-existing failures (I1/I2 — fixed on their own branches outside
+  this ancestry).
+- **Merge status:** READY_FOR_CODEX_REVIEW — stacked branch; merge ONLY after
+  `feature/any-usecase-capability-router @ 445c6de`. Review after the RC2 Golden
+  candidate is stable (see MERGE_PLAN next-wave section).
+- **Rollback:**
+  - Before merge: delete/reset the branch; no master impact.
+  - To revert the commit directly: `git revert 1fc93de`.
+  - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.

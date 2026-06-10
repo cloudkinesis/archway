@@ -229,3 +229,38 @@ Implemented by `chore/internalize-diagram-compiler` @ `4368266`.
   (`.tools/d2/d2`, gitignored — as it was in the external repo). Its absence must degrade
   HONESTLY: `.d2` artifacts are still produced and QA reports `d2_executable_not_found` /
   `missing_render_artifact`; nothing is silently faked (see KNOWN_ISSUES I15).
+
+## D18. Capability accelerators, domain packs, and lane models have separate responsibilities
+Implemented (first accelerator wave) by `feature/capability-accelerator-packs-network-hcm`
+@ `1fc93de`. Archway has three pack-like subsystems; each has ONE job, and the taxonomy
+below is what prevents them from becoming overlapping bloat:
+- **Capability accelerator packs** are for INTAKE HINTS only:
+  - better next-best questions,
+  - missing-fact prompts,
+  - advisory sensitivity/governance notes,
+  - a generic fallback-family candidate (used only when the deterministic fallback is
+    `unknown_directional`, validated against `GENERIC_FALLBACK_FAMILIES`),
+  - dossier notes.
+- **Domain packs** (D5; experiment branches) are for DEEPER VERTICAL LOGIC:
+  - domain-specific vocabulary,
+  - pricing-driver vocabulary,
+  - presentation wording,
+  - future vertical behavior migration (flag-gated, parity-preserving).
+- **Lane models** (D16; `DomainLaneModel`) are for DIAGRAM PLACEMENT/READABILITY:
+  - logical grouping,
+  - layout hints,
+  - domain-specific diagram lanes mapped onto compiler-recognized lane labels.
+- NONE of these systems may own:
+  - global readiness,
+  - procurement safety,
+  - pricing math or pricing quantities,
+  - governance enforcement,
+  - citation/evidence authority,
+  - final architecture truth.
+  The deterministic pipeline (CapabilityRouter, pricing gates, governance controls,
+  diagram QA) remains the sole authority (reinforces D7/D15).
+- Company names (Cisco, ADP, Workday, …) are CONTEXT VOCABULARY in accelerator
+  trigger matching — never pack identities and never product/customer-specific packs.
+  The first two accelerators (`network_security_observability`,
+  `hcm_payroll_workforce`) are advisory and flag-gated
+  (`ARCHWAY_ENABLE_CAPABILITY_ACCELERATOR_PACKS`, default OFF).

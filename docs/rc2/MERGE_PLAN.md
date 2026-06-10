@@ -171,6 +171,24 @@ Notes:
   `_detect_business_targets` pattern in `use_case_profile.py` (the two extractors must
   agree — DECISIONS D1).
 
+## Next wave — post-RC2 accelerators (NOT part of integration/rc2-golden-rehearsal-v2)
+- `feature/capability-accelerator-packs-network-hcm` (`1fc93de`, stacked on
+  `feature/any-usecase-capability-router @ 445c6de`) — advisory capability accelerator
+  packs for network/security/observability and HCM/payroll/workforce intake
+  (DECISIONS D18). READY_FOR_CODEX_REVIEW.
+  - **Do NOT include in `integration/rc2-golden-rehearsal-v2`.** The v2 candidate is
+    stabilization-only (full-green suite); this is new product intelligence. Review
+    after the RC2 Golden candidate is stable.
+  - Merge ONLY after `feature/any-usecase-capability-router @ 445c6de` (stacked — it
+    imports the router's `GENERIC_FALLBACK_FAMILIES` and `route()` integration).
+  - **Conflict watch:** `app/core/config.py` (flag-heavy file also touched by SKU/MCP/
+    router branches — keep-both) and `app/services/capability_router.py` (also the
+    router branch's own file; stacked ancestry resolves this naturally).
+  - **Preserve on merge:** flag default OFF; advisory-only metadata (flag-off route
+    output byte/shape equivalent); import-time-validated fallback families; the
+    deterministic > pack > model-prior > default fallback ranking; no pricing/
+    readiness/architecture leakage (the flag-on/off equality tests are the proof).
+
 ## Deferred — not in this RC2 stabilization line
 - `experiment/domain-pack-interface` (`fe886af`) — DEFER until Codex review.
 - `feature/domain-pack-phase2-pricing-drivers` (`20eea81`) — DEFER until Codex review.

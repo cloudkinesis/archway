@@ -254,6 +254,12 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
 - **Next action:** treat unknown-domain output as directional; invest in specialized
   packs per vertical over time (I7). The frontier model prior is advisory-only and
   cannot upgrade an unknown domain to `supported`.
+- **Accelerator-pack note (`1fc93de`, next-wave — NOT a blocker):** capability
+  accelerator packs (`network_security_observability`, `hcm_payroll_workforce`;
+  DECISIONS D18) are advisory INTAKE improvements — better questions and fallback
+  hints only. They are NOT proof of full domain specialization: unknown domains still
+  route to directional/generic unless a real domain pack or deterministic pattern
+  exists. I13 remains intact and by-design.
 
 ## I14. Additional domain lane adapters are future work
 - **What:** the `DomainLaneModel` framework (DECISIONS D16,
