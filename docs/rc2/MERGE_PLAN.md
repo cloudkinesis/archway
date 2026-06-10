@@ -205,6 +205,19 @@ Notes:
     families; word-boundary context matching; RECORD-level-only sensitivity markers
     (topic words never skip the model prior); no pricing/readiness/architecture
     leakage.
+- `feature/architecture-decision-records` (`ac3d86b`, stacked on
+  `chore/remove-fixed-known-failures @ 6760cc1`) — deterministic Architecture Decision
+  Records in dossier exports (DECISIONS D19). READY_FOR_CODEX_REVIEW.
+  - **Do NOT include in the frozen RC2 v2 candidate.** Merge after the v2 +
+    known-failures-cleanup line, if accepted.
+  - **Conflict watch:** `app/services/export_package.py` (the historically
+    conflict-heavy export file — the ADR block is additive inside
+    `_write_dossier_layer`) and `app/services/dossier_manifest.py` (additive optional
+    parameter).
+  - **Preserve on merge:** the NO-INVENTION ADR contract (catalog-verbatim
+    alternatives, null trade-off axes without deterministic backing, no model prose);
+    manifest hashing of ADR artifacts via the inventory; verifier coverage (tamper
+    detection); the global-vs-SKU-pilot pricing/readiness separation.
 
 ## Deferred — not in this RC2 stabilization line
 - `experiment/domain-pack-interface` (`fe886af`) — DEFER until Codex review.

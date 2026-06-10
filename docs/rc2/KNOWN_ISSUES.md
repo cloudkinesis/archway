@@ -306,3 +306,25 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
 - **Next action:** optionally add a small setup script / README note that downloads or
   copies a pinned `d2` version into `.tools/d2/`; pin the d2 version in SOURCE.md if
   renderer output ever needs byte-stable reproducibility across machines.
+
+## I16. Trade-off / uncertainty / reviewer upgrades are future work (next-wave; NOT RC2 v2 blockers)
+- **What:** an external review identified three highest-impact upgrades toward a
+  "pressure-test the answer" workbench. Status:
+  - **Decision records: IMPLEMENTED** by `feature/architecture-decision-records`
+    @ `ac3d86b` (deterministic ADRs in dossier exports; DECISIONS D19).
+  - **Semantic scenario recomputation / true what-if simulation** (cost, scale,
+    resilience, compliance deltas via deterministic re-runs with perturbed inputs)
+    remains FUTURE WORK.
+  - **Unified uncertainty map** (per-section/per-decision confidence rollup over the
+    existing scattered signals — research quality, citation coverage, assumption
+    ledger, ADR confidence/evidence-class fields) remains FUTURE WORK.
+  - **Reviewer mode** (consolidated pre-export pass over weak claims, brittle
+    assumptions, and over-patterned recommendations, assembling the existing critique/
+    quality-findings/consistency-check machinery) remains FUTURE WORK.
+- **Status:** open / by-design scope limit. These are next-wave product upgrades, NOT
+  blockers for the frozen RC2 v2 candidate.
+- **Severity:** low (product depth, not correctness).
+- **Blocks internal pilot:** no.
+- **Next action:** sequence reviewer mode (mostly integration of existing findings +
+  the new ADR fields), then deterministic what-if recomputation; keep both outside the
+  v2 line and behind the usual branch-per-change discipline.

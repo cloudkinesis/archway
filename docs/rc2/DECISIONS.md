@@ -267,3 +267,26 @@ below is what prevents them from becoming overlapping bloat:
 - Wave-2 accelerators (`d3d7242`) extend advisory intake coverage for firewall/SecOps,
   smart spaces/location IoT, open banking/payments, and financial-crime/risk operations
   without changing readiness, pricing, governance, or architecture authority.
+
+## D19. Architecture Decision Records explain deterministic decisions; they do not invent recommendations
+Implemented by `feature/architecture-decision-records` @ `ac3d86b`.
+- ADRs are generated from DETERMINISTIC Archway data only:
+  - catalog rationale and catalog alternatives,
+  - research service-validation notes,
+  - pricing evidence classes and driver closure,
+  - typed governance controls / effectful-flow metadata,
+  - diagram QA findings,
+  - readiness metadata.
+- ADRs must NOT use LLM/model-generated prose. Generation is a pure function with no
+  model/router imports (test-enforced).
+- ADRs must NOT invent alternatives: `alternatives_considered` is catalog-verbatim;
+  an empty catalog tuple means no component ADR is fabricated.
+- ADRs must NOT invent trade-offs: trade-off axes are NULL unless backed by
+  deterministic data (e.g. a pricing-ledger evidence class, governed-flow counts);
+  `comparison_note` may only quote an existing research service-validation note.
+- ADR `confidence` is scoped to the decision being described and must NOT imply
+  procurement-ready pricing (reinforces D2/D3).
+- Pricing-readiness ADRs remain SEPARATE from component/service ADRs, and keep
+  global readiness separate from SKU-pilot readiness (reinforces D10/D12).
+- ADR artifacts are DOSSIER artifacts: manifest-hashed via the artifact inventory and
+  covered by the offline verifier (tamper detection is test-proven).
