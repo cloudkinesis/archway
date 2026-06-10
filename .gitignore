@@ -34,6 +34,9 @@ build/
 dist/
 *.zip
 
+# Local tool installs (d2 renderer binary etc.) — never committed
+.tools/
+
 # Frontend
 node_modules/
 frontend/node_modules/

@@ -1,5 +1,6 @@
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+import logging
 import sys
 from typing import Any, Literal
 
@@ -9,11 +10,19 @@ from app.models.domain import ArchitectureSpec, DiagramArtifact, DiagramGalleryR
 from app.services.artifacts import ArtifactStore
 from app.services.view_planner import DiagramViewMapping, customer_title_for_compiler_view
 
+logger = logging.getLogger("archway.diagram_compiler")
+
+# Vendored compiler source (see packages/archway_diagram_compiler/SOURCE.md).
+# This is the default compiler for all runtime/test operation; the external
+# path override below is an explicit debug fallback only.
+INTERNAL_COMPILER_SRC = Path(__file__).resolve().parents[2] / "packages" / "archway_diagram_compiler" / "src"
+
 
 class DiagramCompilerAdapter:
     def __init__(self):
         self.settings = get_settings()
         self.artifacts = ArtifactStore()
+        self.compiler_source: str = "unresolved"
 
     def compile_poc_diagrams(self, architecture_spec: ArchitectureSpec, session_id: str) -> DiagramGalleryResult:
         return self._compile(architecture_spec, session_id, "poc")
@@ -24,6 +33,7 @@ class DiagramCompilerAdapter:
     def get_compiler_health(self) -> HealthCheckResult:
         try:
             self._ensure_import_path()
+            import archway_diagram_compiler
             from archway_diagram_compiler.adapters.archway import archway_to_semantic_spec  # noqa: F401
             from archway_diagram_compiler.compiler import compile_architecture  # noqa: F401
         except Exception as exc:
@@ -33,7 +43,11 @@ class DiagramCompilerAdapter:
                 status=HealthStatus.failed,
                 required=True,
                 reason=f"Compiler import failed: {exc}",
-                details={"path": str(self.settings.diagram_compiler_path)},
+                details={
+                    "diagram_compiler_source": self.compiler_source,
+                    "internal_path": str(INTERNAL_COMPILER_SRC),
+                    "external_override_path": str(self.settings.diagram_compiler_path or ""),
+                },
             )
         return HealthCheckResult(
             id="diagram_compiler",
@@ -41,7 +55,10 @@ class DiagramCompilerAdapter:
             status=HealthStatus.ready,
             required=True,
             reason="Compiler package and Archway adapter are importable.",
-            details={"path": str(self.settings.diagram_compiler_path)},
+            details={
+                "diagram_compiler_source": self.compiler_source,
+                "path": str(Path(archway_diagram_compiler.__file__).parent),
+            },
         )
 
     def _compile(self, architecture_spec: ArchitectureSpec, session_id: str, mode: Literal["poc", "production"]) -> DiagramGalleryResult:
@@ -126,9 +143,32 @@ class DiagramCompilerAdapter:
         )
 
     def _ensure_import_path(self) -> None:
-        path = str(self.settings.diagram_compiler_path)
-        if path not in sys.path:
-            sys.path.insert(0, path)
+        """Make the diagram compiler importable, preferring the vendored internal package.
+
+        Default: the in-repo package at packages/archway_diagram_compiler/src.
+        Fallback: only when the internal package is missing AND an explicit
+        ARCHWAY_DIAGRAM_COMPILER_PATH override is set — and never silently.
+        """
+        if (INTERNAL_COMPILER_SRC / "archway_diagram_compiler" / "__init__.py").is_file():
+            path = str(INTERNAL_COMPILER_SRC)
+            if path not in sys.path:
+                sys.path.insert(0, path)
+            self.compiler_source = "internal"
+            return
+        external = self.settings.diagram_compiler_path
+        if external is not None and Path(external).is_dir():
+            path = str(external)
+            if path not in sys.path:
+                sys.path.insert(0, path)
+            self.compiler_source = "external_override"
+            logger.warning(
+                "diagram_compiler_source = external_override: internal vendored compiler "
+                "missing at %s; using explicit ARCHWAY_DIAGRAM_COMPILER_PATH=%s",
+                INTERNAL_COMPILER_SRC,
+                path,
+            )
+            return
+        self.compiler_source = "unavailable"
 
     def _run_compiler_with_timeout(self, compile_call, *, timeout_seconds: float):
         if timeout_seconds <= 0:
