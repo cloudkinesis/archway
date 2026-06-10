@@ -45,10 +45,11 @@ class Settings(BaseModel):
     data_dir: Path = Field(default_factory=lambda: Path(os.getenv("ARCHWAY_DATA_DIR", ".archway")))
     ollama_url: str = Field(default_factory=lambda: os.getenv("ARCHWAY_OLLAMA_URL", "http://localhost:11434"))
     ollama_model: str = Field(default_factory=lambda: os.getenv("ARCHWAY_OLLAMA_MODEL", "llama3.1"))
-    diagram_compiler_path: Path = Field(
-        default_factory=lambda: Path(
-            os.getenv("ARCHWAY_DIAGRAM_COMPILER_PATH", "/Users/arnab/Documents/Archway Diagram Compiler/src")
-        )
+    # Explicit external compiler override only (debug/fallback). The default
+    # runtime imports the vendored package from packages/archway_diagram_compiler/src;
+    # see app/services/diagram_compiler_adapter.py.
+    diagram_compiler_path: Path | None = Field(
+        default_factory=lambda: Path(os.getenv("ARCHWAY_DIAGRAM_COMPILER_PATH")) if os.getenv("ARCHWAY_DIAGRAM_COMPILER_PATH") else None
     )
     compiler_total_timeout_seconds: float = Field(
         default_factory=lambda: float(os.getenv("ARCHWAY_COMPILER_TOTAL_TIMEOUT_SECONDS", "120"))
