@@ -21,7 +21,10 @@ class PricingSanityFinding(BaseModel):
 class PricingSanityReview(BaseModel):
     passed: bool
     findings: list[PricingSanityFinding] = Field(default_factory=list)
-    pricing_can_be_displayed_as_headline: bool = True
+    # Fail closed: headline display must be proven safe, never assumed. The
+    # deterministic reviewer always sets this explicitly; if a model-parsed review
+    # omits it, the missing flag must mean "not headline-safe".
+    pricing_can_be_displayed_as_headline: bool = False
     pricing_status: Literal["sku_traceable", "directional", "invalid_placeholder", "not_enough_information"] = "directional"
     enhancement_status: str = "deterministic"
 
