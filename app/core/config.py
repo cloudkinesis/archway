@@ -117,6 +117,11 @@ class Settings(BaseModel):
     frontier_domain_prior_max_calls_per_session: int = Field(
         default_factory=lambda: max(0, int(os.getenv("ARCHWAY_FRONTIER_DOMAIN_PRIOR_MAX_CALLS_PER_SESSION", "1")))
     )
+    # Capability accelerator packs (advisory intake/question hints only). Default OFF;
+    # with the flag off, CapabilityRouter behavior is byte/behavior equivalent.
+    enable_capability_accelerator_packs: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_CAPABILITY_ACCELERATOR_PACKS", "false") == "true"
+    )
 
     @property
     def sessions_dir(self) -> Path:
