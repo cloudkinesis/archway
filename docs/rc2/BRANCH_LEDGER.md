@@ -535,3 +535,41 @@ NOT independently on master. Review/merge bottom-up (foundation first).
   - Before merge: delete/reset the branch; no master impact.
   - To revert the commit directly: `git revert ac3d86b`.
   - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.
+
+### feature/reviewer-mode-uncertainty-scenario-simulation — `f5e1192` (base: feature/architecture-decision-records @ `ac3d86b`)
+- **Purpose:** adds deterministic Reviewer Mode, the Unified Uncertainty Map, and
+  bounded Scenario/What-if Simulation v1 (DECISIONS D20) — the deterministic
+  pressure-test layer over Archway's own output. Reviewer Mode consolidates findings
+  from ADRs, pricing closure/readiness, SKU pilot metadata, citation/research quality,
+  governance controls, diagram QA, and capability routing, plus a deterministic
+  over-patterning detector. Scenario Simulation recomputes pricing through the REAL
+  `PricingEngine` (its native `pricing_driver_overrides` parameter).
+- **Files:** new `app/services/reviewer_mode.py`, `app/services/scenario_simulation.py`,
+  `tests/test_reviewer_mode_and_simulation.py` (24 tests); additive edits to
+  `app/services/export_package.py` (reviewer/uncertainty always; scenarios only on
+  explicit overrides or flag), `app/services/dossier_manifest.py` (additive
+  `review_summaries` param), `app/core/config.py`
+  (`ARCHWAY_ENABLE_DEFAULT_SCENARIO_SIMULATIONS`, default OFF).
+- **Safety:**
+  - NO LLM/model calls (import-level test-enforced on both modules).
+  - Reviewer findings are deterministic-only; NO invented findings (clean inputs
+    produce ZERO findings — test-proven); every finding cites its evidence source.
+  - No architecture generation / pricing calculation / governance enforcement /
+    diagram compiler changes; inputs never mutated (test-proven).
+  - Scenario simulations are BOUNDED and honest: driver override/multiplier and
+    retention (where a driver exists) recompute through the real engine; SKU
+    quantity-confirmation is simulation-only and sku-pilot-scoped;
+    region/RTO/RPO return honest `not_applied` (no fake architecture); engine
+    no-ops on unrecognized drivers are detected and reported as `not_applied`.
+  - Global pricing/readiness is NEVER promoted; reviewer/uncertainty/scenario
+    artifacts are manifest-hashed via the inventory and verifier-covered (tamper
+    detection test-proven for both reviewer and scenario artifacts).
+- **Tests:** reviewer/simulation suite 24 passed; ADR/export/dossier/verifier 41
+  passed; pricing trio 21 passed; architecture/diagram smoke 25 passed;
+  **full suite 407 passed / 0 failed** on this ancestry.
+- **Merge status:** READY_FOR_CODEX_REVIEW — next-wave branch; NOT part of the frozen
+  RC2 v2 candidate. Merge only after `feature/architecture-decision-records @ ac3d86b`.
+- **Rollback:**
+  - Before merge: delete/reset the branch; no master impact.
+  - To revert the commit directly: `git revert f5e1192`.
+  - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.

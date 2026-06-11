@@ -218,6 +218,22 @@ Notes:
     alternatives, null trade-off axes without deterministic backing, no model prose);
     manifest hashing of ADR artifacts via the inventory; verifier coverage (tamper
     detection); the global-vs-SKU-pilot pricing/readiness separation.
+- `feature/reviewer-mode-uncertainty-scenario-simulation` (`f5e1192`, stacked on
+  `feature/architecture-decision-records @ ac3d86b`) — deterministic Reviewer Mode +
+  Unified Uncertainty Map + bounded Scenario Simulation v1 (DECISIONS D20).
+  READY_FOR_CODEX_REVIEW.
+  - **Do NOT include in the frozen RC2 v2 candidate.** Review after the RC2 Golden
+    candidate is stable.
+  - Merge ONLY after `feature/architecture-decision-records @ ac3d86b` (stacked —
+    reviewer mode consumes ADR fields, and both extend the same export layer).
+  - **Conflict watch:** `app/services/export_package.py`,
+    `app/services/dossier_manifest.py`, `app/core/config.py` (all additive blocks;
+    stacked ancestry resolves the overlap with the ADR branch naturally).
+  - **Preserve on merge:** deterministic reviewer findings with NO LLM/model calls;
+    the no-invention reviewer contract (zero findings without a deterministic signal);
+    honest `not_applied` scenario results for region/RTO/RPO and unrecognized drivers;
+    manifest hashing + verifier coverage of reviewer/scenario artifacts; the
+    global-readiness separation (simulation never promotes headline/procurement).
 
 ## Deferred — not in this RC2 stabilization line
 - `experiment/domain-pack-interface` (`fe886af`) — DEFER until Codex review.
