@@ -383,6 +383,7 @@ def build_dossier_manifest(
     unsupported_dimensions: dict | None = None,
     app_version: str | None = None,
     decision_records_summary: dict | None = None,
+    review_summaries: dict | None = None,
 ) -> dict:
     """Assemble the dossier manifest dict. Reads files already written under ``export_dir``."""
     export_dir = Path(export_dir)
@@ -424,6 +425,11 @@ def build_dossier_manifest(
     # older manifest/verifier behavior byte-identical).
     if decision_records_summary is not None:
         manifest["decision_records"] = dict(decision_records_summary)
+    # Additive: reviewer / uncertainty / scenario summaries (same backward-compat rule).
+    for key in ("reviewer_mode", "uncertainty_map", "scenario_simulation"):
+        value = (review_summaries or {}).get(key)
+        if value is not None:
+            manifest[key] = dict(value)
     return manifest
 
 
