@@ -27,6 +27,7 @@ from app.db.session_store import SessionStore
 from app.models.domain import DiagramGalleryResult, ResearchReport, SessionPhase, SessionStatus
 from app.services.architecture import ArchitecturePlanner
 from app.services.architecture_revisions import ArchitectureRevisionService
+from app.services.artifact_linter import lint_export_zip, summarize_findings
 from app.services.artifacts import ArtifactStore
 from app.services.diagram_compiler_adapter import DiagramCompilerAdapter
 from app.services.export_package import ExportPackageService
@@ -230,6 +231,14 @@ def render_markdown(results: list[dict[str, Any]]) -> str:
         lines.extend([f"- {warning}" for warning in item["warnings"]] or ["- none"])
         lines.extend(["", "Blockers:"])
         lines.extend([f"- {blocker}" for blocker in item["blockers"]] or ["- none"])
+        lint = item.get("artifact_lint") or {}
+        summary = lint.get("summary") or {}
+        lines.extend(["", f"Artifact lint (advisory, never gating): {summary.get('total', 0)} finding(s)"])
+        if summary.get("by_rule"):
+            lines.append(f"- by rule: {summary['by_rule']}")
+        for finding in lint.get("findings") or []:
+            location = f":{finding.get('line')}" if finding.get("line") else ""
+            lines.append(f"- [{finding.get('surface')}] {finding.get('rule_id')} {finding.get('artifact_path')}{location} — {finding.get('message')}")
     return "\n".join(lines) + "\n"
 
 
@@ -372,6 +381,18 @@ def _assess(
 
     rendered_view_ids = [view for gallery in galleries for view in gallery.rendered_view_ids]
     missing_requested_views = [item for gallery in galleries for item in gallery.missing_requested_views]
+    # Advisory artifact lint: informational only — never contributes to
+    # warnings/blockers or the scenario status (rollout contract: advisory
+    # first; client-pack fail-closed gating comes later).
+    artifact_lint: dict[str, Any] = {"summary": {}, "findings": []}
+    try:
+        lint_findings = lint_export_zip(export_zip_path) if export_zip_path else []
+        artifact_lint = {
+            "summary": summarize_findings(lint_findings),
+            "findings": [finding.to_dict() for finding in lint_findings[:12]],
+        }
+    except Exception as exc:  # advisory path must never break validation
+        artifact_lint = {"summary": {"error": f"{type(exc).__name__}: {exc}"}, "findings": []}
     status: Status = "FAIL" if blockers else "WARN" if warnings or pricing_readiness == "directional" else "PASS"
     return {
         "scenario_id": scenario.id,
@@ -400,6 +421,7 @@ def _assess(
         "icon_embedding_metric_captured": _icon_metrics_captured(galleries),
         "warnings": warnings,
         "blockers": blockers,
+        "artifact_lint": artifact_lint,
     }
 
 

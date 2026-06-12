@@ -85,6 +85,16 @@ def gate_display(value: str) -> str:
     return display_label(value) if looks_like_machine_key(str(value or "")) else str(value or "")
 
 
+def format_usd(value) -> str:
+    """Format a dollar amount with thousands separators and whole-dollar
+    rounding for client-facing prose. Raw numbers stay raw in JSON."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return f"${value}"
+    return f"${number:,.0f}"
+
+
 def canonical_fact_key(value: str) -> str:
     """Comparison key that collapses naming variants of the same fact.
 

@@ -15,6 +15,7 @@ from app.services.artifacts import ArtifactStore
 from app.services.build_status import BuildStatusService
 from app.services.convergence.golden_convergence_orchestrator import GoldenConvergenceOrchestrator, quality_summary_markdown
 from app.services.deep_dossier import DeepDossierService
+from app.services.display_labels import display_label, format_usd
 from app.services.dossier_manifest import MANIFEST_FILENAME, build_dossier_manifest, manifest_markdown
 from app.services.golden_regression import GoldenRegressionExportService
 from app.services.jobs import job_manager
@@ -583,13 +584,13 @@ class ExportPackageService:
             *[f"- Warning: {item}" for item in customer_readiness.get("warnings", [])],
             "",
             "## Service Validation Notes",
-            *[f"- {item}" for item in metadata.get("service_validation_notes", [])],
+            *_bullets([f"{item}" for item in metadata.get("service_validation_notes", [])]),
             "",
             "## Service Decision Records",
-            *[
-                f"- {item.get('decision_id')}: {item.get('selected_service')} for {item.get('capability')} ({item.get('selection_reason')})"
+            *_bullets([
+                f"{item.get('decision_id')}: {item.get('selected_service')} for {item.get('capability')} ({item.get('selection_reason')})"
                 for item in metadata.get("service_decision_records", [])
-            ],
+            ]),
             "",
             "## Facts",
             *[f"- {claim.get('text')} [{', '.join(claim.get('evidence_ids', []))}]" for claim in report.get("facts", [])],
@@ -621,14 +622,14 @@ class ExportPackageService:
         headline_safe = metadata.get("pricing_can_be_displayed_as_headline") is True
         if headline_safe:
             headline_lines = [
-                f"Estimated monthly range: ${pricing.get('low_monthly_usd')}-${pricing.get('high_monthly_usd')}",
-                f"Expected monthly estimate: ${pricing.get('expected_monthly_usd')}",
+                f"Estimated monthly range: {format_usd(pricing.get('low_monthly_usd'))}–{format_usd(pricing.get('high_monthly_usd'))}",
+                f"Expected monthly estimate: {format_usd(pricing.get('expected_monthly_usd'))}",
             ]
         elif closure.get("directional_scenario_allowed"):
             headline_lines = [
                 "Directional scenario estimate, not procurement-ready.",
-                f"Estimated monthly range: ${pricing.get('low_monthly_usd')}-${pricing.get('high_monthly_usd')}",
-                f"Expected monthly scenario estimate: ${pricing.get('expected_monthly_usd')}",
+                f"Estimated monthly range: {format_usd(pricing.get('low_monthly_usd'))}–{format_usd(pricing.get('high_monthly_usd'))}",
+                f"Expected monthly scenario estimate: {format_usd(pricing.get('expected_monthly_usd'))}",
                 "This pricing is scenario-based and not procurement-ready.",
             ]
         else:
@@ -645,28 +646,28 @@ class ExportPackageService:
             "",
             "Pricing is directional unless AWS Pricing evidence is present in the evidence appendix.",
             "",
-            f"Pricing validity: {metadata.get('status', 'unknown')}",
-            f"Pricing maturity: {metadata.get('pricing_maturity', closure.get('pricing_maturity', 'unknown'))}",
+            f"Pricing validity: {display_label(str(metadata.get('status', 'unknown')))}",
+            f"Pricing maturity: {display_label(str(metadata.get('pricing_maturity', closure.get('pricing_maturity', 'unknown'))))}",
             f"Extracted scale applied: {metadata.get('scale_applied', 'unknown')}",
             f"Pricing validity reason: {metadata.get('reason', 'No pricing validation metadata was recorded.')}",
             "",
             "## Pricing Driver Closure",
-            f"Closure status: {closure.get('status', 'unknown')}",
+            f"Closure status: {display_label(str(closure.get('status', 'unknown')))}",
             f"Scenario profile used: {closure.get('scenario_profile_used') or 'None'}",
-            f"Pricing readiness: {closure.get('pricing_maturity', metadata.get('pricing_maturity', 'unknown'))}",
+            f"Pricing readiness: {display_label(str(closure.get('pricing_maturity', metadata.get('pricing_maturity', 'unknown'))))}",
             f"Procurement readiness: {closure.get('procurement_ready', False)}",
             "",
             "### Confirmed Drivers",
-            *[f"- {item}" for item in closure.get("confirmed_drivers", [])],
+            *_bullets([f"{item}" for item in closure.get("confirmed_drivers", [])]),
             "",
             "### Assumed Drivers",
-            *[f"- {item}" for item in closure.get("assumed_drivers", [])],
+            *_bullets([f"{item}" for item in closure.get("assumed_drivers", [])]),
             "",
             "### Missing Drivers",
-            *[f"- {item.get('display_name')}: {item.get('why_needed')}" for item in closure.get("missing_drivers", [])],
+            *_bullets([f"{item.get('display_name')}: {item.get('why_needed')}" for item in closure.get("missing_drivers", [])]),
             "",
             "### Next Validation Steps",
-            *[f"- {item}" for item in closure.get("next_validation_steps", [])],
+            *_bullets([f"{item}" for item in closure.get("next_validation_steps", [])]),
             "",
             "## Pricing Drivers",
             *[f"- {item}" for item in pricing.get("main_cost_drivers", [])],
@@ -774,20 +775,20 @@ class ExportPackageService:
                 f"- Network view status: {metadata.get('network_private_connectivity_view_status', {})}",
                 "",
                 "### Security Controls",
-                *[f"- {item.get('name')}: {item.get('rationale')}" for item in spec.get("security_controls", [])],
+                *_bullets([f"{item.get('name')}: {item.get('rationale')}" for item in spec.get("security_controls", [])]),
                 "",
                 "### Action Governance Controls",
-                *[
+                *_bullets([
                     (
-                        f"- {item.get('name')} [{item.get('control_type')}]: flows={', '.join(item.get('governed_flow_ids', [])) or 'n/a'}; "
+                        f"{item.get('name')} [{item.get('control_type')}]: flows={', '.join(item.get('governed_flow_ids', [])) or 'n/a'}; "
                         f"actions={', '.join(item.get('action_types', [])) or 'n/a'}; enforcement_point={item.get('enforcement_point') or 'n/a'}; "
                         f"failure_behavior={item.get('failure_behavior')}; rationale={item.get('rationale')}"
                     )
                     for item in spec.get("governance_controls", [])
-                ],
+                ]),
                 "",
                 "### Observability Controls",
-                *[f"- {item.get('name')}: {item.get('rationale')}" for item in spec.get("observability_controls", [])],
+                *_bullets([f"{item.get('name')}: {item.get('rationale')}" for item in spec.get("observability_controls", [])]),
                 "",
             ])
         if revisions:
@@ -1164,6 +1165,12 @@ def _missing_view_reason(view_id: str, gallery) -> str:
         if view_id in message:
             return message
     return "The existing D2 compiler did not emit this requested view. Check render_plan omitted_views for compiler suppression details."
+
+
+def _bullets(items: list[str]) -> list[str]:
+    """Render list items as markdown bullets; empty lists state so honestly
+    instead of leaving an empty section."""
+    return [f"- {item}" for item in items] or ["- None recorded."]
 
 
 def _pricing_trace_summary(trace: dict) -> str:
