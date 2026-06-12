@@ -460,3 +460,116 @@ NOT independently on master. Review/merge bottom-up (foundation first).
   - Before merge: delete/reset the branch; no master impact.
   - To revert the commit directly: `git revert 1fc93de`.
   - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.
+
+### feature/capability-accelerator-packs-security-banking-spaces — `d3d7242` (base: feature/capability-accelerator-packs-network-hcm @ `1fc93de`)
+- **Purpose:** wave-2 accelerators — extends advisory capability accelerator coverage
+  with `firewall_security_operations`, `smart_spaces_location_iot`,
+  `banking_open_banking_payments`, and `financial_crime_risk_operations`, plus a small
+  HCM delta (payroll exceptions / absence management / benefits admin / leave of absence /
+  workforce compliance) and a context-vocabulary word-boundary fix ("adp" can no longer
+  match inside "adapted"). Six packs total, all capability-domain-named (DECISIONS D18).
+  Post-RC2 NEXT-WAVE branch; explicitly NOT part of `integration/rc2-golden-rehearsal-v2`.
+- **Files:** `app/services/capability_accelerator_packs.py` (4 packs + HCM delta +
+  context fix), `app/services/capability_router.py` (two new RECORD-level sensitivity
+  groups only: `spaces_location_record`, `financial_record`),
+  `tests/test_capability_accelerator_packs.py` (20 new tests; 37 total).
+- **Safety:**
+  - Flag-gated by the EXISTING accelerator flag — no config change.
+  - No customer-branded pack identities; Cisco/ADP/Barclays/NatWest/Meraki/Firepower
+    etc. are context vocabulary only (word-boundary matched).
+  - All fallback families import-time validated against `GENERIC_FALLBACK_FAMILIES`.
+  - Firewall pack DISAMBIGUATED from the network pack: pure NetFlow/switch telemetry
+    matches network only; policy/rule/triage signals anchor the firewall pack; shared
+    terms (SIEM/SOC/SOAR/VPN) deliberately weak.
+  - Record-level sensitivity markers only: badge IDs / individual location history /
+    surveillance footage and raw account numbers / sort codes / IBAN (incl. IBAN-format
+    value pattern) / card numbers / bank statements skip the model prior; abstract
+    wording (account information service, account onboarding) and topic words (open
+    banking, AML, KYC, sanctions, occupancy analytics) NEVER skip — valid use cases
+    stay fully usable, marked sensitive/governed via advisory concerns.
+  - No pricing/readiness/architecture/governance/diagram authority; financial-crime
+    pack proven not to override the deterministic payment-fraud classification; known
+    healthcare/IoT/payment/legal classifications proven unchanged flag-on/off.
+- **Tests:** pack + router + discovery 61 passed; healthcare anti-drift + scenario
+  matrix 15 passed; pricing trio 21 passed; full suite on this ancestry 198 passed /
+  2 pre-existing failures (I1/I2 — fixed separately in the v2 line, outside this
+  stacked ancestry).
+- **Merge status:** READY_FOR_CODEX_REVIEW — stacked; merge ONLY after
+  `feature/capability-accelerator-packs-network-hcm @ 1fc93de`. Review after the RC2
+  Golden candidate is stable.
+- **Rollback:**
+  - Before merge: delete/reset the branch; no master impact.
+  - To revert the commit directly: `git revert d3d7242`.
+  - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.
+
+### feature/architecture-decision-records — `ac3d86b` (base: chore/remove-fixed-known-failures @ `6760cc1`)
+- **Purpose:** adds deterministic Architecture Decision Records (ADRs) to dossier
+  exports (DECISIONS D19). ADRs SURFACE decision rationale Archway already computes —
+  catalog alternatives/purposes, deterministic service rationales, typed governance
+  controls, pricing evidence classes and driver closure, research-quality labels, and
+  diagram QA findings — as export trust artifacts
+  (`architecture/decision_records.{json,md}` + `raw/architecture_decision_records.json`).
+  Five emitters: component/service, governance write-back, pricing-readiness
+  (global vs SKU pilot, kept separate), evidence-readiness, diagram-readiness.
+- **Files:** new `app/services/architecture_decision_records.py`; additive edits to
+  `app/services/export_package.py` (`_write_dossier_layer` ADR block) and
+  `app/services/dossier_manifest.py` (optional `decision_records_summary` param);
+  new `tests/test_architecture_decision_records.py` (17 tests).
+- **Safety:**
+  - NO LLM/model calls — generation is a pure function (import-level test-enforced).
+  - Alternatives are CATALOG-VERBATIM only; no invented alternatives (empty tuple ⇒
+    no component ADR); no invented trade-off prose; trade-off axes are null unless
+    backed by deterministic data (pricing evidence class, governed-flow counts).
+  - `comparison_note` only from existing research service-validation notes.
+  - Global pricing/readiness semantics UNCHANGED (pure-function input-mutation test;
+    pricing suites green); no architecture/governance/diagram behavior touched.
+  - ADR artifacts are auto-hashed in the manifest artifact inventory; additive
+    `decision_records` summary (count / low_confidence / needs_confirmation /
+    directional); the offline verifier DETECTS ADR artifact tampering (test-proven).
+- **Tests:** ADR suite 17 passed; export/dossier/verifier 24 passed; pricing trio 21
+  passed; architecture/diagram smoke 25 passed; **full suite 383 passed / 0 failed**
+  on this ancestry.
+- **Merge status:** READY_FOR_CODEX_REVIEW — next-wave branch; NOT part of the frozen
+  RC2 v2 candidate. Stacked on the v2 + known-failures-cleanup line.
+- **Rollback:**
+  - Before merge: delete/reset the branch; no master impact.
+  - To revert the commit directly: `git revert ac3d86b`.
+  - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.
+
+### feature/reviewer-mode-uncertainty-scenario-simulation — `f5e1192` (base: feature/architecture-decision-records @ `ac3d86b`)
+- **Purpose:** adds deterministic Reviewer Mode, the Unified Uncertainty Map, and
+  bounded Scenario/What-if Simulation v1 (DECISIONS D20) — the deterministic
+  pressure-test layer over Archway's own output. Reviewer Mode consolidates findings
+  from ADRs, pricing closure/readiness, SKU pilot metadata, citation/research quality,
+  governance controls, diagram QA, and capability routing, plus a deterministic
+  over-patterning detector. Scenario Simulation recomputes pricing through the REAL
+  `PricingEngine` (its native `pricing_driver_overrides` parameter).
+- **Files:** new `app/services/reviewer_mode.py`, `app/services/scenario_simulation.py`,
+  `tests/test_reviewer_mode_and_simulation.py` (24 tests); additive edits to
+  `app/services/export_package.py` (reviewer/uncertainty always; scenarios only on
+  explicit overrides or flag), `app/services/dossier_manifest.py` (additive
+  `review_summaries` param), `app/core/config.py`
+  (`ARCHWAY_ENABLE_DEFAULT_SCENARIO_SIMULATIONS`, default OFF).
+- **Safety:**
+  - NO LLM/model calls (import-level test-enforced on both modules).
+  - Reviewer findings are deterministic-only; NO invented findings (clean inputs
+    produce ZERO findings — test-proven); every finding cites its evidence source.
+  - No architecture generation / pricing calculation / governance enforcement /
+    diagram compiler changes; inputs never mutated (test-proven).
+  - Scenario simulations are BOUNDED and honest: driver override/multiplier and
+    retention (where a driver exists) recompute through the real engine; SKU
+    quantity-confirmation is simulation-only and sku-pilot-scoped;
+    region/RTO/RPO return honest `not_applied` (no fake architecture); engine
+    no-ops on unrecognized drivers are detected and reported as `not_applied`.
+  - Global pricing/readiness is NEVER promoted; reviewer/uncertainty/scenario
+    artifacts are manifest-hashed via the inventory and verifier-covered (tamper
+    detection test-proven for both reviewer and scenario artifacts).
+- **Tests:** reviewer/simulation suite 24 passed; ADR/export/dossier/verifier 41
+  passed; pricing trio 21 passed; architecture/diagram smoke 25 passed;
+  **full suite 407 passed / 0 failed** on this ancestry.
+- **Merge status:** READY_FOR_CODEX_REVIEW — next-wave branch; NOT part of the frozen
+  RC2 v2 candidate. Merge only after `feature/architecture-decision-records @ ac3d86b`.
+- **Rollback:**
+  - Before merge: delete/reset the branch; no master impact.
+  - To revert the commit directly: `git revert f5e1192`.
+  - To revert a later `--no-ff` merge: `git revert -m 1 <merge_commit_sha>`.

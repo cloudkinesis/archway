@@ -260,6 +260,11 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
   hints only. They are NOT proof of full domain specialization: unknown domains still
   route to directional/generic unless a real domain pack or deterministic pattern
   exists. I13 remains intact and by-design.
+- **Wave-2 update (`d3d7242`):** accelerator coverage has expanded (firewall/SecOps,
+  smart spaces/location IoT, open banking/payments, financial-crime/risk operations —
+  six packs total), but this still does NOT mean every domain has specialist
+  domain-pack depth. Unknown domains remain directional/generic unless backed by
+  deterministic pattern/domain support.
 
 ## I14. Additional domain lane adapters are future work
 - **What:** the `DomainLaneModel` framework (DECISIONS D16,
@@ -301,3 +306,32 @@ Legend — Status: `open` | `fixed-on-branch` | `wontfix-now`. Severity: low / m
 - **Next action:** optionally add a small setup script / README note that downloads or
   copies a pinned `d2` version into `.tools/d2/`; pin the d2 version in SOURCE.md if
   renderer output ever needs byte-stable reproducibility across machines.
+
+## I16. Trade-off / uncertainty / reviewer upgrades (next-wave; NOT RC2 v2 blockers)
+- **What:** an external review identified three highest-impact upgrades toward a
+  "pressure-test the answer" workbench. Status:
+  - **Decision records: IMPLEMENTED** by `feature/architecture-decision-records`
+    @ `ac3d86b` (deterministic ADRs in dossier exports; DECISIONS D19).
+  - **Reviewer Mode + Unified Uncertainty Map: IMPLEMENTED** by
+    `feature/reviewer-mode-uncertainty-scenario-simulation` @ `f5e1192`
+    (deterministic findings + rule-derived per-section confidence; DECISIONS D20).
+  - **Scenario Simulation v1: IMPLEMENTED** by `f5e1192` — BOUNDED scope: pricing
+    driver overrides/multipliers through the real PricingEngine, retention where a
+    matching driver exists, SKU quantity-confirmation toggle (simulation-only), and
+    honest `not_applied` for region/RTO/RPO. This is NOT full what-if architecture
+    recomputation.
+- **Remaining FUTURE WORK:**
+  - full architecture/governance recomputation for what-if scenarios
+    (region-aware re-architecture, DR/multi-region variants),
+  - semantic scenario diff (beyond pricing/readiness/reviewer-count deltas),
+  - workload evolution modes (phase-0 / MVP / regulated-scale / DR / multi-region
+    variants with transition triggers),
+  - executable governance hooks (control hooks / review templates / policy evidence
+    emitted from GovernanceControl annotations).
+- **Status:** partially implemented / by-design scope limit. The remaining items are
+  next-wave product upgrades, NOT blockers for the frozen RC2 v2 candidate.
+- **Severity:** low (product depth, not correctness).
+- **Blocks internal pilot:** no.
+- **Next action:** treat scenario-simulation v1's `not_applied` results as the honest
+  boundary of current support; expand recomputation surfaces per vertical demand,
+  outside the v2 line, behind the usual branch-per-change discipline.
