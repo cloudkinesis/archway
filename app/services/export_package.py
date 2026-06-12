@@ -16,7 +16,7 @@ from app.services.build_status import BuildStatusService
 from app.services.convergence.golden_convergence_orchestrator import GoldenConvergenceOrchestrator, quality_summary_markdown
 from app.services.client_pack import audit_pack_files, client_pack_files, front_door_readme
 from app.services.deep_dossier import DeepDossierService
-from app.services.display_labels import display_label, format_usd
+from app.services.display_labels import display_label, format_usd, status_display
 from app.services.dossier_manifest import MANIFEST_FILENAME, build_dossier_manifest, manifest_markdown
 from app.services.golden_regression import GoldenRegressionExportService
 from app.services.jobs import job_manager
@@ -659,15 +659,15 @@ class ExportPackageService:
             "",
             "Pricing is directional unless AWS Pricing evidence is present in the evidence appendix.",
             "",
-            f"Pricing validity: {display_label(str(metadata.get('status', 'unknown')))}",
-            f"Pricing maturity: {display_label(str(metadata.get('pricing_maturity', closure.get('pricing_maturity', 'unknown'))))}",
+            f"Pricing validity: {status_display(str(metadata.get('status', 'unknown')))}",
+            f"Pricing maturity: {status_display(str(metadata.get('pricing_maturity', closure.get('pricing_maturity', 'unknown'))))}",
             f"Extracted scale applied: {metadata.get('scale_applied', 'unknown')}",
             f"Pricing validity reason: {metadata.get('reason', 'No pricing validation metadata was recorded.')}",
             "",
             "## Pricing Driver Closure",
-            f"Closure status: {display_label(str(closure.get('status', 'unknown')))}",
+            f"Closure status: {status_display(str(closure.get('status', 'unknown')))}",
             f"Scenario profile used: {closure.get('scenario_profile_used') or 'None'}",
-            f"Pricing readiness: {display_label(str(closure.get('pricing_maturity', metadata.get('pricing_maturity', 'unknown'))))}",
+            f"Pricing readiness: {status_display(str(closure.get('pricing_maturity', metadata.get('pricing_maturity', 'unknown'))))}",
             f"Procurement readiness: {closure.get('procurement_ready', False)}",
             "",
             "### Confirmed Drivers",

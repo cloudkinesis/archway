@@ -56,6 +56,23 @@ TITLE_TRAILING_STOPWORDS = {
     "the", "their", "to", "under", "using", "via", "which", "with",
 }
 
+# Per-key display overrides for keys whose generic humanization is wrong or
+# ambiguous (e.g. a bare "or" that means Operating Room). Deliberately a
+# closed list — never a global rule.
+KEY_DISPLAY_OVERRIDES = {
+    "active_or_count_poc": "Active OR count POC",
+}
+
+# Business-readable renderings for specific internal status values in
+# client-facing markdown. Raw values remain unchanged in JSON/audit surfaces.
+STATUS_DISPLAY_OVERRIDES = {
+    "invalid_placeholder": "Pricing basis incomplete",
+    "pricing_directional_with_assumptions": "Directional with assumptions",
+    "pricing_customer_demo_ready": "Scenario-based planning estimate",
+    "pricing_procurement_ready": "Rate-backed estimate",
+    "missing_non_critical": "Missing non-critical drivers",
+}
+
 _MACHINE_KEY_PATTERN = re.compile(r"[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+")
 
 
@@ -70,6 +87,12 @@ def display_label(value: str, *, capitalize: bool = True) -> str:
     ``schedule_events_per_day`` -> ``Schedule events per day``
     ``INTERNAL_ONLY`` -> ``Internal only``
     """
+    key = str(value or "").strip().lower()
+    if key in KEY_DISPLAY_OVERRIDES:
+        label = KEY_DISPLAY_OVERRIDES[key]
+        if not capitalize and label and label[0].isupper() and not label.split(" ", 1)[0].isupper():
+            label = label[0].lower() + label[1:]
+        return label
     text = str(value or "").replace("_", " ").strip()
     if not text:
         return str(value or "")
@@ -91,6 +114,16 @@ def display_label(value: str, *, capitalize: bool = True) -> str:
 def gate_display(value: str) -> str:
     """Humanize only values that look like machine keys; leave prose alone."""
     return display_label(value) if looks_like_machine_key(str(value or "")) else str(value or "")
+
+
+def status_display(value: str, *, capitalize: bool = True) -> str:
+    """Business-readable rendering of an internal status value for client
+    prose. Falls back to the generic display label."""
+    key = str(value or "").strip().lower()
+    if key in STATUS_DISPLAY_OVERRIDES:
+        label = STATUS_DISPLAY_OVERRIDES[key]
+        return label if capitalize else (label[0].lower() + label[1:] if label else label)
+    return display_label(value, capitalize=capitalize)
 
 
 def format_usd(value) -> str:
