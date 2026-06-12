@@ -46,3 +46,26 @@ def test_utility_metrics_and_business_goals_are_structured():
         "Cut MTTR from 4 hours to under 90 minutes.",
         "Achieve measurable improvement within 18 months.",
     ]
+
+
+def test_outage_reduction_metric_is_stable_and_serializable_across_phrasings():
+    import json
+
+    from app.services.metric_extractor import extract_metrics
+
+    for text in (
+        "A regional utility is reducing unplanned outages by 15% across its grid.",
+        "A regional utility wants to reduce unplanned outages by 15% across its grid.",
+    ):
+        brief = SynthesisEngine().create_initial_brief(text)
+        metrics = {item["label"]: item for item in brief.use_case_profile["metrics"]}
+        assert metrics["outage_reduction_target_percent"]["value"] == 15
+        assert isinstance(metrics["outage_reduction_target_percent"]["value"], float)
+        # The profile alias must not leak the structured-extractor key alongside it.
+        assert "unplanned_outage_reduction_percent" not in metrics
+        # Structured extractor key stays unchanged for its direct consumers.
+        structured = extract_metrics(text)
+        assert structured.business_targets["unplanned_outage_reduction_percent"].value == 15
+        # Structured metrics/business goals must be JSON-serializable.
+        json.dumps(brief.use_case_profile["metrics"])
+        json.dumps(brief.business_goals)

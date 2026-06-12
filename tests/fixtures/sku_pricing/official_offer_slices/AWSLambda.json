@@ -1,0 +1,173 @@
+{
+  "formatVersion": "v1.0",
+  "disclaimer": "INFORMATIONAL TEST SLICE - small real-shape excerpt of the official AWS Price List offer file; NOT authoritative and NOT the full offer. Public rate data, us-east-1.",
+  "publicationDate": "2026-05-21T18:47:54Z",
+  "version": "20260521184754",
+  "offerCode": "AWSLambda",
+  "products": {
+    "GU2ZS9HVP6QTQ7KE": {
+      "sku": "GU2ZS9HVP6QTQ7KE",
+      "productFamily": "Serverless",
+      "attributes": {
+        "servicecode": "AWSLambda",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "group": "AWS-Lambda-Requests",
+        "groupDescription": "Invocation call for a Lambda function",
+        "usagetype": "Request",
+        "operation": "",
+        "regionCode": "us-east-1",
+        "servicename": "AWS Lambda"
+      }
+    },
+    "TG3M4CAGBA3NYQBH": {
+      "sku": "TG3M4CAGBA3NYQBH",
+      "productFamily": "Serverless",
+      "attributes": {
+        "servicecode": "AWSLambda",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "group": "AWS-Lambda-Duration",
+        "groupDescription": "Invocation duration weighted by memory assigned to function, measured in GB-s",
+        "usagetype": "Lambda-GB-Second",
+        "operation": "",
+        "regionCode": "us-east-1",
+        "servicename": "AWS Lambda"
+      }
+    },
+    "ZQVCC2M69R4S79XS": {
+      "sku": "ZQVCC2M69R4S79XS",
+      "productFamily": "Serverless",
+      "attributes": {
+        "servicecode": "AWSLambda",
+        "location": "Any",
+        "locationType": "AWS Region",
+        "group": "AWS-Lambda-Requests",
+        "groupDescription": "Invocation call for a Lambda function",
+        "usagetype": "Global-Request",
+        "operation": "",
+        "regionCode": "",
+        "servicename": "AWS Lambda"
+      }
+    },
+    "4VCGJ7EG8PJVZG7S": {
+      "sku": "4VCGJ7EG8PJVZG7S",
+      "productFamily": "Serverless",
+      "attributes": {
+        "servicecode": "AWSLambda",
+        "location": "Any",
+        "locationType": "AWS Region",
+        "group": "AWS-Lambda-Duration",
+        "groupDescription": "Invocation duration weighted by memory assigned to function, measured in GB-s",
+        "usagetype": "Global-Lambda-GB-Second",
+        "operation": "",
+        "regionCode": "",
+        "servicename": "AWS Lambda"
+      }
+    }
+  },
+  "terms": {
+    "OnDemand": {
+      "GU2ZS9HVP6QTQ7KE": {
+        "GU2ZS9HVP6QTQ7KE.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "GU2ZS9HVP6QTQ7KE",
+          "priceDimensions": {
+            "GU2ZS9HVP6QTQ7KE.JRTCKXETXF.6YS6EN2CT7": {
+              "rateCode": "GU2ZS9HVP6QTQ7KE.JRTCKXETXF.6YS6EN2CT7",
+              "description": "AWS Lambda - Total Requests - US East (Northern Virginia)",
+              "beginRange": "0",
+              "endRange": "Inf",
+              "unit": "Requests",
+              "pricePerUnit": {
+                "USD": "0.0000002000"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      },
+      "TG3M4CAGBA3NYQBH": {
+        "TG3M4CAGBA3NYQBH.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "TG3M4CAGBA3NYQBH",
+          "priceDimensions": {
+            "TG3M4CAGBA3NYQBH.JRTCKXETXF.CUKFZ388N3": {
+              "rateCode": "TG3M4CAGBA3NYQBH.JRTCKXETXF.CUKFZ388N3",
+              "description": "AWS Lambda - Total Compute - US East (Northern Virginia)-Tier-1",
+              "beginRange": "0",
+              "endRange": "6000000000",
+              "unit": "Lambda-GB-Second",
+              "pricePerUnit": {
+                "USD": "0.0000166667"
+              }
+            },
+            "TG3M4CAGBA3NYQBH.JRTCKXETXF.QZE2SB4KVB": {
+              "rateCode": "TG3M4CAGBA3NYQBH.JRTCKXETXF.QZE2SB4KVB",
+              "description": "AWS Lambda - Total Compute - US East (Northern Virginia)-Tier-2",
+              "beginRange": "6000000000",
+              "endRange": "15000000000",
+              "unit": "Lambda-GB-Second",
+              "pricePerUnit": {
+                "USD": "0.0000150000"
+              }
+            },
+            "TG3M4CAGBA3NYQBH.JRTCKXETXF.V7R92EXG27": {
+              "rateCode": "TG3M4CAGBA3NYQBH.JRTCKXETXF.V7R92EXG27",
+              "description": "AWS Lambda - Total Compute - US East (Northern Virginia)-Tier-3",
+              "beginRange": "15000000000",
+              "endRange": "Inf",
+              "unit": "Lambda-GB-Second",
+              "pricePerUnit": {
+                "USD": "0.0000133334"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      },
+      "ZQVCC2M69R4S79XS": {
+        "ZQVCC2M69R4S79XS.A429C66SYZ": {
+          "offerTermCode": "A429C66SYZ",
+          "sku": "ZQVCC2M69R4S79XS",
+          "priceDimensions": {
+            "ZQVCC2M69R4S79XS.A429C66SYZ.SB2VSFF4TP": {
+              "rateCode": "ZQVCC2M69R4S79XS.A429C66SYZ.SB2VSFF4TP",
+              "description": "AWS Lambda - Requests Free Tier - 1,000,000 Requests",
+              "beginRange": "0",
+              "endRange": "1000000",
+              "unit": "Request",
+              "pricePerUnit": {
+                "USD": "0.0000000000"
+              }
+            }
+          },
+          "termAttributes": {
+            "Restriction": "Limited SKU Usage"
+          }
+        }
+      },
+      "4VCGJ7EG8PJVZG7S": {
+        "4VCGJ7EG8PJVZG7S.A429C66SYZ": {
+          "offerTermCode": "A429C66SYZ",
+          "sku": "4VCGJ7EG8PJVZG7S",
+          "priceDimensions": {
+            "4VCGJ7EG8PJVZG7S.A429C66SYZ.KJYPJPDD2A": {
+              "rateCode": "4VCGJ7EG8PJVZG7S.A429C66SYZ.KJYPJPDD2A",
+              "description": "AWS Lambda - Compute Free Tier - 400,000 GB-Seconds",
+              "beginRange": "0",
+              "endRange": "400000",
+              "unit": "Lambda-GB-Second",
+              "pricePerUnit": {
+                "USD": "0.0000000000"
+              }
+            }
+          },
+          "termAttributes": {
+            "Restriction": "Limited SKU Usage"
+          }
+        }
+      }
+    }
+  }
+}

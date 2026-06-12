@@ -1,0 +1,72 @@
+{
+  "formatVersion": "v1.0",
+  "disclaimer": "SYNTHETIC test slice (NOT real AWS data). Models a hypothetical AWS Lambda offer where the duration price dimension uses official unit 'Second' instead of 'Lambda-GB-Second', to test alias normalization + the proof gate. Real us-east-1 Lambda duration uses unit 'Lambda-GB-Second'.",
+  "offerCode": "AWSLambda",
+  "version": "synthetic-second-unit",
+  "products": {
+    "GU2ZS9HVP6QTQ7KE": {
+      "sku": "GU2ZS9HVP6QTQ7KE",
+      "productFamily": "Serverless",
+      "attributes": {
+        "servicecode": "AWSLambda",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "group": "AWS-Lambda-Requests",
+        "groupDescription": "Invocation call for a Lambda function",
+        "usagetype": "Request",
+        "operation": ""
+      }
+    },
+    "TG3M4CAGBA3NYQBH": {
+      "sku": "TG3M4CAGBA3NYQBH",
+      "productFamily": "Serverless",
+      "attributes": {
+        "servicecode": "AWSLambda",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "group": "AWS-Lambda-Duration",
+        "groupDescription": "Invocation duration weighted by memory assigned to function, measured in GB-s",
+        "usagetype": "Lambda-GB-Second",
+        "operation": ""
+      }
+    }
+  },
+  "terms": {
+    "OnDemand": {
+      "GU2ZS9HVP6QTQ7KE": {
+        "GU2ZS9HVP6QTQ7KE.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "GU2ZS9HVP6QTQ7KE",
+          "priceDimensions": {
+            "GU2ZS9HVP6QTQ7KE.JRTCKXETXF.6YS6EN2CT7": {
+              "rateCode": "GU2ZS9HVP6QTQ7KE.JRTCKXETXF.6YS6EN2CT7",
+              "description": "AWS Lambda - Total Requests - US East (Northern Virginia)",
+              "beginRange": "0",
+              "endRange": "Inf",
+              "unit": "Requests",
+              "pricePerUnit": { "USD": "0.0000002000" }
+            }
+          },
+          "termAttributes": {}
+        }
+      },
+      "TG3M4CAGBA3NYQBH": {
+        "TG3M4CAGBA3NYQBH.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "TG3M4CAGBA3NYQBH",
+          "priceDimensions": {
+            "TG3M4CAGBA3NYQBH.JRTCKXETXF.CUKFZ388N3": {
+              "rateCode": "TG3M4CAGBA3NYQBH.JRTCKXETXF.CUKFZ388N3",
+              "description": "AWS Lambda - Total Compute - US East (Northern Virginia) - per GB-Second of duration",
+              "beginRange": "0",
+              "endRange": "6000000000",
+              "unit": "Second",
+              "pricePerUnit": { "USD": "0.0000166667" }
+            }
+          },
+          "termAttributes": {}
+        }
+      }
+    }
+  }
+}

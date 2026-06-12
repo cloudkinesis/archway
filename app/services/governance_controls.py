@@ -149,6 +149,24 @@ def _required_control_types(action_type: str, impact_level: str) -> set[str]:
 
 
 def _action_type(flow: ArchitectureFlow) -> str | None:
+    """Detect the effectful action type for a flow.
+
+    Priority:
+    1. Explicit typed metadata (``action_intent``, ``external_write``,
+       ``mutates_source_system``, ``requires_approval``, ``governed_action_candidate``,
+       ``automation_mode``, ``customer_or_patient_impacting``, ``target_system_type``;
+       also the existing healthcare keys ``approval_required``/``patient_impacting``/
+       ``governance_mode``).
+    2. Existing label/classification string matching as a UNION fallback.
+
+    Union semantics: a flow is effectful if typed metadata OR string matching says
+    so, so this never removes governance that the previous string logic produced.
+    Typed metadata is preferred only for choosing the concrete action type.
+    """
+    return _typed_action_type(flow) or _string_action_type(flow)
+
+
+def _string_action_type(flow: ArchitectureFlow) -> str | None:
     classification = str(flow.metadata.get("classification", "")).lower()
     label = (flow.label or "").lower()
     text = f"{classification} {label}"
@@ -158,7 +176,72 @@ def _action_type(flow: ArchitectureFlow) -> str | None:
     return None
 
 
+def _truthy(value) -> bool:
+    return value is True or str(value).strip().lower() in {"true", "1", "yes"}
+
+
+def _meta(md: dict, *keys: str):
+    for key in keys:
+        if key in md and md[key] not in (None, ""):
+            return md[key]
+    return None
+
+
+def _typed_action_type(flow: ArchitectureFlow) -> str | None:
+    md = flow.metadata or {}
+    intent = str(_meta(md, "action_intent") or "").lower()
+    external = _truthy(_meta(md, "external_write"))
+    mutates = _truthy(_meta(md, "mutates_source_system"))
+    requires_approval = _truthy(_meta(md, "requires_approval", "approval_required"))
+    candidate = _truthy(_meta(md, "governed_action_candidate"))
+    customer_impacting = _truthy(_meta(md, "customer_or_patient_impacting"))
+    automation = str(_meta(md, "automation_mode", "governance_mode") or "").lower()
+    target = str(_meta(md, "target_system_type") or "").lower()
+
+    external_targets = {
+        "ehr", "payment_network", "case_management", "contract_repository",
+        "workflow_system", "network_controller", "ticketing", "device", "device_fleet",
+        "generic_external_system",
+    }
+    governance_automation = automation in {"approval_required", "policy_approved", "prohibited", "site_policy_required"}
+    state_changing = intent in {"create", "update", "delete", "writeback", "block", "publish"}
+    has_risk_signal = external or mutates or requires_approval or candidate or customer_impacting or governance_automation
+
+    effectful = (
+        has_risk_signal
+        or intent in {"delete", "block"}
+        or (state_changing and target in external_targets)
+    )
+    if not effectful:
+        return None
+
+    if intent == "delete":
+        return "delete"
+    if intent == "block" or target == "payment_network":
+        return "trade_block"
+    if target == "network_controller":
+        return "network_change"
+    if target in {"device", "device_fleet"}:
+        return "device_update"
+    if intent == "create":
+        return "create"
+    if external or mutates or intent in {"writeback", "publish"} or target in external_targets:
+        return "external_write"
+    if intent == "update":
+        return "update"
+    # A risk signal exists but the intent is vague: fail safe as an external write.
+    return "external_write"
+
+
 def _impact_level(flow: ArchitectureFlow, action_type: str) -> str:
+    levels = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+    string_impact = _string_impact_level(flow, action_type)
+    typed_impact = _typed_impact_level(flow)
+    # Never reduce below the string-derived impact (union/no-relax).
+    return string_impact if levels[string_impact] >= levels[typed_impact] else typed_impact
+
+
+def _string_impact_level(flow: ArchitectureFlow, action_type: str) -> str:
     text = f"{flow.label or ''} {flow.metadata}".lower()
     if any(term in text for term in ("safety", "catastrophic", "kill switch", "public", "customer-impacting")):
         return "critical"
@@ -166,6 +249,17 @@ def _impact_level(flow: ArchitectureFlow, action_type: str) -> str:
         return "high"
     if action_type in {"create", "update", "external_write"}:
         return "medium"
+    return "low"
+
+
+def _typed_impact_level(flow: ArchitectureFlow) -> str:
+    md = flow.metadata or {}
+    if _truthy(_meta(md, "customer_or_patient_impacting")):
+        return "critical"
+    if _truthy(_meta(md, "external_write")) or _truthy(_meta(md, "mutates_source_system")):
+        return "high"
+    if _truthy(_meta(md, "requires_approval")):
+        return "high"
     return "low"
 
 

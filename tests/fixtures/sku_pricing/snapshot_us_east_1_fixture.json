@@ -1,0 +1,14 @@
+{
+  "snapshot_id": "json-fixture-us-east-1-v1",
+  "generated_at": "2026-06-08T00:00:00+00:00",
+  "region": "us-east-1",
+  "source": "static_fixture",
+  "currency": "USD",
+  "services": ["Amazon S3", "AWS Lambda", "Amazon SQS"],
+  "rates": [
+    {"service_name": "Amazon S3", "service_code": "AmazonS3", "region": "us-east-1", "dimension_key": "s3_standard_storage_gb_month", "usage_type": "TimedStorage-ByteHrs", "unit": "GB-Mo", "rate": "0.023", "currency": "USD", "sku": "S3-Standard-FIXTURE", "price_dimension_id": "S3-Standard-FIXTURE.dim"},
+    {"service_name": "AWS Lambda", "service_code": "AWSLambda", "region": "us-east-1", "dimension_key": "lambda_requests", "usage_type": "Request", "unit": "Requests", "rate": "0.0000002", "currency": "USD", "sku": "Lambda-Requests-FIXTURE", "price_dimension_id": "Lambda-Requests-FIXTURE.dim"},
+    {"service_name": "AWS Lambda", "service_code": "AWSLambda", "region": "us-east-1", "dimension_key": "lambda_gb_seconds", "usage_type": "Lambda-GB-Second", "unit": "GB-Second", "rate": "0.0000166667", "currency": "USD", "sku": "Lambda-Duration-FIXTURE", "price_dimension_id": "Lambda-Duration-FIXTURE.dim"},
+    {"service_name": "Amazon SQS", "service_code": "AmazonSQS", "region": "us-east-1", "dimension_key": "sqs_requests", "usage_type": "Requests-Tier1", "unit": "Requests", "rate": "0.0000004", "currency": "USD", "sku": "SQS-Requests-FIXTURE", "price_dimension_id": "SQS-Requests-FIXTURE.dim"}
+  ]
+}

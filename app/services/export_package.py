@@ -5,17 +5,23 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import asyncio
 import copy
 import json
+import threading
 
-from app.core.logging import AuditLogger, hash_payload, read_session_logs
+from app.core.config import get_settings
+from app.core.logging import AuditLogger, hash_payload, read_session_audit
 from app.db.session_store import SessionStore
 from app.models.domain import ExportBundle
 from app.services.artifacts import ArtifactStore
 from app.services.build_status import BuildStatusService
 from app.services.convergence.golden_convergence_orchestrator import GoldenConvergenceOrchestrator, quality_summary_markdown
 from app.services.deep_dossier import DeepDossierService
+from app.services.dossier_manifest import MANIFEST_FILENAME, build_dossier_manifest, manifest_markdown
 from app.services.golden_regression import GoldenRegressionExportService
 from app.services.jobs import job_manager
 from app.services.llm.telemetry import llm_telemetry_store
+from app.services.mcp_security import mcp_security_status
+from app.services.sku_pricing.export_trace import build_pilot_trace_files, pilot_trace_hash
+from app.services.sku_pricing.official_snapshot_builder import UNSUPPORTED_OFFICIAL_DIMENSIONS
 
 
 class ExportPackageService:
@@ -37,10 +43,10 @@ class ExportPackageService:
         warnings: list[str] = []
 
         progress(18, "Collecting quality and repair summary.")
-        convergence_result = _await_or_none(
-            GoldenConvergenceOrchestrator().run(session_id, session.initial_use_case, [], "deep_dossier"),
-            warnings,
+        convergence_result, convergence_status, convergence_reason = _collect_async(
+            lambda: GoldenConvergenceOrchestrator().run(session_id, session.initial_use_case, [], "deep_dossier"),
             "golden convergence",
+            warnings,
         )
 
         progress(26, "Collecting research, architecture, pricing, and diagram outputs.")
@@ -50,8 +56,25 @@ class ExportPackageService:
         architectures = _read_known_json(root, "architecture/specs.json", warnings)
         architecture_revisions = _read_known_json(root, "architecture/revisions.json", warnings)
         diagrams = _read_known_json(root, "diagrams/gallery.json", warnings)
-        logs = read_session_logs(session_id)
-        build_status = _await_or_none(BuildStatusService().status(), warnings, "build status")
+        audit = read_session_audit(session_id)
+        logs = audit.events
+        if audit.status in {"degraded", "unreadable"}:
+            _warn_once(
+                warnings,
+                f"Audit log {audit.status}: {audit.malformed_count} malformed / {audit.skipped_count} skipped line(s) were dropped.",
+            )
+        build_status, build_status_status, build_status_reason = _collect_async(
+            lambda: BuildStatusService().status(),
+            "build status",
+            warnings,
+        )
+        if build_status is None:
+            build_status = {
+                "status": build_status_status,
+                "computed": False,
+                "reason": build_status_reason or "Build status could not be collected during export.",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            }
         golden_regression = GoldenRegressionExportService().export()
         job_telemetry = _job_telemetry(session_id, finalize_export=True, export_result_path=f"exports/{export_name}.zip")
         workflow_status = _workflow_status(session, report)
@@ -101,6 +124,20 @@ class ExportPackageService:
             included_artifacts.append(f"exports/{export_name}/{relative_name}")
 
         progress(66, "Writing raw evidence and trace payloads.")
+        quality_payloads, quality_artifact_records = self._collect_quality_artifacts(
+            session_id, root, convergence_status, convergence_reason,
+        )
+        quality_artifact_status = {
+            "golden_convergence": {"status": convergence_status, "reason": convergence_reason},
+            "build_status": {"status": build_status_status, "reason": build_status_reason},
+            "customer_readiness": quality_artifact_records["customer_readiness"],
+            "quality_findings": quality_artifact_records["quality_findings"],
+            "repair_plan": quality_artifact_records["repair_plan"],
+            "golden_convergence_result": quality_artifact_records["golden_convergence_result"],
+            "diagram_qa": _diagram_qa_status(diagrams),
+            "pricing_headline_safety": _pricing_headline_status(pricing),
+            "pricing_readiness": _pricing_readiness_status(pricing),
+        }
         raw_payloads = {
             "session": session.model_dump(mode="json"),
             "brief": brief,
@@ -110,6 +147,8 @@ class ExportPackageService:
             "architecture_revisions": architecture_revisions,
             "diagram_gallery": diagrams,
             "diagnostics": logs,
+            "audit_log": audit.to_dict(),
+            "mcp_security": mcp_security_status(get_settings()),
             "build_status": build_status,
             "golden_regression_summary": golden_regression,
             "job_telemetry": job_telemetry,
@@ -133,13 +172,14 @@ class ExportPackageService:
             "service_usage_dimensions": _pricing_metadata(pricing, "service_usage_dimensions"),
             "aws_rate_bindings": _pricing_metadata(pricing, "aws_rate_bindings"),
             "pricing_ledger": _pricing_metadata(pricing, "pricing_ledger"),
-            "readiness_report": _read_known_json(root, "quality/customer_readiness.json", warnings) or _report_metadata(report, "customer_readiness"),
+            "readiness_report": quality_payloads["customer_readiness"],
             "source_policy": _source_policy_payload(report),
             "architecture_critiques": _architecture_critiques(architectures),
-            "golden_convergence_result": convergence_result.model_dump(mode="json") if convergence_result else _read_known_json(root, "quality/golden_convergence_result.json", warnings),
-            "quality_findings": _read_known_json(root, "quality/quality_findings.json", warnings),
-            "repair_plan": _read_known_json(root, "quality/repair_plan.json", warnings),
-            "customer_readiness": _read_known_json(root, "quality/customer_readiness.json", warnings),
+            "golden_convergence_result": convergence_result.model_dump(mode="json") if convergence_result else quality_payloads["golden_convergence_result"],
+            "quality_findings": quality_payloads["quality_findings"],
+            "repair_plan": quality_payloads["repair_plan"],
+            "customer_readiness": quality_payloads["customer_readiness"],
+            "quality_artifact_status": quality_artifact_status,
         }
         raw_dir = export_dir / "raw"
         raw_dir.mkdir(exist_ok=True)
@@ -157,11 +197,19 @@ class ExportPackageService:
             "created_at": datetime.now(timezone.utc).isoformat(),
             "included_artifacts": included_artifacts,
             "warnings": warnings,
+            "quality_artifact_status": quality_artifact_status,
             "inputs_hash": hash_payload(raw_payloads),
         }
         manifest_path = export_dir / "manifest.json"
         manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         included_artifacts.append(f"exports/{export_name}/manifest.json")
+
+        progress(84, "Building verifiable dossier manifest.")
+        self._write_dossier_layer(
+            export_dir, export_name, session, brief, report, pricing,
+            architectures, architecture_revisions, diagrams, convergence_result,
+            warnings, included_artifacts,
+        )
 
         progress(88, "Building ZIP package.")
         zip_path = root / "exports" / f"{export_name}.zip"
@@ -187,6 +235,62 @@ class ExportPackageService:
             warnings=warnings,
         )
 
+    def _collect_quality_artifacts(self, session_id: str, root: Path, convergence_status: str, convergence_reason: str | None):
+        """Collect quality artifacts without emitting raw "missing optional" warnings.
+
+        For each quality artifact: if present, use it; otherwise write a deterministic
+        placeholder (status: present/skipped/deferred/not_applicable/failed) into the
+        session quality dir so the export carries an explicit, honest record instead of
+        a bare missing-artifact warning. Customer readiness fails closed when absent.
+        """
+        specs = {
+            "golden_convergence_result": "quality/golden_convergence_result.json",
+            "quality_findings": "quality/quality_findings.json",
+            "repair_plan": "quality/repair_plan.json",
+            "customer_readiness": "quality/customer_readiness.json",
+        }
+        timestamp = datetime.now(timezone.utc).isoformat()
+        payloads: dict = {}
+        records: dict = {}
+        for key, relative in specs.items():
+            existing = _read_json_quiet(root, relative)
+            if existing is not None:
+                payloads[key] = existing
+                records[key] = {"status": "present", "artifact": relative}
+                continue
+            if convergence_status == "failed":
+                art_status = "failed"
+                reason = convergence_reason or "Golden convergence failed during export."
+            elif convergence_status == "present":
+                art_status = "not_applicable"
+                reason = "Golden convergence completed but did not emit this artifact for this run."
+            else:
+                art_status = "deferred"
+                reason = convergence_reason or "Quality computation was deferred during export."
+            if key == "customer_readiness":
+                placeholder = {
+                    "status": "directional_only",
+                    "computed": False,
+                    "reason": "Customer readiness was not recomputed during export; using current research/pricing/diagram validation state.",
+                    "customer_ready": False,
+                    "procurement_ready": False,
+                    "quality_artifact_status": art_status,
+                    "generated_at": timestamp,
+                }
+            else:
+                placeholder = {
+                    "status": art_status,
+                    "computed": False,
+                    "reason": reason,
+                    "recommended_next_action": "Run the convergence/quality pass (or re-run export) to populate this artifact.",
+                    "customer_readiness_affected": key in {"golden_convergence_result", "quality_findings"},
+                    "generated_at": timestamp,
+                }
+            self.artifacts.write_json(session_id, "quality", key, placeholder)
+            payloads[key] = placeholder
+            records[key] = {"status": art_status, "reason": reason, "artifact": relative}
+        return payloads, records
+
     def _readme(self, session_name: str) -> str:
         return "\n".join([
             f"# {session_name}",
@@ -204,6 +308,105 @@ class ExportPackageService:
             "- Diagram gallery index and diagram files when available",
             "- Evidence appendix",
             "- Diagnostics summary",
+            "",
+        ])
+
+    def _write_dossier_layer(
+        self, export_dir: Path, export_name: str, session, brief, report, pricing,
+        architectures, architecture_revisions, diagrams, convergence_result,
+        warnings: list[str], included_artifacts: list[str],
+    ) -> None:
+        """Write supplemental SKU trace files + the verifiable dossier manifest.
+
+        Purely additive. Never changes legacy totals or global readiness; the SKU
+        trace files appear only when SKU pilot metadata is present.
+        """
+        settings = get_settings()
+        pilot = ((pricing or {}).get("metadata") or {}).get("sku_pricing_pilot")
+        sku_trace_hash = None
+        if pilot:
+            pricing_dir = export_dir / "pricing"
+            pricing_dir.mkdir(exist_ok=True)
+            trace_files = build_pilot_trace_files(pilot)
+            for name, key in (
+                ("sku_pricing_pilot_trace.json", "json"),
+                ("sku_pricing_pilot_trace.csv", "csv"),
+                ("sku_pricing_pilot_summary.md", "md"),
+            ):
+                (pricing_dir / name).write_text(trace_files[key], encoding="utf-8")
+                included_artifacts.append(f"exports/{export_name}/pricing/{name}")
+            sku_trace_hash = pilot_trace_hash(pilot)
+
+        (export_dir / "README_DOSSIER.md").write_text(self._readme_dossier(), encoding="utf-8")
+        included_artifacts.append(f"exports/{export_name}/README_DOSSIER.md")
+
+        feature_flags = {
+            "enable_sku_pricing_pilot": settings.enable_sku_pricing_pilot,
+            "sku_pricing_snapshot_configured": bool(settings.sku_pricing_snapshot_path),
+            "llm_provider": settings.llm_provider,
+        }
+        dossier = build_dossier_manifest(
+            export_dir,
+            session_id=session.id,
+            export_name=export_name,
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            session_input=getattr(session, "initial_use_case", None),
+            brief=brief,
+            report=report,
+            pricing=pricing,
+            architectures=architectures,
+            architecture_revisions=architecture_revisions,
+            diagrams=diagrams,
+            warnings=warnings,
+            feature_flags=feature_flags,
+            convergence_status=getattr(convergence_result, "final_status", None),
+            sku_trace_hash=sku_trace_hash,
+            unsupported_dimensions=dict(UNSUPPORTED_OFFICIAL_DIMENSIONS),
+        )
+        (export_dir / MANIFEST_FILENAME).write_text(
+            json.dumps(dossier, indent=2, sort_keys=True, default=str), encoding="utf-8"
+        )
+        (export_dir / "dossier_manifest.md").write_text(manifest_markdown(dossier), encoding="utf-8")
+        included_artifacts.append(f"exports/{export_name}/{MANIFEST_FILENAME}")
+        included_artifacts.append(f"exports/{export_name}/dossier_manifest.md")
+
+    def _readme_dossier(self) -> str:
+        return "\n".join([
+            "# Verifiable Solution Dossier",
+            "",
+            "This package ships a `dossier_manifest.json` — the trust spine of the export.",
+            "It records, for this solution, what is verified, what is directional, what is",
+            "missing, what failed closed, what can be reproduced, and what is NOT",
+            "procurement-ready.",
+            "",
+            "## How to verify this package",
+            "```",
+            "python scripts/verify_solution_dossier.py /path/to/this/export",
+            "```",
+            "The verifier recomputes every artifact hash in the manifest inventory and checks",
+            "required artifacts exist. It performs NO network calls and NO regeneration.",
+            "",
+            "## What SKU-backed pilot pricing means",
+            "When present, `pricing/sku_pricing_pilot_*` is a SUPPLEMENTAL SKU-backed trace",
+            "for a narrow service set. It does NOT replace the legacy estimate and does NOT",
+            "change global headline/procurement readiness.",
+            "",
+            "## Why rate authority and quantity confirmation are separate",
+            "- `rate_authoritative` means the rate was bound to an official-source-backed",
+            "  snapshot. Fixture-backed rates are never authoritative.",
+            "- `quantities_confirmed` means the workload quantities were explicitly confirmed.",
+            "- Procurement-ready requires BOTH. Authoritative rates with assumed quantities are",
+            "  NOT procurement-ready.",
+            "",
+            "## Why EventBridge may be 'not estimated'",
+            "AWS bills EventBridge custom events per 64KB chunk, not per raw event. Until a",
+            "chunk-quantity model exists, EventBridge fails closed rather than guessing.",
+            "",
+            "## Terms",
+            "- Directional: indicative only; not a procurement quote.",
+            "- Procurement-ready: bound to authoritative rates AND confirmed quantities, with",
+            "  every required line bound and no ambiguity. Global procurement-ready is not",
+            "  promoted by the SKU pilot.",
             "",
         ])
 
@@ -288,7 +491,8 @@ class ExportPackageService:
             return "# Pricing\n\nNo pricing estimate was available at export time.\n"
         metadata = pricing.get("metadata") or {}
         closure = metadata.get("pricing_driver_closure") or {}
-        headline_safe = metadata.get("pricing_can_be_displayed_as_headline", True) is not False
+        # Fail closed: a missing flag must mean "not headline-safe". Explicit True is preserved.
+        headline_safe = metadata.get("pricing_can_be_displayed_as_headline", False) is not False
         if headline_safe:
             headline_lines = [
                 f"Estimated monthly range: ${pricing.get('low_monthly_usd')}-${pricing.get('high_monthly_usd')}",
@@ -635,6 +839,11 @@ def _safe_name(value: str) -> str:
 
 
 def _await_or_none(coro, warnings: list[str], label: str):
+    """Legacy degrade helper (kept for compatibility).
+
+    Prefer ``_collect_async`` in the export path, which runs the collector safely
+    even when a loop is already running. This helper still defers inside a loop.
+    """
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -648,6 +857,88 @@ def _await_or_none(coro, warnings: list[str], label: str):
     except Exception as exc:
         _warn_once(warnings, f"Could not collect {label}: {type(exc).__name__}")
         return None
+
+
+def _run_coro_blocking(factory):
+    """Run an async coroutine to completion from sync code, loop-safe.
+
+    If no event loop is running, use ``asyncio.run``. If a loop is already running
+    on this thread, offload to a dedicated worker thread (which has no running loop)
+    and run ``asyncio.run`` there. This avoids nested-loop hacks and never calls an
+    unsafe ``run``/``run_until_complete`` on the already-running loop.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(factory())
+    result: dict = {}
+    error: dict = {}
+
+    def _runner():
+        try:
+            result["value"] = asyncio.run(factory())
+        except BaseException as exc:  # noqa: BLE001 - re-raised on the calling thread
+            error["error"] = exc
+
+    thread = threading.Thread(target=_runner, name="archway-export-async", daemon=True)
+    thread.start()
+    thread.join()
+    if "error" in error:
+        raise error["error"]
+    return result.get("value")
+
+
+def _collect_async(factory, label: str, warnings: list[str]):
+    """Collect an async result loop-safely. Returns (result, status, reason).
+
+    status is "present" on success or "failed" on exception. A single, exact
+    warning is recorded on failure (deduplicated); no vague event-loop warning is
+    produced because the collector runs regardless of execution context.
+    """
+    try:
+        return _run_coro_blocking(factory), "present", None
+    except Exception as exc:  # noqa: BLE001
+        reason = f"{type(exc).__name__}: {exc}"[:300]
+        _warn_once(warnings, f"Could not collect {label}: {reason}")
+        return None, "failed", reason
+
+
+def _read_json_quiet(root: Path, relative: str):
+    path = (root / relative).resolve()
+    if root in path.parents and path.is_file():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+    return None
+
+
+def _diagram_qa_status(diagrams) -> dict:
+    if not diagrams:
+        return {"status": "not_applicable", "reason": "No diagram gallery was available at export time."}
+    qa_reports = [qa for gallery in diagrams for qa in (gallery.get("qa_reports") or [])]
+    if not qa_reports:
+        return {"status": "not_applicable", "reason": "No diagram QA reports were present."}
+    return {"status": "present", "passed": all(qa.get("passed", False) for qa in qa_reports)}
+
+
+def _pricing_headline_status(pricing) -> dict:
+    if not pricing:
+        return {"status": "not_applicable", "reason": "No pricing estimate was available at export time."}
+    metadata = pricing.get("metadata") or {}
+    return {"status": "present", "headline_safe": bool(metadata.get("pricing_can_be_displayed_as_headline", False))}
+
+
+def _pricing_readiness_status(pricing) -> dict:
+    if not pricing:
+        return {"status": "not_applicable", "reason": "No pricing estimate was available at export time."}
+    metadata = pricing.get("metadata") or {}
+    ledger_summary = (metadata.get("pricing_ledger") or {}).get("summary") or {}
+    return {
+        "status": "present",
+        "pricing_maturity": metadata.get("pricing_maturity"),
+        "procurement_ready": bool(ledger_summary.get("procurement_ready", False)),
+    }
 
 
 def _job_telemetry(session_id: str, *, finalize_export: bool = False, export_result_path: str | None = None) -> dict:

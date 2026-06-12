@@ -19,9 +19,23 @@ from app.models.domain import (
     UseCaseGap,
     UserPersona,
 )
+from app.services.capability_router import CapabilityRouter
 from app.services.discovery_planner import DiscoveryPlannerService
 from app.services.pattern_catalog import poc_scope, pricing_dimensions, production_scope
 from app.services.use_case_profile import profile_from_metadata, profile_to_metadata, profile_use_case, refine_profile_with_context
+
+
+def _attach_capability_decision(profile, raw_use_case: str) -> None:
+    """Attach the deterministic CapabilityRouter decision to the profile.
+
+    The advisory model prior (discovery_plan) is consumed read-only and can never set
+    the capability status. Never breaks synthesis.
+    """
+    try:
+        decision = CapabilityRouter().route(profile, getattr(profile, "discovery_plan", {}) or {}, raw_use_case=raw_use_case)
+        profile.capability_decision = decision.to_dict()
+    except Exception:  # noqa: BLE001 - routing metadata must never break synthesis
+        profile.capability_decision = {}
 
 
 class SynthesisEngine:
@@ -41,6 +55,7 @@ class SynthesisEngine:
             profile,
             previous_answers=[],
         ).model_dump(mode="json")
+        _attach_capability_decision(profile, raw_use_case)
         industry = profile.domain or _detect_industry(raw_use_case)
         sensitive = _looks_sensitive(raw_use_case, industry)
         title = _title_from_use_case(raw_use_case)
@@ -97,6 +112,7 @@ class SynthesisEngine:
             session_id=session_id,
         )
         profile.discovery_plan = plan.model_dump(mode="json")
+        _attach_capability_decision(profile, brief.raw_use_case)
         brief.use_case_profile = profile_to_metadata(profile)
         brief.open_questions = _questions_for_profile(profile)
         return brief
@@ -106,12 +122,19 @@ class SynthesisEngine:
         profile_metadata = dict(updated.use_case_profile or {})
         interview = dict(profile_metadata.get("interview") or {})
         answered = list(interview.get("answered") or [])
+        clarifications = list(interview.get("clarifications") or [])
         profile = profile_from_metadata(updated.use_case_profile, updated.raw_use_case)
         questions = _synthesis_questions(profile, _readiness_assumptions(profile))
-        current = next((item for item in questions if item.id not in answered), questions[0] if questions else None)
+        current = next((item for item in questions if item.id not in answered), None)
+        interview_complete = current is None and bool(questions)
         if current:
             answered.append(current.id)
             _record_interview_answer(updated, current, user_message)
+        elif interview_complete:
+            # All interview questions are already answered. Do NOT fall back to
+            # question[0]; treat the extra input as a clarification so we don't
+            # re-answer the first question or grow the brief with stale context.
+            _record_post_completion_clarification(updated, clarifications, user_message)
         lower = user_message.lower()
         if any(word in lower for word in ("production", "prod", "scale")):
             updated.scale_profile.posture = "production"
@@ -129,6 +152,7 @@ class SynthesisEngine:
             **dict(profile_metadata.get("interview") or {}),
             "answered": list(dict.fromkeys(answered)),
             "turn_count": len(set(answered)),
+            "clarifications": clarifications,
         }
         profile_metadata["interview"] = interview
         rerouted = refine_profile_with_context(
@@ -140,12 +164,16 @@ class SynthesisEngine:
             rerouted,
             previous_answers=[item.text for item in updated.assumptions if item.user_confirmed],
         ).model_dump(mode="json")
+        _attach_capability_decision(rerouted, updated.raw_use_case)
         profile_metadata = {**profile_to_metadata(rerouted), "interview": interview}
         updated.use_case_profile = profile_metadata
         updated.open_questions = _questions_for_profile(rerouted)
         readiness = self.readiness(updated)
-        question = _next_interview_question(updated)
-        message = _interview_message(question, len(set(answered)))
+        if interview_complete:
+            message = _COMPLETION_CLARIFICATION_MESSAGE
+        else:
+            question = _next_interview_question(updated)
+            message = _interview_message(question, len(set(answered)))
         return SynthesisResponse(message=message, brief=updated, readiness=readiness)
 
     def readiness(self, brief: UseCaseBrief) -> SynthesisReadiness:
@@ -228,6 +256,35 @@ def _record_interview_answer(brief: UseCaseBrief, question: SynthesisQuestion, a
         ))
     brief.open_questions = [item for item in brief.open_questions if question.prompt[:40].lower() not in item.text.lower()]
     brief.refined_problem_statement = f"{brief.refined_problem_statement}\n\nSynthesis interview note: {question.prompt} Answer: {text}"
+
+
+_COMPLETION_CLARIFICATION_MESSAGE = (
+    "Thanks — I’ve added this as an additional clarification. The brief is ready to proceed to research."
+)
+
+
+def _record_post_completion_clarification(brief: UseCaseBrief, clarifications: list[str], message: str) -> None:
+    """Record post-interview input as a clean, deduplicated clarification.
+
+    Called only when every interview question is already answered. It must not
+    re-answer a question, append junk/duplicate assumptions, or grow the refined
+    problem statement with stale question context.
+    """
+    text = message.strip()
+    if not text:
+        return
+    if any(text.lower() == existing.strip().lower() for existing in clarifications):
+        return
+    clarifications.append(text)
+    assumption_text = f"Additional clarification: {text}"
+    if assumption_text not in {item.text for item in brief.assumptions}:
+        brief.assumptions.append(Assumption(
+            text=assumption_text,
+            reason="Captured after the synthesis interview was complete; recorded as an additional clarification rather than a new interview answer.",
+            impact="scope",
+            confidence="medium",
+            user_confirmed=True,
+        ))
 
 
 def _question_impact(question_id: str):

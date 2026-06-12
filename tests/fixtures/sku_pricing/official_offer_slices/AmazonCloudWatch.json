@@ -1,0 +1,153 @@
+{
+  "formatVersion": "v1.0",
+  "disclaimer": "INFORMATIONAL TEST SLICE - small real-shape excerpt of the official AWS Price List offer file; NOT authoritative and NOT the full offer. Public rate data, us-east-1.",
+  "publicationDate": "2026-03-13T17:42:19Z",
+  "version": "20260313174219",
+  "offerCode": "AmazonCloudWatch",
+  "products": {
+    "S8QGXX5R2BKKMDSJ": {
+      "sku": "S8QGXX5R2BKKMDSJ",
+      "productFamily": "Data Payload",
+      "attributes": {
+        "servicecode": "AmazonCloudWatch",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "group": "Ingested Logs",
+        "groupDescription": "Existing system, application, and custom log files",
+        "usagetype": "USE1-DataProcessing-Bytes",
+        "operation": "PutLogEvents",
+        "logsDestination": "Amazon CloudWatch Logs",
+        "regionCode": "us-east-1",
+        "servicename": "AmazonCloudWatch",
+        "version": "Current"
+      }
+    },
+    "96K55R2PV3ZZZ3AM": {
+      "sku": "96K55R2PV3ZZZ3AM",
+      "productFamily": "Data Payload",
+      "attributes": {
+        "servicecode": "AmazonCloudWatch",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "group": "Ingested Logs",
+        "groupDescription": "Existing system, application, and custom log files",
+        "usagetype": "DataProcessing-Bytes",
+        "operation": "PutLogEvents",
+        "logsDestination": "Amazon CloudWatch Logs",
+        "regionCode": "us-east-1",
+        "servicename": "AmazonCloudWatch",
+        "version": "Legacy"
+      }
+    },
+    "6K9ADYQAHV5KX9KZ": {
+      "sku": "6K9ADYQAHV5KX9KZ",
+      "productFamily": "Storage Snapshot",
+      "attributes": {
+        "servicecode": "AmazonCloudWatch",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "storageMedia": "Amazon S3",
+        "usagetype": "USE1-TimedStorage-ByteHrs",
+        "operation": "",
+        "regionCode": "us-east-1",
+        "servicename": "AmazonCloudWatch",
+        "version": "Current"
+      }
+    },
+    "JRHJQ2UMPUB5K73A": {
+      "sku": "JRHJQ2UMPUB5K73A",
+      "productFamily": "Storage Snapshot",
+      "attributes": {
+        "servicecode": "AmazonCloudWatch",
+        "location": "US East (N. Virginia)",
+        "locationType": "AWS Region",
+        "storageMedia": "Amazon S3",
+        "usagetype": "TimedStorage-ByteHrs",
+        "operation": "",
+        "regionCode": "us-east-1",
+        "servicename": "AmazonCloudWatch",
+        "version": "Legacy"
+      }
+    }
+  },
+  "terms": {
+    "OnDemand": {
+      "S8QGXX5R2BKKMDSJ": {
+        "S8QGXX5R2BKKMDSJ.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "S8QGXX5R2BKKMDSJ",
+          "priceDimensions": {
+            "S8QGXX5R2BKKMDSJ.JRTCKXETXF.6YS6EN2CT7": {
+              "rateCode": "S8QGXX5R2BKKMDSJ.JRTCKXETXF.6YS6EN2CT7",
+              "description": "$0.50 per GB custom log data ingested in Standard log class - US East (Northern Virginia)",
+              "beginRange": "0",
+              "endRange": "Inf",
+              "unit": "GB",
+              "pricePerUnit": {
+                "USD": "0.5000000000"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      },
+      "96K55R2PV3ZZZ3AM": {
+        "96K55R2PV3ZZZ3AM.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "96K55R2PV3ZZZ3AM",
+          "priceDimensions": {
+            "96K55R2PV3ZZZ3AM.JRTCKXETXF.6YS6EN2CT7": {
+              "rateCode": "96K55R2PV3ZZZ3AM.JRTCKXETXF.6YS6EN2CT7",
+              "description": "$0.50 per GB custom log data ingested in Standard log class - US East (Northern Virginia)",
+              "beginRange": "0",
+              "endRange": "Inf",
+              "unit": "GB",
+              "pricePerUnit": {
+                "USD": "0.5000000000"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      },
+      "6K9ADYQAHV5KX9KZ": {
+        "6K9ADYQAHV5KX9KZ.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "6K9ADYQAHV5KX9KZ",
+          "priceDimensions": {
+            "6K9ADYQAHV5KX9KZ.JRTCKXETXF.6YS6EN2CT7": {
+              "rateCode": "6K9ADYQAHV5KX9KZ.JRTCKXETXF.6YS6EN2CT7",
+              "description": "$0.03 per GB-mo of log storage - US East (Northern Virginia)",
+              "beginRange": "0",
+              "endRange": "Inf",
+              "unit": "GB-Mo",
+              "pricePerUnit": {
+                "USD": "0.0300000000"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      },
+      "JRHJQ2UMPUB5K73A": {
+        "JRHJQ2UMPUB5K73A.JRTCKXETXF": {
+          "offerTermCode": "JRTCKXETXF",
+          "sku": "JRHJQ2UMPUB5K73A",
+          "priceDimensions": {
+            "JRHJQ2UMPUB5K73A.JRTCKXETXF.6YS6EN2CT7": {
+              "rateCode": "JRHJQ2UMPUB5K73A.JRTCKXETXF.6YS6EN2CT7",
+              "description": "$0.03 per GB-mo of log storage - US East (Northern Virginia)",
+              "beginRange": "0",
+              "endRange": "Inf",
+              "unit": "GB-Mo",
+              "pricePerUnit": {
+                "USD": "0.0300000000"
+              }
+            }
+          },
+          "termAttributes": {}
+        }
+      }
+    }
+  }
+}

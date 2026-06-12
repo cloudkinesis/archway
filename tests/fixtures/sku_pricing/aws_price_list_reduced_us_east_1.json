@@ -1,0 +1,17 @@
+{
+  "_note": "REDUCED AWS Price List-style fixture for tests. Not the full AWS Price List. Representative us-east-1 OnDemand USD rates for the supported service subset.",
+  "region": "us-east-1",
+  "currency": "USD",
+  "products": [
+    {"service_name": "Amazon S3", "service_code": "AmazonS3", "region": "us-east-1", "usage_type": "TimedStorage-ByteHrs", "operation": "StandardStorage", "sku": "S3STD-USE1", "price_dimension_id": "S3STD-USE1.JRTCKXETXF.6YS6EN2CT7", "unit": "GB-Mo", "usd_rate": "0.023", "dimension_key": "s3_standard_storage_gb_month"},
+    {"service_name": "AWS Lambda", "service_code": "AWSLambda", "region": "us-east-1", "usage_type": "Request", "operation": "Invoke", "sku": "LAMBDA-REQ-USE1", "price_dimension_id": "LAMBDA-REQ-USE1.dim", "unit": "Requests", "usd_rate": "0.0000002", "dimension_key": "lambda_requests"},
+    {"service_name": "AWS Lambda", "service_code": "AWSLambda", "region": "us-east-1", "usage_type": "Lambda-GB-Second", "operation": "Invoke", "sku": "LAMBDA-DUR-USE1", "price_dimension_id": "LAMBDA-DUR-USE1.dim", "unit": "GB-Second", "usd_rate": "0.0000166667", "dimension_key": "lambda_gb_seconds"},
+    {"service_name": "Amazon SQS", "service_code": "AmazonSQS", "region": "us-east-1", "usage_type": "Requests-Tier1", "operation": "Standard", "sku": "SQS-REQ-USE1", "price_dimension_id": "SQS-REQ-USE1.dim", "unit": "Requests", "usd_rate": "0.0000004", "dimension_key": "sqs_requests"},
+    {"service_name": "Amazon EventBridge", "service_code": "AmazonEventBridge", "region": "us-east-1", "usage_type": "Event-64K-Chunks", "operation": "PutEvents", "sku": "EB-EVT-USE1", "price_dimension_id": "EB-EVT-USE1.dim", "unit": "Events", "usd_rate": "0.000001", "dimension_key": "eventbridge_custom_events"},
+    {"service_name": "Amazon DynamoDB", "service_code": "AmazonDynamoDB", "region": "us-east-1", "usage_type": "WriteRequestUnits", "operation": "PayPerRequestThroughput", "sku": "DDB-WRU-USE1", "price_dimension_id": "DDB-WRU-USE1.dim", "unit": "WriteRequestUnits", "usd_rate": "0.00000125", "dimension_key": "dynamodb_write_request_units"},
+    {"service_name": "Amazon DynamoDB", "service_code": "AmazonDynamoDB", "region": "us-east-1", "usage_type": "ReadRequestUnits", "operation": "PayPerRequestThroughput", "sku": "DDB-RRU-USE1", "price_dimension_id": "DDB-RRU-USE1.dim", "unit": "ReadRequestUnits", "usd_rate": "0.00000025", "dimension_key": "dynamodb_read_request_units"},
+    {"service_name": "Amazon DynamoDB", "service_code": "AmazonDynamoDB", "region": "us-east-1", "usage_type": "TimedStorage-ByteHrs", "operation": "StandardStorage", "sku": "DDB-STORE-USE1", "price_dimension_id": "DDB-STORE-USE1.dim", "unit": "GB-Mo", "usd_rate": "0.25", "dimension_key": "dynamodb_storage_gb_month"},
+    {"service_name": "Amazon CloudWatch Logs", "service_code": "AmazonCloudWatch", "region": "us-east-1", "usage_type": "DataProcessing-Bytes", "operation": "PutLogEvents", "sku": "CWL-ING-USE1", "price_dimension_id": "CWL-ING-USE1.dim", "unit": "GB", "usd_rate": "0.50", "dimension_key": "cwl_ingestion_gb"},
+    {"service_name": "Amazon CloudWatch Logs", "service_code": "AmazonCloudWatch", "region": "us-east-1", "usage_type": "TimedStorage-ByteHrs", "operation": "StandardStorage", "sku": "CWL-STORE-USE1", "price_dimension_id": "CWL-STORE-USE1.dim", "unit": "GB-Mo", "usd_rate": "0.03", "dimension_key": "cwl_storage_gb_month"}
+  ]
+}

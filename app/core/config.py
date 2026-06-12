@@ -45,10 +45,11 @@ class Settings(BaseModel):
     data_dir: Path = Field(default_factory=lambda: Path(os.getenv("ARCHWAY_DATA_DIR", ".archway")))
     ollama_url: str = Field(default_factory=lambda: os.getenv("ARCHWAY_OLLAMA_URL", "http://localhost:11434"))
     ollama_model: str = Field(default_factory=lambda: os.getenv("ARCHWAY_OLLAMA_MODEL", "llama3.1"))
-    diagram_compiler_path: Path = Field(
-        default_factory=lambda: Path(
-            os.getenv("ARCHWAY_DIAGRAM_COMPILER_PATH", "/Users/arnab/Documents/Archway Diagram Compiler/src")
-        )
+    # Explicit external compiler override only (debug/fallback). The default
+    # runtime imports the vendored package from packages/archway_diagram_compiler/src;
+    # see app/services/diagram_compiler_adapter.py.
+    diagram_compiler_path: Path | None = Field(
+        default_factory=lambda: Path(os.getenv("ARCHWAY_DIAGRAM_COMPILER_PATH")) if os.getenv("ARCHWAY_DIAGRAM_COMPILER_PATH") else None
     )
     compiler_total_timeout_seconds: float = Field(
         default_factory=lambda: float(os.getenv("ARCHWAY_COMPILER_TOTAL_TIMEOUT_SECONDS", "120"))
@@ -92,6 +93,25 @@ class Settings(BaseModel):
     enable_aws_official_web_fallback: bool = Field(
         default_factory=lambda: os.getenv("ARCHWAY_ENABLE_AWS_OFFICIAL_WEB_FALLBACK", "false") == "true"
     )
+    # MCP endpoint trust controls. Tokens are only ever attached to trusted endpoints:
+    # localhost + private network by default; external hosts must be explicitly
+    # allowlisted (or globally opted-in). Arbitrary external hosts are fail-closed.
+    mcp_allow_localhost: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_MCP_ALLOW_LOCALHOST", "true") == "true"
+    )
+    mcp_allow_private_network: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_MCP_ALLOW_PRIVATE_NETWORK", "true") == "true"
+    )
+    mcp_allow_external: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_MCP_ALLOW_EXTERNAL", "false") == "true"
+    )
+    mcp_allowed_hosts: list[str] = Field(
+        default_factory=lambda: [
+            item.strip().lower()
+            for item in os.getenv("ARCHWAY_MCP_ALLOWED_HOSTS", "").split(",")
+            if item.strip()
+        ]
+    )
     aws_price_list_bulk_index_url: str = Field(
         default_factory=lambda: os.getenv(
             "ARCHWAY_AWS_PRICE_LIST_BULK_INDEX_URL",
@@ -108,6 +128,28 @@ class Settings(BaseModel):
     bedrock_temperature_default: float = Field(default_factory=lambda: float(os.getenv("ARCHWAY_BEDROCK_TEMPERATURE_DEFAULT", "0.2")))
     bedrock_enable_structured_output: bool = Field(default_factory=lambda: os.getenv("ARCHWAY_BEDROCK_ENABLE_STRUCTURED_OUTPUT", "true") == "true")
     max_request_bytes: int = 64_000
+    # In-memory job lifecycle TTL/eviction (best-effort cleanup of terminal jobs).
+    job_completed_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv("ARCHWAY_JOB_COMPLETED_TTL_SECONDS", "3600")))
+    job_failed_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv("ARCHWAY_JOB_FAILED_TTL_SECONDS", "21600")))
+    job_max_retained: int = Field(default_factory=lambda: int(os.getenv("ARCHWAY_JOB_MAX_RETAINED", "500")))
+    # Frontier-model domain prior (advisory only). Default OFF -> deterministic
+    # Discovery Planner is the default; the model prior is an explicit opt-in and is
+    # quarantined to interview questions + a generic fallback-family candidate only.
+    enable_frontier_domain_prior: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_FRONTIER_DOMAIN_PRIOR", "false") == "true"
+    )
+    frontier_domain_prior_max_calls_per_session: int = Field(
+        default_factory=lambda: max(0, int(os.getenv("ARCHWAY_FRONTIER_DOMAIN_PRIOR_MAX_CALLS_PER_SESSION", "1")))
+    )
+    # Pilot: attach a supplemental SKU-backed pricing trace (legal/document RAG only).
+    # Default OFF. When off, pricing behavior is byte/behavior equivalent to baseline.
+    # Does NOT reuse the domain-pack registry flag.
+    enable_sku_pricing_pilot: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_SKU_PRICING_PILOT", "false") == "true"
+    )
+    sku_pricing_snapshot_path: str | None = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_SKU_PRICING_SNAPSHOT_PATH") or None
+    )
 
     @property
     def sessions_dir(self) -> Path:

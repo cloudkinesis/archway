@@ -37,6 +37,7 @@ import {
   X
 } from "lucide-react";
 import { api, artifactUrl } from "../lib/api";
+import { TrustPanel } from "./TrustPanel";
 import type { ArchitectureRevision, ArchitectureSpec, ArchitectureValidationIssue, BuildStatusSummary, DiagramGalleryResult, ExportBundle, HealthCheckResult, HealthSummary, JobRun, PricingCheckpoint, PricingViewModel, Readiness, ResearchDigest, ResearchNarrative, ResearchReport, ResearchViewModel, Session } from "../lib/types";
 import { sanitizeMarkdown } from "../lib/markdown";
 
@@ -992,6 +993,7 @@ function Report({
         {researchSubTab === "competitors" ? <CompetitorsResearchTab viewModel={viewModel} /> : null}
         {researchSubTab === "risks" ? <RisksResearchTab viewModel={viewModel} /> : null}
         {researchSubTab === "evidence" ? <EvidenceResearchTab viewModel={viewModel} /> : null}
+        <TrustPanel pricing={report.pricing_analysis} exportBundle={researchExport} />
         <details className="border border-awsBorder bg-white p-4">
           <summary className="cursor-pointer text-sm font-semibold">Advanced dossier and debug trace</summary>
           <div className="mt-4 space-y-4">

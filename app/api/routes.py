@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from app.core.config import get_settings
 from app.core.logging import AuditLogger, hash_payload, read_session_logs
 from app.db.session_store import SessionStore
 from app.models.domain import ArchitectureSpec, DiagramGalleryResult, ResearchReport, SessionPhase, SessionStatus
@@ -19,6 +20,7 @@ from app.services.deep_dossier import DeepDossierService
 from app.services.diagram_compiler_adapter import DiagramCompilerAdapter
 from app.services.health import HealthService
 from app.services.jobs import job_manager
+from app.services.mcp_security import mcp_security_status
 from app.services.export_package import ExportPackageService
 from app.services.golden_regression import GoldenRegressionExportService
 from app.services.governance_controls import GovernanceControlEnricher
@@ -128,6 +130,7 @@ async def hydrate_session(session_id: str):
         "diagnostics": {
             "logs": read_session_logs(session_id),
             "latest_export": latest_export,
+            "mcp_security": mcp_security_status(get_settings()),
         },
     }
 
@@ -341,7 +344,7 @@ async def generate_architecture(session_id: str):
         job_manager.update(job_id, progress=62, message="Running architecture critique and repair planning.")
         specs = asyncio.run(_repair_architecture_critiques(report, specs, session_id))
         job_manager.update(job_id, progress=82, message="Saving revision and preparing diagram inputs.")
-        revision = architecture_revisions.initialize(session_id, specs)
+        revision = architecture_revisions.record_generation(session_id, specs)
         specs_path = "architecture/specs.json"
         current = _require_session(session_id)
         current.active_phase = SessionPhase.diagrams
@@ -444,7 +447,7 @@ async def update_architecture(session_id: str, request: UpdateArchitectureReques
 async def regenerate_architecture(session_id: str):
     _require_session(session_id)
     try:
-        revision = architecture_revisions.regenerate_from_active(session_id)
+        revision = architecture_revisions.duplicate_active_revision(session_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     AuditLogger(session_id).event("architecture", "architecture_revision_regenerated", output_hash=hash_payload(revision.model_dump()))
@@ -535,7 +538,8 @@ async def get_artifact(session_id: str, artifact_id: str):
 @router.get("/sessions/{session_id}/diagnostics")
 async def diagnostics(session_id: str):
     _require_session(session_id)
-    return {"logs": read_session_logs(session_id), "health": await HealthService().check()}
+    return {"logs": read_session_logs(session_id), "health": await HealthService().check(),
+            "mcp_security": mcp_security_status(get_settings())}
 
 
 @router.get("/sessions/{session_id}/export")
