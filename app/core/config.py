@@ -150,6 +150,16 @@ class Settings(BaseModel):
     sku_pricing_snapshot_path: str | None = Field(
         default_factory=lambda: os.getenv("ARCHWAY_SKU_PRICING_SNAPSHOT_PATH") or None
     )
+    # Capability accelerator packs (advisory intake/question hints only). Default OFF;
+    # with the flag off, CapabilityRouter behavior is byte/behavior equivalent.
+    enable_capability_accelerator_packs: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_CAPABILITY_ACCELERATOR_PACKS", "false") == "true"
+    )
+    # Default scenario simulations at export time (deterministic what-ifs). Default OFF;
+    # scenario artifacts appear only when explicit overrides are passed or this is on.
+    enable_default_scenario_simulations: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_DEFAULT_SCENARIO_SIMULATIONS", "false") == "true"
+    )
 
     @property
     def sessions_dir(self) -> Path:

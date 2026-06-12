@@ -92,6 +92,19 @@ _SENSITIVE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?i)\b(patient record|medical record|clinical note|insurance claim number)"), "phi_marker"),
     (re.compile(r"(?i)\bMRN\b"), "phi_marker"),
     (re.compile(r"(?i)\bdiagnosis\b"), "phi_marker"),
+    # HCM/payroll RECORD/VALUE-level markers — model-prior skip only. Bare topic words
+    # ("payroll", "timecard", "benefits", "employee") deliberately do NOT trigger a skip;
+    # valid HCM use cases continue with the deterministic fallback + accelerator packs.
+    (re.compile(r"(?i)\b(pay statements?|payroll records?|payslips?|tax identifiers?|national id numbers?|bank account numbers?|employee identifiers?|employee ssns?|direct deposit|benefits enrollment records?|medical leave details?)\b"), "hcm_payroll_record"),
+    # Smart-spaces / location RECORD-level markers — individual identity/track data only.
+    # Topic phrases ("occupancy analytics", "indoor location") do NOT skip the prior.
+    (re.compile(r"(?i)\b(badge ids?|individual location histor(?:y|ies)|individual locations?|named employee locations?|visitor identit(?:y|ies)|surveillance footage|identifiable camera footage)\b"), "spaces_location_record"),
+    # Banking / financial RECORD/VALUE-level markers. Abstract account wording
+    # ("account information service", "account onboarding", "account analytics")
+    # deliberately does NOT skip — only raw/customer account data does.
+    (re.compile(r"(?i)(\b(?:raw|customer) account numbers?\b|\baccount numbers?\s*[:#]?\s*\d|\b(?:sort codes?|iban|card numbers?|bank statements?|customer identifiers?)\b|\braw (?:payment instructions?|transaction records?)\b|\bkyc documents?[^.]{0,40}\b(?:personal|passport|pii)\b|\bcase files?[^.]{0,40}\bpii\b)"), "financial_record"),
+    # IBAN-format value (case-sensitive on purpose: real IBANs are uppercase).
+    (re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b"), "financial_record"),
 )
 
 # --------------------------------------------------------------------------- #
@@ -194,7 +207,7 @@ class CapabilityDecision:
     deterministic_confidence: str
     matched_known_family: str | None
     generic_fallback_family: str
-    fallback_family_source: Literal["deterministic", "model_prior_unverified", "default"]
+    fallback_family_source: Literal["deterministic", "accelerator_pack", "model_prior_unverified", "default"]
     next_best_questions: list[str] = field(default_factory=list)
     advisory_candidates_unverified: dict = field(default_factory=dict)
     model_prior: dict = field(default_factory=dict)
@@ -204,9 +217,15 @@ class CapabilityDecision:
     safe_to_generate_architecture: bool = True
     safe_to_generate_pricing: bool = True
     safe_to_generate_diagrams: bool = True
+    # Advisory accelerator-pack metadata (ARCHWAY_ENABLE_CAPABILITY_ACCELERATOR_PACKS).
+    capability_accelerators: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        # Flag-off decisions stay byte-identical to the pre-accelerator shape.
+        if not data.get("capability_accelerators"):
+            data.pop("capability_accelerators", None)
+        return data
 
 
 def _deterministic_fallback_family(profile, raw_use_case: str) -> str:
@@ -232,6 +251,26 @@ def _deterministic_fallback_family(profile, raw_use_case: str) -> str:
     if any(term in lower for term in ("observability", "monitoring", "metrics", "logs")):
         return "observability_monitoring"
     return "unknown_directional"
+
+
+def _accelerator_matches(raw_use_case: str) -> list:
+    """Advisory accelerator-pack matches, ONLY when the feature flag is on.
+
+    Lazy import keeps module load acyclic (the packs module imports
+    GENERIC_FALLBACK_FAMILIES from here for import-time validation) and means a
+    disabled flag has zero behavioral or import surface.
+    """
+    try:
+        from app.core.config import get_settings
+
+        if not get_settings().enable_capability_accelerator_packs:
+            return []
+        from app.services.capability_accelerator_packs import match_accelerator_packs
+
+        return match_accelerator_packs(raw_use_case)
+    except Exception:
+        # Advisory only: accelerator failures must never break routing.
+        return []
 
 
 def _model_fallback_candidate(discovery_plan: dict) -> str | None:
@@ -299,12 +338,25 @@ class CapabilityRouter:
             status = "directional"
             reason = "Recognized workload shape without high-confidence deep support; directional handling."
 
-        # Generic fallback family: deterministic first; the model may only fill the void.
+        # Advisory accelerator packs (flag-gated; deterministic keyword matching).
+        accelerator_matches = _accelerator_matches(raw_use_case)
+
+        # Generic fallback family: deterministic first; advisory sources (accelerator
+        # pack, then model prior) may only fill the void.
         fallback = _deterministic_fallback_family(profile, raw_use_case)
-        fallback_source: Literal["deterministic", "model_prior_unverified", "default"] = "deterministic"
+        fallback_source: Literal["deterministic", "accelerator_pack", "model_prior_unverified", "default"] = "deterministic"
+        pack_fallback_used: str | None = None
         if fallback == "unknown_directional":
+            pack_candidate = next(
+                (family for m in accelerator_matches for family in m.pack.candidate_fallback_families),
+                None,
+            )
             model_candidate = _model_fallback_candidate(discovery_plan)
-            if model_candidate:
+            if pack_candidate:
+                fallback = pack_candidate
+                fallback_source = "accelerator_pack"
+                pack_fallback_used = pack_candidate
+            elif model_candidate:
                 fallback = model_candidate
                 fallback_source = "model_prior_unverified"
             else:
@@ -316,6 +368,36 @@ class CapabilityRouter:
             for q in (discovery_plan.get("top_questions") or [])
             if isinstance(q, dict) and q.get("question")
         ][:5]
+
+        # Allowed accelerator surface: extra advisory questions (deduped, capped) +
+        # metadata. Never status, readiness, pricing, architecture, or citations.
+        accelerators_meta: list[dict] = []
+        for match in accelerator_matches:
+            appended = 0
+            for question in match.pack.next_best_questions:
+                if question not in next_questions and appended < 2 and len(next_questions) < 9:
+                    next_questions.append(question)
+                    appended += 1
+            used_for = ["questions", "missing_facts"]
+            if pack_fallback_used and pack_fallback_used in match.pack.candidate_fallback_families:
+                used_for.append("fallback_candidate")
+            accelerators_meta.append({
+                "pack_id": match.pack.pack_id,
+                "display_name": match.pack.display_name,
+                "match_score": match.score,
+                "matched_signals": list(match.matched_signals),
+                "match_explanation": match.explanation,
+                "advisory_only": True,
+                "used_for": used_for,
+                "fallback_family_candidate": pack_fallback_used if "fallback_candidate" in used_for else None,
+                "questions": list(match.pack.next_best_questions),
+                "missing_fact_prompts": list(match.pack.missing_fact_prompts),
+                "governance_concerns": list(match.pack.governance_concerns),
+                "sensitivity_concerns": list(match.pack.sensitivity_concerns),
+                "pricing_question_hints": list(match.pack.pricing_question_hints),
+                "notes": list(match.pack.dossier_notes),
+                "disallowed_assumptions": list(match.pack.disallowed_assumptions),
+            })
 
         # Artifact level + safety (non-abuse). unsupported_or_blocked (e.g. out-of-scope)
         # gets an explanation only; other statuses are safe to generate.
@@ -354,6 +436,7 @@ class CapabilityRouter:
             safe_to_generate_architecture=safe,
             safe_to_generate_pricing=safe,
             safe_to_generate_diagrams=safe,
+            capability_accelerators=accelerators_meta,
         )
 
 

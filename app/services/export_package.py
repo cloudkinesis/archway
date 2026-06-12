@@ -19,6 +19,22 @@ from app.services.dossier_manifest import MANIFEST_FILENAME, build_dossier_manif
 from app.services.golden_regression import GoldenRegressionExportService
 from app.services.jobs import job_manager
 from app.services.llm.telemetry import llm_telemetry_store
+from app.services.architecture_decision_records import (
+    build_decision_records,
+    decision_records_markdown,
+    decision_records_summary,
+)
+from app.services.reviewer_mode import (
+    build_reviewer_report,
+    reviewer_summary_markdown,
+    uncertainty_map_markdown,
+)
+from app.services.scenario_simulation import (
+    known_driver_values as _scenario_known_drivers,
+    scenario_simulations_markdown,
+    scenario_summary,
+    simulate_scenarios,
+)
 from app.services.mcp_security import mcp_security_status
 from app.services.sku_pricing.export_trace import build_pilot_trace_files, pilot_trace_hash
 from app.services.sku_pricing.official_snapshot_builder import UNSUPPORTED_OFFICIAL_DIMENSIONS
@@ -315,6 +331,7 @@ class ExportPackageService:
         self, export_dir: Path, export_name: str, session, brief, report, pricing,
         architectures, architecture_revisions, diagrams, convergence_result,
         warnings: list[str], included_artifacts: list[str],
+        scenario_overrides: list | None = None,
     ) -> None:
         """Write supplemental SKU trace files + the verifiable dossier manifest.
 
@@ -336,6 +353,109 @@ class ExportPackageService:
                 (pricing_dir / name).write_text(trace_files[key], encoding="utf-8")
                 included_artifacts.append(f"exports/{export_name}/pricing/{name}")
             sku_trace_hash = pilot_trace_hash(pilot)
+
+        # Architecture Decision Records — deterministic export trust artifacts only
+        # (no runtime/pricing/readiness influence; see architecture_decision_records.py).
+        decision_records = build_decision_records(architectures, pricing, report, diagrams)
+        adr_summary = decision_records_summary(decision_records)
+        if decision_records:
+            adr_payload = json.dumps(
+                [record.model_dump(mode="json") for record in decision_records],
+                indent=2,
+                sort_keys=True,
+            )
+            adr_dir = export_dir / "architecture"
+            adr_dir.mkdir(exist_ok=True)
+            (adr_dir / "decision_records.json").write_text(adr_payload, encoding="utf-8")
+            (adr_dir / "decision_records.md").write_text(decision_records_markdown(decision_records), encoding="utf-8")
+            raw_dir = export_dir / "raw"
+            raw_dir.mkdir(exist_ok=True)
+            (raw_dir / "architecture_decision_records.json").write_text(adr_payload, encoding="utf-8")
+            included_artifacts.extend(
+                f"exports/{export_name}/{rel}"
+                for rel in (
+                    "architecture/decision_records.json",
+                    "architecture/decision_records.md",
+                    "raw/architecture_decision_records.json",
+                )
+            )
+
+        # Reviewer Mode + Uncertainty Map — deterministic export trust artifacts
+        # (always generated; see reviewer_mode.py — no model prose, no behavior change).
+        adr_dicts = [record.model_dump(mode="json") for record in decision_records]
+        reviewer_report = build_reviewer_report(brief, report, pricing, architectures, diagrams, adr_dicts)
+        reviewer_dir = export_dir / "reviewer"
+        reviewer_dir.mkdir(exist_ok=True)
+        raw_dir = export_dir / "raw"
+        raw_dir.mkdir(exist_ok=True)
+        reviewer_json = json.dumps(reviewer_report.model_dump(mode="json"), indent=2, sort_keys=True)
+        uncertainty_json = json.dumps(reviewer_report.uncertainty_map, indent=2, sort_keys=True)
+        (reviewer_dir / "reviewer_findings.json").write_text(reviewer_json, encoding="utf-8")
+        (reviewer_dir / "reviewer_summary.md").write_text(reviewer_summary_markdown(reviewer_report), encoding="utf-8")
+        (reviewer_dir / "uncertainty_map.json").write_text(uncertainty_json, encoding="utf-8")
+        (reviewer_dir / "uncertainty_map.md").write_text(uncertainty_map_markdown(reviewer_report.uncertainty_map), encoding="utf-8")
+        (raw_dir / "reviewer_findings.json").write_text(reviewer_json, encoding="utf-8")
+        (raw_dir / "uncertainty_map.json").write_text(uncertainty_json, encoding="utf-8")
+        included_artifacts.extend(
+            f"exports/{export_name}/{rel}"
+            for rel in (
+                "reviewer/reviewer_findings.json", "reviewer/reviewer_summary.md",
+                "reviewer/uncertainty_map.json", "reviewer/uncertainty_map.md",
+                "raw/reviewer_findings.json", "raw/uncertainty_map.json",
+            )
+        )
+        reviewer_manifest_summary = {
+            "overall_review_status": reviewer_report.overall_review_status,
+            "finding_count": reviewer_report.summary.get("finding_count", 0),
+            "blocker_count": reviewer_report.summary.get("blocker_count", 0),
+            "warning_count": reviewer_report.summary.get("warning_count", 0),
+            "advisory_count": reviewer_report.summary.get("advisory_count", 0),
+            "top_categories": reviewer_report.summary.get("top_categories", []),
+        }
+        uncertainty_manifest_summary = {
+            "overall_confidence": reviewer_report.uncertainty_map.get("overall_confidence"),
+            "low_confidence_sections": sorted(
+                section for section, confidence in (reviewer_report.uncertainty_map.get("by_section") or {}).items()
+                if confidence in {"low", "limited", "directional"}
+            ),
+        }
+
+        # Scenario simulations — only on explicit overrides or the default-set flag.
+        scenario_manifest_summary = None
+        effective_overrides = list(scenario_overrides or [])
+        if not effective_overrides and settings.enable_default_scenario_simulations:
+            known_drivers = sorted(_scenario_known_drivers(pricing))
+            if known_drivers:
+                effective_overrides.append({
+                    "override_id": "default_10x_first_driver",
+                    "override_type": "pricing_driver_multiplier",
+                    "payload": {"driver": known_drivers[0], "multiplier": 10},
+                })
+            if ((pricing or {}).get("metadata") or {}).get("sku_pricing_pilot"):
+                effective_overrides.append({
+                    "override_id": "default_quantity_confirmation",
+                    "override_type": "quantity_confirmation",
+                    "payload": {"confirmed": True},
+                })
+        if effective_overrides:
+            simulations = simulate_scenarios(
+                effective_overrides, brief=brief, baseline_pricing=pricing, report=report,
+                architectures=architectures, diagrams=diagrams, decision_records=adr_dicts,
+            )
+            scenarios_dir = export_dir / "scenarios"
+            scenarios_dir.mkdir(exist_ok=True)
+            scenarios_json = json.dumps([s.model_dump(mode="json") for s in simulations], indent=2, sort_keys=True)
+            (scenarios_dir / "scenario_simulations.json").write_text(scenarios_json, encoding="utf-8")
+            (scenarios_dir / "scenario_simulations.md").write_text(scenario_simulations_markdown(simulations), encoding="utf-8")
+            (raw_dir / "scenario_simulations.json").write_text(scenarios_json, encoding="utf-8")
+            included_artifacts.extend(
+                f"exports/{export_name}/{rel}"
+                for rel in (
+                    "scenarios/scenario_simulations.json", "scenarios/scenario_simulations.md",
+                    "raw/scenario_simulations.json",
+                )
+            )
+            scenario_manifest_summary = scenario_summary(simulations)
 
         (export_dir / "README_DOSSIER.md").write_text(self._readme_dossier(), encoding="utf-8")
         included_artifacts.append(f"exports/{export_name}/README_DOSSIER.md")
@@ -362,6 +482,12 @@ class ExportPackageService:
             convergence_status=getattr(convergence_result, "final_status", None),
             sku_trace_hash=sku_trace_hash,
             unsupported_dimensions=dict(UNSUPPORTED_OFFICIAL_DIMENSIONS),
+            decision_records_summary=adr_summary,
+            review_summaries={
+                "reviewer_mode": reviewer_manifest_summary,
+                "uncertainty_map": uncertainty_manifest_summary,
+                **({"scenario_simulation": scenario_manifest_summary} if scenario_manifest_summary else {}),
+            },
         )
         (export_dir / MANIFEST_FILENAME).write_text(
             json.dumps(dossier, indent=2, sort_keys=True, default=str), encoding="utf-8"
