@@ -96,6 +96,15 @@ _SENSITIVE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # ("payroll", "timecard", "benefits", "employee") deliberately do NOT trigger a skip;
     # valid HCM use cases continue with the deterministic fallback + accelerator packs.
     (re.compile(r"(?i)\b(pay statements?|payroll records?|payslips?|tax identifiers?|national id numbers?|bank account numbers?|employee identifiers?|employee ssns?|direct deposit|benefits enrollment records?|medical leave details?)\b"), "hcm_payroll_record"),
+    # Smart-spaces / location RECORD-level markers — individual identity/track data only.
+    # Topic phrases ("occupancy analytics", "indoor location") do NOT skip the prior.
+    (re.compile(r"(?i)\b(badge ids?|individual location histor(?:y|ies)|individual locations?|named employee locations?|visitor identit(?:y|ies)|surveillance footage|identifiable camera footage)\b"), "spaces_location_record"),
+    # Banking / financial RECORD/VALUE-level markers. Abstract account wording
+    # ("account information service", "account onboarding", "account analytics")
+    # deliberately does NOT skip — only raw/customer account data does.
+    (re.compile(r"(?i)(\b(?:raw|customer) account numbers?\b|\baccount numbers?\s*[:#]?\s*\d|\b(?:sort codes?|iban|card numbers?|bank statements?|customer identifiers?)\b|\braw (?:payment instructions?|transaction records?)\b|\bkyc documents?[^.]{0,40}\b(?:personal|passport|pii)\b|\bcase files?[^.]{0,40}\bpii\b)"), "financial_record"),
+    # IBAN-format value (case-sensitive on purpose: real IBANs are uppercase).
+    (re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b"), "financial_record"),
 )
 
 # --------------------------------------------------------------------------- #

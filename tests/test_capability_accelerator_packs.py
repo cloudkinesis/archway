@@ -245,3 +245,177 @@ def test_capability_decision_serializes_with_accelerator_metadata(packs_enabled)
     payload = decision.to_dict()
     assert payload["capability_accelerators"]
     json.dumps(payload)
+
+
+# =============================================================================
+# Wave 2 packs: firewall / smart spaces / banking / financial crime + HCM delta
+# =============================================================================
+
+from app.services.capability_accelerator_packs import (  # noqa: E402
+    BANKING_OPEN_BANKING_PAYMENTS_PACK,
+    FINANCIAL_CRIME_RISK_OPERATIONS_PACK,
+    FIREWALL_SECURITY_OPERATIONS_PACK,
+    SMART_SPACES_LOCATION_IOT_PACK,
+)
+
+FIREWALL_POLICY_USE_CASE = (
+    "Optimize firewall policies and automate rule recertification across 200 firewalls "
+    "with SIEM integration."
+)
+PURE_TELEMETRY_USE_CASE = NETWORK_OBSERVABILITY_USE_CASE  # NetFlow/switches/SIEM/SOC
+SMART_SPACES_USE_CASE = (
+    "Analyze workspace occupancy and meeting room utilization with indoor location from "
+    "WiFi presence across our smart buildings."
+)
+OPEN_BANKING_USE_CASE = (
+    "Build open banking payment initiation with consent management for bank-to-bank payments."
+)
+AML_TRIAGE_USE_CASE = (
+    "AML alert triage with case management for transaction monitoring alerts."
+)
+
+
+def test_firewall_pack_matches_firewall_policy_optimization():
+    assert FIREWALL_SECURITY_OPERATIONS_PACK.match(FIREWALL_POLICY_USE_CASE)
+
+
+def test_firewall_pack_matches_vpn_firewall_event_triage():
+    assert FIREWALL_SECURITY_OPERATIONS_PACK.match(
+        "Triage VPN anomalies and firewall events from security appliances, integrated with the SOC."
+    )
+
+
+def test_pure_telemetry_matches_network_pack_but_not_firewall_pack():
+    assert NETWORK_SECURITY_OBSERVABILITY_PACK.match(PURE_TELEMETRY_USE_CASE)
+    assert FIREWALL_SECURITY_OPERATIONS_PACK.match(PURE_TELEMETRY_USE_CASE) is None
+
+
+def test_firewall_metaphor_does_not_match_firewall_pack():
+    assert FIREWALL_SECURITY_OPERATIONS_PACK.match("Run a wall fire drill evacuation plan for the office.") is None
+    assert FIREWALL_SECURITY_OPERATIONS_PACK.match(
+        "Train staff to act as a human firewall against phishing with security awareness."
+    ) is None
+
+
+def test_smart_spaces_pack_matches_occupancy_indoor_location():
+    assert SMART_SPACES_LOCATION_IOT_PACK.match(SMART_SPACES_USE_CASE)
+
+
+def test_smart_spaces_person_location_markers_trigger_sensitivity_skip():
+    sensitive, reason = screen_sensitivity("Track badge IDs and individual location history for employees.")
+    assert sensitive is True and reason == "spaces_location_record"
+    topic_only, _ = screen_sensitivity("Workspace occupancy analytics with indoor location heatmaps.")
+    assert topic_only is False
+    assert SMART_SPACES_LOCATION_IOT_PACK.sensitivity_concerns
+
+
+def test_smart_spaces_does_not_match_generic_real_estate_planning():
+    assert SMART_SPACES_LOCATION_IOT_PACK.match(
+        "Plan office space allocation and lease optimization for our real estate portfolio."
+    ) is None
+
+
+def test_banking_pack_matches_open_banking_payment_initiation():
+    assert BANKING_OPEN_BANKING_PAYMENTS_PACK.match(OPEN_BANKING_USE_CASE)
+
+
+def test_banking_pack_matches_account_information_consent_workflow():
+    assert BANKING_OPEN_BANKING_PAYMENTS_PACK.match(
+        "Account information service with customer consent workflow across banking APIs."
+    )
+
+
+def test_banking_pack_does_not_match_generic_bank_marketing_site():
+    assert BANKING_OPEN_BANKING_PAYMENTS_PACK.match(
+        "Build a marketing website where customers can open a bank account online."
+    ) is None
+
+
+def test_swift_programming_does_not_trigger_banking_swift():
+    assert BANKING_OPEN_BANKING_PAYMENTS_PACK.match(
+        "Build an iOS app in Swift with SwiftUI for our retail bank's marketing site."
+    ) is None
+
+
+def test_financial_crime_pack_matches_aml_alert_triage():
+    assert FINANCIAL_CRIME_RISK_OPERATIONS_PACK.match(AML_TRIAGE_USE_CASE)
+
+
+def test_financial_crime_pack_matches_sanctions_screening_kyc_refresh():
+    assert FINANCIAL_CRIME_RISK_OPERATIONS_PACK.match(
+        "Sanctions screening and KYC refresh for customer onboarding."
+    )
+
+
+def test_search_and_rescue_sar_does_not_trigger_financial_crime():
+    assert FINANCIAL_CRIME_RISK_OPERATIONS_PACK.match(
+        "Build a dispatch coordination system for search and rescue (SAR) operations with mission filing."
+    ) is None
+
+
+def test_banking_sensitivity_skips_records_not_abstract_account_wording():
+    assert screen_sensitivity("Reconcile transfers for IBAN GB29NWBK60161331926819")[1] == "financial_record"
+    assert screen_sensitivity("Validate sort codes during payment setup")[1] == "financial_record"
+    assert screen_sensitivity("Match customer account numbers against statements")[1] == "financial_record"
+    # Abstract account wording and financial-crime topics never skip the prior.
+    assert screen_sensitivity("Account information service for account onboarding and account analytics")[0] is False
+    assert screen_sensitivity("Build AML alert triage with sanctions screening and KYC refresh")[0] is False
+
+
+def test_financial_crime_pack_does_not_override_deterministic_payment_fraud(packs_enabled):
+    text = "Payment fraud scoring for 50 million card transactions per day with real-time risk decisions."
+    settings = get_settings()
+    settings.enable_capability_accelerator_packs = False
+    try:
+        profile_off = profile_use_case(text)
+        decision_off = _route(text)
+    finally:
+        settings.enable_capability_accelerator_packs = True
+    profile_on = profile_use_case(text)
+    decision_on = _route(text)
+    assert profile_on.workload_families == profile_off.workload_families
+    assert decision_on.status == decision_off.status
+    assert decision_on.matched_known_family == decision_off.matched_known_family
+    assert decision_on.generic_fallback_family == decision_off.generic_fallback_family
+
+
+def test_hcm_delta_signals_match_and_hr_policy_rag_still_unmatched():
+    assert HCM_PAYROLL_WORKFORCE_PACK.match(
+        "Handle payroll exceptions and absence management with benefits administration workflows."
+    )
+    assert HCM_PAYROLL_WORKFORCE_PACK.match(PAYROLL_ANOMALY_USE_CASE)
+    assert HCM_PAYROLL_WORKFORCE_PACK.match(
+        "Build a RAG assistant over HR policy documents so staff can ask questions."
+    ) is None
+
+
+def test_context_vocabulary_uses_word_boundaries():
+    match = HCM_PAYROLL_WORKFORCE_PACK.match(
+        "We adapted our workforce management and time and attendance processes."
+    )
+    assert match is not None
+    assert all(not s.startswith("context:") for s in match.matched_signals), match.matched_signals
+
+
+def test_company_names_are_context_only_not_pack_ids():
+    for pack in CAPABILITY_ACCELERATOR_PACKS:
+        for company in ("cisco", "adp", "barclays", "natwest", "workday", "meraki"):
+            assert company not in pack.pack_id
+
+
+def test_wave2_flag_on_adds_advisory_metadata_only(packs_enabled):
+    for text in (FIREWALL_POLICY_USE_CASE, SMART_SPACES_USE_CASE, OPEN_BANKING_USE_CASE, AML_TRIAGE_USE_CASE):
+        settings = get_settings()
+        settings.enable_capability_accelerator_packs = False
+        try:
+            baseline = _route(text)
+        finally:
+            settings.enable_capability_accelerator_packs = True
+        enriched = _route(text)
+        assert enriched.capability_accelerators
+        assert all(item["advisory_only"] is True for item in enriched.capability_accelerators)
+        assert enriched.status == baseline.status
+        assert enriched.safe_to_generate_pricing == baseline.safe_to_generate_pricing
+        assert enriched.expected_artifact_level == baseline.expected_artifact_level
+        assert set(baseline.next_best_questions) <= set(enriched.next_best_questions)
+        json.dumps(enriched.to_dict())
