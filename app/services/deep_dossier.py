@@ -307,9 +307,9 @@ def _feasibility_rows(brief: dict, profile: dict, production: dict, evidence_ite
     if {"ml_inference", "predictive_ml", "real_time_anomaly_detection", "anomaly_detection"} & capabilities:
         rows.append(FeasibilityRow(requirement="Predictive scoring and anomaly detection", candidate_design="SageMaker training, registry, endpoint or batch scoring depending on latency and volume.", aws_capability="Managed model lifecycle and inference hosting.", feasibility_verdict="REQUIRES_VALIDATION", key_risk="False positives, false negatives, and model latency can affect operations.", validation_method="Validate model quality, drift, inference latency, and approval thresholds before automation.", evidence_ids=[evidence_id] if evidence_id else []))
     if profile.get("actions"):
-        rows.append(FeasibilityRow(requirement="Automated operational action", candidate_design="EventBridge, SQS, Step Functions, Lambda adapters, and approval/policy gates.", aws_capability="Durable event choreography with retriable integration adapters.", feasibility_verdict="CONDITIONALLY_FEASIBLE", key_risk="Unsafe dispatch or inventory actions if policy gates are weak.", validation_method="Run shadow-mode dispatch and inventory workflow with idempotency and rollback tests.", evidence_ids=[evidence_id] if evidence_id else []))
+        rows.append(FeasibilityRow(requirement="Automated operational action", candidate_design="EventBridge, SQS, Step Functions, Lambda adapters, and approval/policy gates.", aws_capability="Durable event choreography with retriable integration adapters.", feasibility_verdict="CONDITIONALLY_FEASIBLE", key_risk="Unsafe downstream operational updates if policy gates are weak.", validation_method="Run shadow-mode operational workflow with idempotency and rollback tests.", evidence_ids=[evidence_id] if evidence_id else []))
     if "network_private_connectivity" in ((production.get("metadata") or {}).get("expected_views") or []):
-        rows.append(FeasibilityRow(requirement="Private enterprise integration", candidate_design="VPC-resident integration adapter with private network path to existing workforce/depot systems.", aws_capability="VPC placement, endpoint/private connectivity pattern, logging, and policy controls.", feasibility_verdict="REQUIRES_VALIDATION", key_risk="Customer network path, DNS, identity, firewall, and latency are not yet confirmed.", validation_method="Validate connectivity design with customer network team and run failover tests.", evidence_ids=[evidence_id] if evidence_id else []))
+        rows.append(FeasibilityRow(requirement="Private enterprise integration", candidate_design="VPC-resident integration adapter with private network path to existing enterprise systems.", aws_capability="VPC placement, endpoint/private connectivity pattern, logging, and policy controls.", feasibility_verdict="REQUIRES_VALIDATION", key_risk="Customer network path, DNS, identity, firewall, and latency are not yet confirmed.", validation_method="Validate connectivity design with customer network team and run failover tests.", evidence_ids=[evidence_id] if evidence_id else []))
     return rows
 
 
@@ -371,7 +371,7 @@ def _risk_records(report: dict, pricing: dict, profile: dict) -> list[RiskRecord
             why = "Budget approval can be wrong if workload event rate, message size, retention, or action rate differ from assumptions."
         records.append(RiskRecord(severity="medium", risk="Pricing remains directional until workload drivers are measured.", why_it_matters=why, likelihood="high", impact="medium", mitigation="Run a POC burn-in and refresh with AWS Pricing Calculator or Pricing MCP.", validation_owner="Cloud economist", blocking_status="watch", evidence_ids=[]))
     if "hybrid" in profile.get("deployment_posture", []):
-        records.append(RiskRecord(severity="high", risk="Hybrid/private integration is a production readiness gate.", why_it_matters="Automated field dispatch and depot actions depend on reliable customer network, identity, and retry behavior.", likelihood="medium", impact="high", mitigation="Validate private connectivity, DNS, IAM, firewall, idempotency, and rollback in pilot.", validation_owner="Network and operations owner", blocking_status="blocking", evidence_ids=[]))
+        records.append(RiskRecord(severity="high", risk="Hybrid/private integration is a production readiness gate.", why_it_matters="Automated downstream operational updates depend on reliable customer network, identity, and retry behavior.", likelihood="medium", impact="high", mitigation="Validate private connectivity, DNS, IAM, firewall, idempotency, and rollback in pilot.", validation_owner="Network and operations owner", blocking_status="blocking", evidence_ids=[]))
     return records
 
 
@@ -670,7 +670,7 @@ def _competitive_landscape(ctx: dict) -> str:
         ["Commercial platforms", "commercial", "Requires validation", "May include packaged workflow and domain features.", "Pricing and model transparency may be unclear.", "Pricing not publicly available from reviewed sources.", "medium", evidence],
         ["Cloud-native AWS build", "cloud-native", "Strong directional fit", "AWS-native services, model ownership, auditability, and staged delivery.", "Requires integration, security, and pricing validation.", _cost_range(ctx["pricing"]), "medium", ", ".join(_evidence_ids(ctx["evidence_items"], {"aws_docs", "aws_pricing"})) or "Requires validation"],
         ["Open-source/self-managed stack", "open-source", "Possible but higher operations burden", "Maximum control and portability.", "Customer owns scaling, patching, compliance evidence, and SRE burden.", "Requires validation", "medium", "Assumed - requires validation"],
-        ["Incumbent enterprise systems", "incumbent", "Integration target, not replacement", "May already own dispatch, inventory, or case data.", "May constrain API, latency, identity, and workflow design.", "Existing customer cost; not estimated", "low", "User input"],
+        ["Incumbent enterprise systems", "incumbent", "Integration target, not replacement", "May already own operational, inventory, clinical, or case data.", "May constrain API, latency, identity, and workflow design.", "Existing customer cost; not estimated", "low", "User input"],
     ]
     return "\n".join([
         "# Competitive and Alternative Landscape",
@@ -712,9 +712,9 @@ def _reliability_resilience(ctx: dict) -> str:
     rows = [
         ["Regional failure", "Service interruption and delayed detection/action.", "Regional health alarms and DR runbook.", "Multi-region strategy or accepted RTO/RPO.", "Residual risk remains until DR test."],
         ["AZ failure", "Reduced capacity for ingestion, scoring, or adapters.", "Multi-AZ managed services where available.", "Confirm subnet/AZ placement and scaling.", "Capacity may degrade during failover."],
-        ["Stream backlog", "Delayed anomaly detection and dispatch.", "Iterator age/backlog alarms and autoscaling.", "Backpressure and replay runbooks.", "Peak event bursts can still affect latency."],
+        ["Stream backlog", "Delayed anomaly detection or downstream action.", "Iterator age/backlog alarms and autoscaling.", "Backpressure and replay runbooks.", "Peak event bursts can still affect latency."],
         ["Model endpoint degradation", "Missed or late predictions.", "Health checks, fallback thresholds, and approval queues.", "Shadow scoring and rollback.", "Model quality remains customer-owned."],
-        ["External system unavailable", "Dispatch or depot action fails.", "Queue, retry, dead-letter, idempotent adapter.", "Manual fallback process.", "Operational SLA depends on customer system."],
+        ["External system unavailable", "Downstream operational update fails.", "Queue, retry, dead-letter, idempotent adapter.", "Manual fallback process.", "Operational SLA depends on customer system."],
         ["Human approval bottleneck", "High-impact actions wait too long.", "Priority queues and escalation rules.", "On-call ownership and staffing.", "Surges may still require manual triage."],
     ]
     return "# Reliability and Resilience Analysis\n\n" + _table(["Failure mode", "Impact", "Detection", "Mitigation", "Residual risk"], rows)
@@ -750,11 +750,11 @@ def _performance_scalability(ctx: dict) -> str:
 def _operational_readiness(ctx: dict) -> str:
     rows = [
         ["Monitoring", "CloudWatch dashboards for ingest, processing, scoring, queues, adapters, and cost signals."],
-        ["Alarms", "Backlog, error rate, model latency, false-positive proxy metrics, failed dispatch, dead-letter queues, and budget anomalies."],
-        ["Runbooks", "Stream replay, model rollback, integration adapter failure, manual dispatch fallback, and security incident response."],
-        ["On-call", "Named owners for platform, ML, security, network, and field operations."],
+        ["Alarms", "Backlog, error rate, model latency, false-positive proxy metrics, failed downstream updates, dead-letter queues, and budget anomalies."],
+        ["Runbooks", "Stream replay, model rollback, integration adapter failure, manual operational fallback, and security incident response."],
+        ["On-call", "Named owners for platform, ML, security, network, and operations."],
         ["Change management", "Promotion gates for model versions, IaC changes, pricing assumptions, and integration policies."],
-        ["Data quality checks", "Schema, missing values, drift, asset identity, and timestamp quality before model scoring."],
+        ["Data quality checks", "Schema, missing values, drift, record identity, and timestamp quality before model scoring."],
         ["Release gates", "No direct automation until accuracy, latency, security, compliance, and rollback gates pass."],
     ]
     return "# Operational Readiness\n\n" + _table(["Area", "Required operating practice"], rows)
@@ -770,8 +770,8 @@ def _risk_matrix(ctx: dict) -> str:
 def _implementation_roadmap(ctx: dict) -> str:
     services = ", ".join((ctx["production"].get("selected_services") or [{}])[i].get("service", "") for i in range(min(5, len(ctx["production"].get("selected_services") or [])))) or "AWS services selected in architecture"
     rows = [
-        ["POC", "Representative ingest, feature extraction, shadow scoring, evidence capture.", "Latency, accuracy, false-positive baseline, and cost burn-in.", services, "Telemetry replay, model quality, pricing sanity.", "4-8 weeks", "POC metrics meet agreed thresholds."],
-        ["Pilot", "Limited operational workflow with human approval.", "Safe dispatch/depot recommendation path.", services, "Approval, rollback, idempotency, network.", "6-10 weeks", "Operational users accept workflow."],
+        ["POC", "Representative ingest, feature extraction, shadow scoring, evidence capture.", "Latency, accuracy, false-positive baseline, and cost burn-in.", services, "Representative event replay, model quality, pricing sanity.", "4-8 weeks", "POC metrics meet agreed thresholds."],
+        ["Pilot", "Limited operational workflow with human approval.", "Safe downstream recommendation path.", services, "Approval, rollback, idempotency, network.", "6-10 weeks", "Operational users accept workflow."],
         ["Production rollout", "Resilient AWS platform, private integrations, security controls, runbooks.", "Controlled automation under policy.", services, "DR, security, compliance, quotas, load.", "8-16 weeks", "Production readiness review passes."],
         ["Optimization", "Tune cost, capacity, retention, model retraining, and observability.", "Lower unit cost and better model quality.", services, "Measured cost and SLA review.", "ongoing", "Optimization backlog owned."],
     ]
