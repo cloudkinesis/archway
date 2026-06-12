@@ -21,7 +21,7 @@ from app.models.domain import (
 )
 from app.services.capability_router import CapabilityRouter
 from app.services.discovery_planner import DiscoveryPlannerService
-from app.services.display_labels import ACRONYM_CASING
+from app.services.display_labels import ACRONYM_CASING, TITLE_TRAILING_STOPWORDS
 from app.services.pattern_catalog import poc_scope, pricing_dimensions, production_scope
 from app.services.use_case_profile import profile_from_metadata, profile_to_metadata, profile_use_case, refine_profile_with_context
 
@@ -603,16 +603,13 @@ def _looks_sensitive(text: str, industry: str | None) -> bool | None:
 
 
 _TITLE_MAX_WORDS = 10
-_TITLE_TRAILING_STOPWORDS = {
-    "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from",
-    "in", "into", "is", "its", "of", "on", "or", "over", "per", "that",
-    "the", "their", "to", "under", "using", "via", "which", "with",
-}
 
 
 def _title_from_use_case(text: str) -> str:
     tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9\-]*", text)[:_TITLE_MAX_WORDS]
-    while tokens and tokens[-1].lower() in _TITLE_TRAILING_STOPWORDS:
+    # Bare numbers ("with 5 000 contracts" -> "5", "000") never end a title,
+    # and trimming them can expose a trailing stopword, so trim both kinds.
+    while tokens and (tokens[-1].lower() in TITLE_TRAILING_STOPWORDS or tokens[-1].isdigit()):
         tokens.pop()
     if not tokens:
         return "AI Solution Architecture"
@@ -623,11 +620,24 @@ def _title_from_use_case(text: str) -> str:
             words.append(token)
         elif lower in ACRONYM_CASING:
             words.append(ACRONYM_CASING[lower])
-        elif index > 0 and lower in _TITLE_TRAILING_STOPWORDS:
+        elif index > 0 and lower in TITLE_TRAILING_STOPWORDS:
             words.append(lower)
+        elif "-" in token:
+            words.append("-".join(_title_word(part, first=(index == 0 and position == 0)) for position, part in enumerate(token.split("-"))))
         else:
             words.append(token.capitalize())
     return " ".join(words)
+
+
+def _title_word(part: str, *, first: bool) -> str:
+    lower = part.lower()
+    if part.isupper() and len(part) >= 2:
+        return part
+    if lower in ACRONYM_CASING:
+        return ACRONYM_CASING[lower]
+    if not first and lower in TITLE_TRAILING_STOPWORDS:
+        return lower
+    return part.capitalize()
 
 
 def _is_media_profile(profile) -> bool:

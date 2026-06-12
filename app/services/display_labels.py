@@ -48,6 +48,14 @@ ACRONYM_CASING = {
     "vpc": "VPC",
 }
 
+# Words a title or display name should never end on (articles, prepositions,
+# conjunctions). Used by title generation and session-name truncation.
+TITLE_TRAILING_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from",
+    "in", "into", "is", "its", "of", "on", "or", "over", "per", "that",
+    "the", "their", "to", "under", "using", "via", "which", "with",
+}
+
 _MACHINE_KEY_PATTERN = re.compile(r"[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+")
 
 

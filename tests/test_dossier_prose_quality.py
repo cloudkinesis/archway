@@ -133,6 +133,30 @@ def test_title_uses_lowercase_minor_words_and_has_fallback():
     assert _title_from_use_case("") == "AI Solution Architecture"
 
 
+def test_title_drops_trailing_bare_numbers_and_cases_hyphenated_acronyms():
+    # Found by rendered-artifact inspection: "…Platform with 5 000" tail and
+    # "Ai-assisted" hyphen casing in the legal golden package.
+    title = _title_from_use_case(
+        "AI-assisted legal contract review and obligation-tracking platform with 5 000 contracts"
+    )
+    assert title.startswith("AI-Assisted")
+    assert not title.lower().endswith(TRAILING_STOPWORDS)
+    assert not title.endswith(("5", "000"))
+
+
+def test_session_name_truncates_at_word_boundary_without_dangling_stopword():
+    from app.db.session_store import _session_name
+
+    long_title = "Ai-assisted Legal Contract Review and Obligation-tracking Platform with 5 000"
+    name = _session_name(long_title, "")
+    assert len(name) <= 72
+    assert not name.endswith(" ")
+    assert not name.lower().endswith(TRAILING_STOPWORDS)
+    assert not name.endswith(("5", "000"))
+    assert _session_name("", "") == "New Archway session"
+    assert _session_name("Short title", "") == "Short title"
+
+
 # --------------------------------------------------------------------------- #
 # Row 2 — heading hierarchy
 # --------------------------------------------------------------------------- #
