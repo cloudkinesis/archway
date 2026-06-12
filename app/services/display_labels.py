@@ -73,7 +73,15 @@ def display_label(value: str, *, capitalize: bool = True) -> str:
     text = str(value or "").replace("_", " ").strip()
     if not text:
         return str(value or "")
-    words = [ACRONYM_CASING.get(word.lower(), word.lower()) for word in text.split()]
+    words = []
+    for word in text.split():
+        lower = word.lower()
+        if lower in ACRONYM_CASING:
+            words.append(ACRONYM_CASING[lower])
+        elif lower.endswith("s") and lower[:-1] in ACRONYM_CASING:
+            words.append(ACRONYM_CASING[lower[:-1]] + "s")  # cdrs -> CDRs
+        else:
+            words.append(lower)
     label = " ".join(words)
     if capitalize and label and label[0].islower():
         label = label[0].upper() + label[1:]
