@@ -14,6 +14,7 @@ from app.models.domain import ExportBundle
 from app.services.artifacts import ArtifactStore
 from app.services.build_status import BuildStatusService
 from app.services.convergence.golden_convergence_orchestrator import GoldenConvergenceOrchestrator, quality_summary_markdown
+from app.services.client_pack import audit_pack_files, client_pack_files, front_door_readme
 from app.services.deep_dossier import DeepDossierService
 from app.services.display_labels import display_label, format_usd
 from app.services.dossier_manifest import MANIFEST_FILENAME, build_dossier_manifest, manifest_markdown
@@ -226,6 +227,7 @@ class ExportPackageService:
             export_dir, export_name, session, brief, report, pricing,
             architectures, architecture_revisions, diagrams, convergence_result,
             warnings, included_artifacts,
+            deep_dossier=deep_dossier,
         )
 
         progress(88, "Building ZIP package.")
@@ -309,30 +311,16 @@ class ExportPackageService:
         return payloads, records
 
     def _readme(self, session_name: str) -> str:
-        return "\n".join([
-            f"# {session_name}",
-            "",
-            "This Archway solution package contains the local artifacts generated for the session.",
-            "",
-            "Sections:",
-            "- Solution brief",
-            "- Evidence-disciplined research report",
-            "- Executive summary",
-            "- Deep research dossier",
-            "- Claim register, evidence map, and consistency check",
-            "- Deterministic pricing estimate",
-            "- POC and production architecture specs",
-            "- Diagram gallery index and diagram files when available",
-            "- Evidence appendix",
-            "- Diagnostics summary",
-            "",
-        ])
+        # Front door: polished title, one-paragraph guide, and where to start
+        # (client pack vs audit pack vs compatibility root files).
+        return front_door_readme(session_name)
 
     def _write_dossier_layer(
         self, export_dir: Path, export_name: str, session, brief, report, pricing,
         architectures, architecture_revisions, diagrams, convergence_result,
         warnings: list[str], included_artifacts: list[str],
         scenario_overrides: list | None = None,
+        deep_dossier=None,
     ) -> None:
         """Write supplemental SKU trace files + the verifiable dossier manifest.
 
@@ -420,6 +408,31 @@ class ExportPackageService:
                 if confidence in {"low", "limited", "directional"}
             ),
         }
+
+        # Client/audit pack split — additive presentation layer rendered from the
+        # SAME payloads as the root artifacts (no new claims, numbers, readiness
+        # states, risks, or decisions). Root numbered files stay untouched; the
+        # manifest inventory walk hashes these files automatically.
+        if deep_dossier is not None:
+            client_dir = export_dir / "client_pack"
+            client_dir.mkdir(exist_ok=True)
+            for relative, content in client_pack_files(
+                session_name=getattr(session, "name", None) or export_name,
+                brief=brief,
+                report=report,
+                pricing=pricing,
+                architectures=architectures,
+                diagrams=diagrams,
+                deep_dossier=deep_dossier,
+                decision_records=decision_records,
+            ).items():
+                (client_dir / relative).write_text(content, encoding="utf-8")
+                included_artifacts.append(f"exports/{export_name}/client_pack/{relative}")
+            audit_dir = export_dir / "audit_pack"
+            audit_dir.mkdir(exist_ok=True)
+            for relative, content in audit_pack_files(diagrams=diagrams).items():
+                (audit_dir / relative).write_text(content, encoding="utf-8")
+                included_artifacts.append(f"exports/{export_name}/audit_pack/{relative}")
 
         # Scenario simulations — only on explicit overrides or the default-set flag.
         scenario_manifest_summary = None
