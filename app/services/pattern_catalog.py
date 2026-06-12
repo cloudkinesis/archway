@@ -484,7 +484,7 @@ def _service_specific_rationale(item: ServicePattern, pattern: WorkloadPattern, 
         ("kinesis data streams", "It provides a durable hot buffer for high-volume ordered telemetry and protects downstream analytics from producer spikes."),
         ("eventbridge", "It normalizes domain events and decouples anomaly producers from workflow, notification, and case-management consumers."),
         ("sqs", "It absorbs downstream integration backpressure and supports retry/dead-letter handling for operational actions."),
-        ("step functions", "It gives dispatch and exception handling an auditable workflow boundary instead of hiding action policy inside code."),
+        ("step functions", "It gives workflow execution and exception handling an auditable boundary instead of hiding action policy inside code."),
         ("dynamodb", "It fits low-latency operational state, dedupe keys, alert state, feature cache, and idempotency records."),
         ("s3", "It is the durable system of record for raw/curated data, artifacts, evidence, lifecycle retention, and replay."),
         ("cloudwatch", "It is needed to operate the workload through metrics, logs, alarms, dashboards, and cost/throughput signals."),
@@ -794,7 +794,7 @@ def observability_controls(profile: UseCaseProfile, production: bool) -> list[Ob
     if "predictive_ml" in profile.capabilities:
         controls.append(ObservabilityControl(name="Model quality and drift monitoring", rationale="Tracks false positives, false negatives, feature drift, and retraining triggers."))
     if production:
-        controls.append(ObservabilityControl(name="Business SLA dashboards", rationale="Connects technical health to outage, dispatch, restoration, and customer-impact objectives."))
+        controls.append(ObservabilityControl(name="Business SLA dashboards", rationale="Connects technical health to operational SLA and customer-impact objectives."))
     return _dedupe_named(controls)
 
 
