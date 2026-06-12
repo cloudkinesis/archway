@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from app.services.display_labels import dedupe_canonical, display_label, gate_display
 from app.models.domain import (
     AssumptionRecord,
     DeepResearchDossier,
@@ -153,7 +154,7 @@ class DeepDossierService:
             "final_recommendation",
             "evidence_appendix",
         ]
-        return "\n\n".join(dossier.sections[key] for key in order) + "\n"
+        return "\n\n".join(["# Deep Research Dossier", *(dossier.sections[key] for key in order)]) + "\n"
 
     def claim_register_markdown(self, dossier: DeepResearchDossier) -> str:
         rows = [
@@ -478,21 +479,21 @@ def _cover_summary(ctx: dict) -> str:
     evidence_quality = ctx["evidence_quality"]
     readiness = ctx["readiness"]
     lines = [
-        "# Cover Summary",
+        "## Cover Summary",
         "",
         f"Use case title: {brief.get('title', 'Untitled')}",
-        f"Industry: {brief.get('industry') or profile.get('domain') or 'Requires validation'}",
-        f"Workload family: {', '.join(profile.get('workload_families', [])) or 'Requires validation'}",
-        "Research depth: DEEP_DOSSIER",
+        f"Industry: {display_label(brief.get('industry') or profile.get('domain') or '') or 'Requires validation'}",
+        f"Workload family: {', '.join(display_label(family) for family in profile.get('workload_families', [])) or 'Requires validation'}",
+        "Research depth: Deep dossier",
         f"Generated timestamp: {ctx['generated_at'].isoformat()}",
-        f"Evidence authority status: {evidence_quality.get('evidence_authority', 'unknown')}",
+        f"Evidence authority status: {display_label(evidence_quality.get('evidence_authority', 'unknown'))}",
         f"Pricing confidence: {quality.pricing_score}/10",
-        f"Customer-readiness status: {quality.readiness_status.value}",
+        f"Customer-readiness status: {display_label(quality.readiness_status.value)}",
         f"Recommendation verdict: {ctx['verdict']}",
         f"Pricing status: {_cost_range(ctx['pricing'])}",
         "",
         "Top validation gates:",
-        *[f"- {item}" for item in ctx["top_gates"][:3]],
+        *[f"- {gate_display(item)}" for item in ctx["top_gates"][:3]],
     ]
     return "\n".join(lines)
 
@@ -501,13 +502,14 @@ def _executive_verdict(ctx: dict) -> str:
     report = ctx["report"]
     risks = ctx["risks"]
     top_risk = risks[0].risk if risks else "Pricing and operational validation remain open."
-    validation = ctx["top_gates"][0] if ctx["top_gates"] else "Refresh evidence and pricing before procurement."
+    validation = gate_display(ctx["top_gates"][0]) if ctx["top_gates"] else "Refresh evidence and pricing before procurement."
+    direction = report.get("recommended_production_direction") or "an AWS-native architecture with governed operations, evidence discipline, and explicit pricing validation"
     return "\n".join([
-        "# Executive Verdict",
+        "## Executive Verdict",
         "",
-        f"{ctx['verdict']}: Archway recommends proceeding only through a staged AWS-native path, starting with a scoped POC and moving to production after the validation gates pass. The recommended direction is {report.get('recommended_production_direction') or 'an AWS-native architecture with governed operations, evidence discipline, and explicit pricing validation'}.",
+        _end_sentence(f"{ctx['verdict']}: Archway recommends proceeding only through a staged AWS-native path, starting with a scoped POC and moving to production after the validation gates pass. The recommended direction is {direction}"),
         "",
-        f"The biggest reason to proceed is that the extracted workload capabilities align with managed AWS building blocks for ingestion, event processing, model lifecycle, workflow integration, audit, and observability. The biggest risk is {top_risk}. Before production, the customer must validate: {validation}.",
+        _end_sentence(f"The biggest reason to proceed is that the extracted workload capabilities align with managed AWS building blocks for ingestion, event processing, model lifecycle, workflow integration, audit, and observability. {_end_sentence(f'The biggest risk is {top_risk}')} Before production, the customer must validate: {validation}"),
     ])
 
 
@@ -516,7 +518,7 @@ def _use_case_interpretation(ctx: dict) -> str:
     profile = ctx["profile"]
     non_goals = profile.get("excluded_families") or profile.get("excluded_patterns") or []
     return "\n".join([
-        "# Use Case Interpretation",
+        "## Use Case Interpretation",
         "",
         f"Archway understood the business problem as: {brief.get('refined_problem_statement') or brief.get('raw_use_case', '')}",
         "",
@@ -532,14 +534,14 @@ def _use_case_interpretation(ctx: dict) -> str:
 
 
 def _confirmed_requirements(ctx: dict) -> str:
-    return "# Confirmed Requirements\n\n" + _table(
+    return "## Confirmed Requirements\n\n" + _table(
         ["Requirement", "Value", "Source", "Architecture impact", "Pricing impact", "Confidence"],
         [[r.requirement, r.value, r.source, r.architecture_impact, r.pricing_impact, r.confidence] for r in ctx["requirements"]],
     )
 
 
 def _key_assumptions(ctx: dict) -> str:
-    return "# Key Assumptions\n\n" + _table(
+    return "## Key Assumptions\n\n" + _table(
         ["Assumption", "Confidence", "Why needed", "Impacts", "If wrong", "Validation method", "Used in pricing?", "Used in architecture?"],
         [[a.assumption, a.confidence, a.why_needed, ", ".join(a.impacts), a.if_wrong, a.validation_method, "yes" if a.used_in_pricing else "no", "yes" if a.used_in_architecture else "no"] for a in ctx["assumptions"]],
     )
@@ -549,13 +551,13 @@ def _evidence_quality(ctx: dict) -> str:
     quality = ctx["evidence_quality"]
     readiness = ctx["readiness"]
     lines = [
-        "# Evidence Quality and Research Limitations",
+        "## Evidence Quality and Research Limitations",
         "",
         f"AWS official docs available? {_yes_no(quality.get('aws_docs_available'))}",
         f"AWS Pricing evidence available? {_yes_no(quality.get('aws_pricing_available'))}",
         f"Competitor web evidence available? {_yes_no(any(item.get('source_type') == 'web' for item in ctx['evidence_items']))}",
-        f"Evidence authority: {quality.get('evidence_authority', 'unknown')}",
-        f"Customer readiness: {ctx['quality'].readiness_status.value}",
+        f"Evidence authority: {display_label(quality.get('evidence_authority', 'unknown'))}",
+        f"Customer readiness: {display_label(ctx['quality'].readiness_status.value)}",
         "",
         "Limitations:",
         *[f"- {item}" for item in quality.get("limitations", []) or ["No limitations recorded."]],
@@ -568,7 +570,7 @@ def _architecture_recommendation(ctx: dict) -> str:
     report = ctx["report"]
     profile = ctx["profile"]
     return "\n".join([
-        "# Architecture Recommendation",
+        "## Architecture Recommendation",
         "",
         f"Recommended architecture pattern: AWS-native {', '.join(profile.get('workload_families', [])) or 'enterprise workload'} with governed POC-to-production progression.",
         "",
@@ -596,11 +598,11 @@ def _service_decision_matrix(ctx: dict) -> str:
             ", ".join(row.get("evidence_ids", [])) or "Requires validation",
             "; ".join(row.get("required_validation", [])) or "Validate before production.",
         ])
-    return "# AWS Service Decision Matrix\n\n" + _table(["Capability", "Recommended AWS service/pattern", "Alternatives considered", "Why selected", "Why alternatives were not selected", "Risks", "Evidence", "Validation needed"], rows)
+    return "## AWS Service Decision Matrix\n\n" + _table(["Capability", "Recommended AWS service/pattern", "Alternatives considered", "Why selected", "Why alternatives were not selected", "Risks", "Evidence", "Validation needed"], rows)
 
 
 def _technical_feasibility(ctx: dict) -> str:
-    return "# Technical Feasibility Matrix\n\n" + _table(
+    return "## Technical Feasibility Matrix\n\n" + _table(
         ["Requirement", "Candidate design", "AWS capability", "Feasibility verdict", "Key risk", "Validation method", "Evidence"],
         [[r.requirement, r.candidate_design, r.aws_capability, r.feasibility_verdict, r.key_risk, r.validation_method, ", ".join(r.evidence_ids) or "Requires validation"] for r in ctx["feasibility"]],
     )
@@ -614,18 +616,18 @@ def _pricing_analysis(ctx: dict) -> str:
     heuristic = sum(line.monthly_estimate or 0 for line in lines if line.evidence_type == DossierPricingEvidenceClass.heuristic)
     procurement = "No" if heuristic or any(line.validation_needed for line in lines) else "Yes"
     return "\n".join([
-        "# Pricing Analysis",
+        "## Pricing Analysis",
         "",
         f"Pricing confidence: {ctx['quality'].pricing_score}/10",
-        f"Low / expected / high estimate: ${pricing.get('low_monthly_usd', 0)} / ${pricing.get('expected_monthly_usd', 0)} / ${pricing.get('high_monthly_usd', 0)} per month",
+        f"Low / expected / high estimate: {_usd(pricing.get('low_monthly_usd', 0))} / {_usd(pricing.get('expected_monthly_usd', 0))} / {_usd(pricing.get('high_monthly_usd', 0))} per month",
         f"POC estimate: directional and scoped by the POC architecture; validate with POC burn-in.",
         f"Production estimate: {_cost_range(pricing)}",
-        f"Pricing-backed subtotal: ${round(backed, 2)}",
-        f"Heuristic subtotal: ${round(heuristic, 2)}",
+        f"Pricing-backed subtotal: {_usd(backed)}",
+        f"Heuristic subtotal: {_usd(heuristic)}",
         f"Procurement readiness: {procurement}",
         "Reason: exact SKU/tier quantities remain unresolved for any line marked HEURISTIC or PRICE_LIST_CATALOG_BACKED.",
         "",
-        "## Pricing Driver Closure",
+        "### Pricing Driver Closure",
         f"Closure status: {closure.get('status', 'unknown')}",
         f"Pricing maturity: {closure.get('pricing_maturity', (pricing.get('metadata') or {}).get('pricing_maturity', 'unknown'))}",
         f"Scenario profile used: {closure.get('scenario_profile_used') or 'None'}",
@@ -659,7 +661,7 @@ def _cost_sensitivity(ctx: dict) -> str:
         fallback = ["event rate", "message size", "workflow execution rate"]
     variables = pricing.get("unknown_variables", [])[:6] or fallback
     rows = [[item, "current dossier assumption", "50% of base", "200% of base", "Material; quantify in burn-in", "It controls one or more line-item quantities."] for item in variables]
-    return "# Cost Sensitivity Analysis\n\n" + _table(["Variable", "Base assumption", "Low case", "High case", "Monthly cost impact", "Why it matters"], rows)
+    return "## Cost Sensitivity Analysis\n\n" + _table(["Variable", "Base assumption", "Low case", "High case", "Monthly cost impact", "Why it matters"], rows)
 
 
 def _competitive_landscape(ctx: dict) -> str:
@@ -673,7 +675,7 @@ def _competitive_landscape(ctx: dict) -> str:
         ["Incumbent enterprise systems", "incumbent", "Integration target, not replacement", "May already own operational, inventory, clinical, or case data.", "May constrain API, latency, identity, and workflow design.", "Existing customer cost; not estimated", "low", "User input"],
     ]
     return "\n".join([
-        "# Competitive and Alternative Landscape",
+        "## Competitive and Alternative Landscape",
         "",
         report.get("competitor_analysis", "Competitive analysis is directional and requires external validation."),
         "",
@@ -693,7 +695,7 @@ def _key_differentiators(ctx: dict) -> str:
         ["Hybrid integration posture", "External systems remain integration actors while AWS hosts the platform services.", "User input, architecture metadata"],
         ["Faster POC path", poc_text, "User input, local policy"],
     ]
-    return "# Key Differentiators\n\n" + _table(["Differentiator", "Why it matters", "Evidence"], rows)
+    return "## Key Differentiators\n\n" + _table(["Differentiator", "Why it matters", "Evidence"], rows)
 
 
 def _security_compliance(ctx: dict) -> str:
@@ -705,7 +707,7 @@ def _security_compliance(ctx: dict) -> str:
         ["Network boundaries", "Private enterprise integrations are production gates.", "VPC-resident adapters, private routes, logs.", "Firewall, DNS, identity, routing, and failover ownership.", "architecture", "Network validation test"],
         ["Compliance caveat", "AWS eligibility is not workload compliance.", "Use eligible services and evidence collection.", "Final compliance depends on customer configuration, operations, evidence, and auditor/regulator validation.", "local policy", "Auditor/regulator review"],
     ]
-    return "# Security and Compliance Analysis\n\nUsing AWS services that are eligible for a compliance program does not automatically make the workload compliant. Final compliance depends on customer configuration, operational controls, evidence, and auditor/regulator validation.\n\n" + _table(["Requirement / regulation", "Architecture implication", "AWS control/pattern", "Customer-owned control", "Evidence", "Validation needed"], rows)
+    return "## Security and Compliance Analysis\n\nUsing AWS services that are eligible for a compliance program does not automatically make the workload compliant. Final compliance depends on customer configuration, operational controls, evidence, and auditor/regulator validation.\n\n" + _table(["Requirement / regulation", "Architecture implication", "AWS control/pattern", "Customer-owned control", "Evidence", "Validation needed"], rows)
 
 
 def _reliability_resilience(ctx: dict) -> str:
@@ -717,7 +719,7 @@ def _reliability_resilience(ctx: dict) -> str:
         ["External system unavailable", "Downstream operational update fails.", "Queue, retry, dead-letter, idempotent adapter.", "Manual fallback process.", "Operational SLA depends on customer system."],
         ["Human approval bottleneck", "High-impact actions wait too long.", "Priority queues and escalation rules.", "On-call ownership and staffing.", "Surges may still require manual triage."],
     ]
-    return "# Reliability and Resilience Analysis\n\n" + _table(["Failure mode", "Impact", "Detection", "Mitigation", "Residual risk"], rows)
+    return "## Reliability and Resilience Analysis\n\n" + _table(["Failure mode", "Impact", "Detection", "Mitigation", "Residual risk"], rows)
 
 
 def _performance_scalability(ctx: dict) -> str:
@@ -735,7 +737,7 @@ def _performance_scalability(ctx: dict) -> str:
         quotas = "Quotas requiring validation: stream shards/throughput, Flink KPU capacity, model endpoint concurrency, API limits, workflow transitions, logs, and private connectivity limits."
         load = "Load test plan: replay representative events, inject peak bursts, measure end-to-end latency, verify backlog recovery, and compare expected AWS cost burn."
     return "\n".join([
-        "# Performance and Scalability Analysis",
+        "## Performance and Scalability Analysis",
         "",
         f"Expected throughput: derived from confirmed metrics and assumptions; raw profile metrics include {len(profile.get('metrics', []))} extracted entries.",
         peak,
@@ -757,11 +759,11 @@ def _operational_readiness(ctx: dict) -> str:
         ["Data quality checks", "Schema, missing values, drift, record identity, and timestamp quality before model scoring."],
         ["Release gates", "No direct automation until accuracy, latency, security, compliance, and rollback gates pass."],
     ]
-    return "# Operational Readiness\n\n" + _table(["Area", "Required operating practice"], rows)
+    return "## Operational Readiness\n\n" + _table(["Area", "Required operating practice"], rows)
 
 
 def _risk_matrix(ctx: dict) -> str:
-    return "# Risk and Mitigation Matrix\n\n" + _table(
+    return "## Risk and Mitigation Matrix\n\n" + _table(
         ["Severity", "Risk", "Why it matters", "Likelihood", "Impact", "Mitigation", "Validation owner", "Blocking status"],
         [[r.severity, r.risk, r.why_it_matters, r.likelihood, r.impact, r.mitigation, r.validation_owner, r.blocking_status] for r in ctx["risks"]],
     )
@@ -775,13 +777,13 @@ def _implementation_roadmap(ctx: dict) -> str:
         ["Production rollout", "Resilient AWS platform, private integrations, security controls, runbooks.", "Controlled automation under policy.", services, "DR, security, compliance, quotas, load.", "8-16 weeks", "Production readiness review passes."],
         ["Optimization", "Tune cost, capacity, retention, model retraining, and observability.", "Lower unit cost and better model quality.", services, "Measured cost and SLA review.", "ongoing", "Optimization backlog owned."],
     ]
-    return "# Implementation Roadmap\n\n" + _table(["Phase", "Scope", "Success criteria", "AWS services", "Validation gates", "Estimated duration", "Exit criteria"], rows)
+    return "## Implementation Roadmap\n\n" + _table(["Phase", "Scope", "Success criteria", "AWS services", "Validation gates", "Estimated duration", "Exit criteria"], rows)
 
 
 def _validation_plan(ctx: dict) -> str:
     gates = ctx["top_gates"]
     defaults = ["Full-scale load test", "Latency profiling", "Model accuracy validation", "False positive / false negative validation", "Quota validation", "Security control validation", "Compliance audit readiness", "DR test", "Network failover test", "Cost burn-in test"]
-    return "# Validation Plan\n\n" + "\n".join(f"- OPEN_VALIDATION_ITEM: {item}" for item in list(dict.fromkeys(gates + defaults)))
+    return "## Validation Plan\n\n" + "\n".join(f"- OPEN_VALIDATION_ITEM: {gate_display(item)}" for item in list(dict.fromkeys(gates + defaults)))
 
 
 def _final_recommendation(ctx: dict) -> str:
@@ -790,20 +792,20 @@ def _final_recommendation(ctx: dict) -> str:
     else:
         driver_action = "- Confirm workload drivers: event rate, message size, retention, anomaly rates, and approval rates."
     return "\n".join([
-        "# Final Recommendation",
+        "## Final Recommendation",
         "",
         f"Verdict: {ctx['verdict']}.",
         "Why: the architecture direction is credible for AWS, but readiness depends on evidence, pricing, integration, security, and operational validation rather than prose confidence.",
         "",
         "Conditions:",
-        *[f"- {item}" for item in ctx["top_gates"][:5]],
+        *[f"- {gate_display(item)}" for item in ctx["top_gates"][:5]],
         "",
         "Next three actions:",
         driver_action,
         "- Run the POC with measured load, model quality, security controls, and cost burn-in.",
         "- Refresh AWS Docs/Pricing evidence and review the dossier with architecture, security, finance, and operations owners.",
         "",
-        f"Customer-readiness status: {ctx['quality'].readiness_status.value}.",
+        f"Customer-readiness status: {display_label(ctx['quality'].readiness_status.value)}.",
     ])
 
 
@@ -818,7 +820,7 @@ def _evidence_appendix(ctx: dict) -> str:
     for item in ctx["evidence_items"]:
         assessment = ctx["assessments"].get(item.get("id"), {})
         rows.append([item.get("id"), item.get("title"), item.get("url") or "n/a", item.get("source_type"), assessment.get("source_type", "UNKNOWN"), item.get("retrieved_at", ""), _supported_claims(item.get("id"), ctx["claims"]), assessment.get("use_limitations", "Use according to source authority.")])
-    return "# Evidence Appendix\n\n" + _table(["Evidence ID", "Source title", "Source URL/reference", "Source type", "Authority", "Retrieved at", "Supports claims", "Limitations"], rows)
+    return "## Evidence Appendix\n\n" + _table(["Evidence ID", "Source title", "Source URL/reference", "Source type", "Authority", "Retrieved at", "Supports claims", "Limitations"], rows)
 
 
 def _table(headers: list[str], rows: list[list[Any]]) -> str:
@@ -834,20 +836,44 @@ def _cell(value: Any) -> str:
     return str(value if value is not None else "").replace("\n", " ").replace("|", "/")
 
 
+def _usd(value: Any) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return f"${value}"
+    return f"${number:,.0f}"
+
+
+def _usd_range(pricing: dict) -> str:
+    low = _usd(pricing.get("low_monthly_usd", 0))
+    high = _usd(pricing.get("high_monthly_usd", 0))
+    expected = _usd(pricing.get("expected_monthly_usd", 0))
+    return f"{low}–{high}/month, expected ≈ {expected}"
+
+
+def _end_sentence(text: str) -> str:
+    text = str(text or "").rstrip()
+    while text.endswith(".."):
+        text = text[:-1]
+    if not text or text.endswith((".", "?", "!")):
+        return text
+    return text + "."
+
+
 def _cost_range(pricing: dict) -> str:
     if not pricing:
         return "Not estimated"
     metadata = pricing.get("metadata") or {}
     closure = metadata.get("pricing_driver_closure") or {}
     if metadata.get("pricing_maturity") == "pricing_customer_demo_ready" or closure.get("directional_scenario_allowed"):
-        return f"Directional scenario estimate, not procurement-ready: ${pricing.get('low_monthly_usd', 0)}-${pricing.get('high_monthly_usd', 0)}/month expected ${pricing.get('expected_monthly_usd', 0)}. Replace scenario assumptions with traffic forecasts, CDN logs, or event schedule data before budgeting."
+        return f"Directional scenario estimate, not procurement-ready: {_usd_range(pricing)}. Replace scenario assumptions with traffic forecasts, CDN logs, or event schedule data before budgeting."
     if metadata.get("pricing_can_be_displayed_as_headline") is False:
         return "Directional placeholder only - not headline-safe. Cost range is intentionally withheld from the executive headline; see Pricing Trace for rough-order calculation details."
     if metadata.get("status") == "invalid_extracted_scale_not_applied":
         return f"Pricing invalid until extracted scale is applied: {metadata.get('reason')}"
     if metadata.get("status") == "directional_only_missing_core_compute_drivers":
         return f"Directional only until core compute/SKU drivers are confirmed: {metadata.get('reason')}"
-    return f"${pricing.get('low_monthly_usd', 0)}-${pricing.get('high_monthly_usd', 0)}/month expected ${pricing.get('expected_monthly_usd', 0)}"
+    return _usd_range(pricing)
 
 
 def _pricing_evidence_class(item: dict) -> DossierPricingEvidenceClass:
@@ -912,7 +938,7 @@ def _validation_gates(brief: dict, metadata: dict, pricing: dict, risks: list[Ri
         gates.extend(record.get("required_validation", []))
     gates.extend(pricing.get("unknown_variables", [])[:4])
     gates.extend(risk.risk for risk in risks if risk.blocking_status == "blocking")
-    return [item for item in dict.fromkeys(gates) if item]
+    return dedupe_canonical([item for item in dict.fromkeys(gates) if item])
 
 
 def _production_architecture(architectures: list[dict]) -> dict:
