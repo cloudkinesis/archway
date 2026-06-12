@@ -17,23 +17,9 @@
 # real regressions.
 
 schema: rc2_known_failures_v1
-known_failures:
-  - test_id: "tests/test_end_to_end_flow.py::test_utility_grid_flow_is_not_misclassified_as_rag_assistant"
-    issue_id: "I1"
-    reason: "Citation-coverage assertion is non-deterministic / sensitive to leftover .archway state; expected False but often yields True. Present on baseline f692c04; unrelated to fix branches."
-    severity: low
-    blocks_internal_pilot: false
-    added_date: "2026-06-08"
-    status: open
-    expected_behavior: "Test-only flake. Triage once (make deterministic or quarantine); no product impact."
-    next_action: "Stabilize the assertion or isolate the data dir, then remove this entry."
-
-  - test_id: "tests/test_synthesis.py::test_utility_metrics_and_business_goals_are_structured"
-    issue_id: "I2"
-    reason: "KeyError: 'outage_reduction_target_percent' — metric label/extraction expectation. Pre-existing on baseline; verify it is still present."
-    severity: low
-    blocks_internal_pilot: false
-    added_date: "2026-06-08"
-    status: open
-    expected_behavior: "If it fails as documented, report FAIL_KNOWN. If it now passes, report KNOWN_FAIL_NOW_PASSING and remove this entry."
-    next_action: "Confirm on a clean baseline run; if real, scope a focused metric-extraction fix branch."
+# 2026-06-10: I1 and I2 entries removed — both tests now pass on the v2 line
+# (I1 fixed by fix/utility-grid-e2e-citation-determinism @ 6081c76; I2 fixed by
+# fix/utility-metric-structuring @ 1138849). The harness reported them as
+# KNOWN_FAIL_NOW_PASSING, which per the rules above means this file must be
+# cleaned up. No known failing tests remain.
+known_failures: []

@@ -152,7 +152,7 @@ def _pricing_section(pricing, sku_trace_hash, unsupported_dimensions) -> dict:
         "low_monthly_usd": pricing.get("low_monthly_usd"),
         "expected_monthly_usd": pricing.get("expected_monthly_usd"),
         "high_monthly_usd": pricing.get("high_monthly_usd"),
-        "pricing_can_be_displayed_as_headline": md.get("pricing_can_be_displayed_as_headline", True) is not False,
+        "pricing_can_be_displayed_as_headline": md.get("pricing_can_be_displayed_as_headline") is True,
         "headline_safe": bool(ledger_summary.get("headline_safe", False)),
         "procurement_ready": bool(ledger_summary.get("procurement_ready", False)),
         "pricing_closure_status": closure.get("status", "unknown"),

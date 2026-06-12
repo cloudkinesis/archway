@@ -57,6 +57,9 @@ def test_hospital_or_use_case_routes_to_healthcare_operations_not_iot_or_field_s
     assert "External Epic / EHR system" in service_names
     assert "External OR command center" in service_names
     assert "AWS Step Functions" in service_names
+    rationale_text = "\n".join(item.rationale for item in services).lower()
+    assert "dispatch" not in rationale_text
+    assert "depot" not in rationale_text
     assert select_pricing_driver_family(profile) == PricingDriverFamily.HEALTHCARE_OPERATIONS_SCHEDULING
 
 
@@ -129,6 +132,16 @@ def test_healthcare_operations_architecture_has_governed_clinical_flows_without_
         assumptions=[],
         risks=[],
     )
+    architecture_text = "\n".join(
+        [
+            *[item.rationale for item in spec.selected_services],
+            *[item.rationale for item in spec.observability_controls],
+        ]
+    ).lower()
+    assert "dispatch" not in architecture_text
+    assert "depot" not in architecture_text
+    assert "outage" not in architecture_text
+    assert "restoration" not in architecture_text
 
     revision = ArchitectureRevisionService().initialize("sess_healthcare_or_test", [spec])
     critical = [issue for issue in revision.validation_issues if issue.severity == "critical"]

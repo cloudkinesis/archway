@@ -118,6 +118,20 @@ def test_manifest_separates_global_and_sku_readiness(tmp_path):
     assert sku["sku_pilot_procurement_ready"] is False
 
 
+def test_manifest_headline_safety_fails_closed_when_missing_or_null(tmp_path):
+    export = _seed_export(tmp_path)
+
+    missing_flag = _pricing()
+    missing_flag["metadata"].pop("pricing_can_be_displayed_as_headline")
+    m_missing = _build(export, missing_flag)
+    assert m_missing["pricing"]["global"]["pricing_can_be_displayed_as_headline"] is False
+
+    null_flag = _pricing()
+    null_flag["metadata"]["pricing_can_be_displayed_as_headline"] = None
+    m_null = _build(export, null_flag)
+    assert m_null["pricing"]["global"]["pricing_can_be_displayed_as_headline"] is False
+
+
 # 6 — assumed quantities never produce procurement-ready -----------------------
 def test_assumed_quantities_never_procurement_ready(tmp_path):
     export = _seed_export(tmp_path)

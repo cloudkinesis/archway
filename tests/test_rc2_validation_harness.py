@@ -201,10 +201,29 @@ def test_run_command_missing_binary_is_not_run(monkeypatch, tmp_path):
 
 
 # Known-failures loader reads the structured file
-def test_load_known_failures_reads_yaml():
-    known, warn = rc2.load_known_failures(Path(rc2.REPO_ROOT) / "docs" / "rc2" / "known_failures.yaml")
+def test_load_known_failures_reads_yaml(tmp_path):
+    # Parse a self-contained fixture so this test does not couple to the LIVE
+    # known_failures.yaml contents (entries are removed once fixed — by design).
+    sample = tmp_path / "known_failures.yaml"
+    sample.write_text(
+        "schema: rc2_known_failures_v1\n"
+        "known_failures:\n"
+        '  - test_id: "tests/test_example.py::test_known_fail"\n'
+        '    issue_id: "I999"\n'
+        '    reason: "fixture entry"\n'
+        "    severity: low\n"
+        "    blocks_internal_pilot: false\n"
+        '    added_date: "2026-06-10"\n'
+        "    status: open\n",
+        encoding="utf-8",
+    )
+    known, warn = rc2.load_known_failures(sample)
     assert warn is None
-    assert any("test_utility_grid_flow_is_not_misclassified_as_rag_assistant" in tid for tid in known)
+    assert any("tests/test_example.py::test_known_fail" in tid for tid in known)
+    # The LIVE file must always load cleanly, whether or not entries remain.
+    live_known, live_warn = rc2.load_known_failures(Path(rc2.REPO_ROOT) / "docs" / "rc2" / "known_failures.yaml")
+    assert live_warn is None
+    assert isinstance(live_known, dict)
 
 
 def test_load_known_failures_missing_file_warns(tmp_path):

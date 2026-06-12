@@ -193,6 +193,12 @@ def test_export_missing_headline_flag_fails_closed(tmp_path, monkeypatch):
     assert "Headline-safe pricing: No" in md
 
 
+def test_export_null_headline_flag_fails_closed(tmp_path, monkeypatch):
+    md, _ = _pricing_markdown({"pricing_can_be_displayed_as_headline": None}, tmp_path, monkeypatch)
+    assert "Expected monthly estimate:" not in md
+    assert "Headline-safe pricing: No" in md
+
+
 def test_export_explicit_false_remains_unsafe(tmp_path, monkeypatch):
     md, _ = _pricing_markdown({"pricing_can_be_displayed_as_headline": False}, tmp_path, monkeypatch)
     assert "Expected monthly estimate:" not in md
