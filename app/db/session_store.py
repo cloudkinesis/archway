@@ -6,6 +6,7 @@ from uuid import uuid4
 from app.core.config import get_settings
 from app.models.domain import Session, SessionPhase, SessionStatus, UseCaseBrief, utc_now
 from app.services.artifacts import ArtifactStore
+from app.services.display_labels import TITLE_TRAILING_STOPWORDS
 
 
 class SessionStore:
@@ -75,6 +76,14 @@ class SessionStore:
 
 
 def _session_name(title: str, raw: str) -> str:
-    candidate = title or raw
-    return candidate.strip().splitlines()[0][:72] or "New Archway session"
+    candidate = (title or raw).strip()
+    candidate = candidate.splitlines()[0] if candidate else ""
+    if len(candidate) > 72:
+        cut = candidate[:72]
+        # Truncate at a word boundary instead of mid-word.
+        candidate = cut[: cut.rfind(" ")] if " " in cut else cut
+    words = candidate.split()
+    while words and (words[-1].lower() in TITLE_TRAILING_STOPWORDS or words[-1].isdigit()):
+        words.pop()
+    return " ".join(words) or "New Archway session"
 

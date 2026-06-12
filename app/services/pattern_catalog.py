@@ -13,6 +13,7 @@ from app.services.lane_planner import (
     plan_lanes,
     resolve_domain_lane_model,
 )
+from app.services.display_labels import display_label
 from app.services.use_case_profile import UseCaseProfile
 from app.services.view_planner import compiler_views_for_semantic, plan_semantic_views
 
@@ -460,7 +461,7 @@ def service_recommendations(profile: UseCaseProfile, evidence_ids: list[str]) ->
 def _service_specific_rationale(item: ServicePattern, pattern: WorkloadPattern, profile: UseCaseProfile) -> str:
     role = str(item.metadata.get("role") or item.service_key or item.component_id or item.service).lower()
     service = item.service.lower()
-    capability_hint = ", ".join(profile.capabilities[:6]) or "the extracted workload requirements"
+    capability_hint = ", ".join(display_label(capability, capitalize=False) for capability in profile.capabilities[:6]) or "the extracted workload requirements"
     role_rationales = {
         "stream_processor": "It owns stateful windowing, late-event handling, feature extraction, and continuous anomaly-preparation logic before scoring or storage.",
         "model_endpoint": "It owns governed model hosting or batch/real-time scoring, separating ML inference from stream-processing and workflow side effects.",
@@ -497,11 +498,15 @@ def _service_specific_rationale(item: ServicePattern, pattern: WorkloadPattern, 
     detail = role_rationales.get(role)
     if not detail:
         detail = next((text for token, text in service_rationales if token in service), None)
-    detail = detail or item.purpose
-    return (
-        f"{detail} Selected for the {pattern.label} workload because the use case requires {capability_hint}. "
-        f"Alternatives remain explicit where cost, latency, regional availability, or operational model may change the final selection."
-    )
+    if detail:
+        # The role/service rationale already explains the selection; the
+        # workload-fit boilerplate and the alternatives caveat are stated once
+        # at section level instead of being repeated on every service.
+        return detail
+    # Fallback when no specific rationale exists: a workload-fit sentence that
+    # is never identical to the purpose text, so downstream renderers that
+    # combine purpose + rationale cannot duplicate the same fragment.
+    return f"Selected for the {pattern.label} workload to support {capability_hint}."
 
 
 def _capability_service_recommendations(profile: UseCaseProfile, evidence_ids: list[str]) -> list[AWSServiceRecommendation]:

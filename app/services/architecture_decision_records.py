@@ -23,6 +23,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.services.display_labels import dedupe_canonical, display_label, looks_like_machine_key
 from app.services.dossier_manifest import stable_json_hash
 
 DecisionType = Literal[
@@ -211,9 +212,16 @@ def _component_records(spec: dict, pricing: dict | None, report: dict | None, ha
         if not alternatives and not decision_point:
             continue
         # chosen_because: existing purpose + existing deterministic rationale, verbatim.
+        # Skip the purpose when the rationale already restates it, so the
+        # combined text never repeats the same fragment twice.
         purpose = str(selection.get("purpose") or "").strip()
         rationale = str(selection.get("rationale") or "").strip()
-        chosen_because = " ".join(part for part in (purpose, rationale) if part)
+        if purpose and rationale.lower().startswith(purpose.rstrip(".").lower()):
+            chosen_because = rationale
+        elif purpose and rationale:
+            chosen_because = f"{purpose.rstrip('.')}. {rationale}"
+        else:
+            chosen_because = purpose or rationale
         governed_flows = _governed_flow_ids_for(related, flows)
         ledger_evidence = _ledger_evidence_class(service, pricing)
         tradeoffs = TradeoffAxes(
@@ -323,7 +331,9 @@ def _pricing_readiness_record(pricing: dict | None, hashes: dict[str, str]) -> A
     pilot_ready = bool(pilot.get("sku_pilot_procurement_ready", False)) if pilot else False
     not_estimated = [str(item) for item in (pilot.get("not_estimated") or [])]
 
-    missing_facts = sorted(set(missing_drivers + unknowns))
+    # Naming variants of the same fact (e.g. "availability_target" and
+    # "availability target") collapse to one canonical entry before counting.
+    missing_facts = sorted(dedupe_canonical(missing_drivers + unknowns))
     directional = (not headline_safe) or (not procurement_ready) or bool(missing_facts)
     return ArchitectureDecisionRecord(
         decision_id="adr_pricing_readiness",
@@ -349,7 +359,7 @@ def _pricing_readiness_record(pricing: dict | None, hashes: dict[str, str]) -> A
         assumptions=[],
         missing_facts=missing_facts + ([f"not_estimated: {item}" for item in not_estimated]),
         reviewer_questions=(
-            [f"Confirm the missing pricing drivers before treating totals as more than directional: {', '.join(missing_facts)}."]
+            [f"Confirm the missing pricing drivers before treating totals as more than directional: {', '.join(display_label(fact, capitalize=False) for fact in missing_facts)}."]
             if missing_facts
             else []
         ),
@@ -466,6 +476,8 @@ def decision_records_markdown(records: list[ArchitectureDecisionRecord]) -> str:
         "",
         "Deterministically derived from the catalog, typed governance metadata, pricing",
         "evidence classes, research quality, and diagram QA. No model-generated prose.",
+        "Alternatives remain explicit where cost, latency, regional availability, or",
+        "operational model may change the final selection.",
         "",
     ]
     for record in records:
@@ -487,7 +499,7 @@ def decision_records_markdown(records: list[ArchitectureDecisionRecord]) -> str:
         if populated:
             lines.append("- **Trade-offs (deterministic facts only):** " + "; ".join(f"{k}: {v}" for k, v in sorted(populated.items())))
         if record.missing_facts:
-            lines.append(f"- **Missing facts:** {'; '.join(record.missing_facts)}")
+            lines.append(f"- **Missing facts:** {'; '.join(display_label(fact, capitalize=False) if looks_like_machine_key(fact) else fact for fact in record.missing_facts)}")
         if record.reviewer_questions:
             lines.append(f"- **Reviewer questions:** {' '.join(record.reviewer_questions)}")
         lines.append("")
