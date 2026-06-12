@@ -21,7 +21,7 @@ from app.models.domain import (
 )
 from app.services.capability_router import CapabilityRouter
 from app.services.discovery_planner import DiscoveryPlannerService
-from app.services.display_labels import ACRONYM_CASING, TITLE_TRAILING_STOPWORDS
+from app.services.display_labels import ACRONYM_CASING, TITLE_TRAILING_STOPWORDS, display_label
 from app.services.pattern_catalog import poc_scope, pricing_dimensions, production_scope
 from app.services.use_case_profile import profile_from_metadata, profile_to_metadata, profile_use_case, refine_profile_with_context
 
@@ -210,7 +210,7 @@ class SynthesisEngine:
 
 
 def _problem_statement(profile, raw_use_case: str) -> str:
-    families = ", ".join(profile.workload_families)
+    families = ", ".join(display_label(family, capitalize=False) for family in profile.workload_families)
     domain = profile.domain or "the target industry"
     return f"Design an AWS architecture for a {domain} workload classified as {families}: {raw_use_case.strip()}"
 

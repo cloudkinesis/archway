@@ -11,6 +11,7 @@ from app.models.domain import (
 )
 from app.services.aws_research_tools import AWSDocsAdapter, AWSPricingAdapter
 from app.services.aws_price_list_query import AWSPriceListQueryClient
+from app.services.display_labels import display_label
 from app.services.evidence_discipline import EvidenceDisciplineService, enforce_citation_gate
 from app.services.evidence_quality import summarize_evidence_quality
 from app.services.pattern_catalog import pricing_dimensions, service_recommendations
@@ -288,7 +289,7 @@ class ResearchOrchestrator:
         progress(94, "Finalizing research dossier and UI view-model inputs.")
         return ResearchReport(
             session_id=session_id,
-            executive_verdict=f"Proceed with caution: classified as {workload_label}. Customer readiness is {customer_readiness.status.value}; governance, evidence, and pricing validation are required before procurement.",
+            executive_verdict=f"Proceed with caution: classified as {display_label(workload_label, capitalize=False)}. Customer readiness is {display_label(customer_readiness.status.value, capitalize=False)}; governance, evidence, and pricing validation are required before procurement.",
             proceed_recommendation="proceed_with_caution",
             use_case_interpretation=effective_brief.refined_problem_statement,
             assumptions=effective_brief.assumptions,
