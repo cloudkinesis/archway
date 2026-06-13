@@ -33,6 +33,11 @@ from app.services.agentic.repair_planner import (
 )
 from app.services.agentic.evaluation import evaluation_gate_markdown, evaluation_gate_payload
 from app.services.agentic.contracts import ArtifactCompletenessState
+from app.services.agentic.research_agent import (
+    build_research_agent_trace,
+    build_research_input_context,
+    research_summary_markdown,
+)
 from app.services.reviewer_mode import (
     build_reviewer_report,
     reviewer_summary_markdown,
@@ -435,6 +440,27 @@ class ExportPackageService:
                 encoding="utf-8",
             )
             included_artifacts.append(f"exports/{export_name}/raw/{name}.json")
+        research_trace = build_research_agent_trace(
+            settings=settings,
+            input_context=build_research_input_context(
+                brief=brief,
+                report=report,
+                pricing=pricing,
+                architectures=architectures,
+                diagrams=diagrams,
+                reviewer_findings=reviewer_report.findings,
+            ),
+        )
+        (raw_dir / "agent_research_trace.json").write_text(
+            research_trace.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        (raw_dir / "agent_research_evidence.json").write_text(
+            json.dumps([item.model_dump(mode="json") for item in research_trace.evidence_items], indent=2, sort_keys=True, default=str),
+            encoding="utf-8",
+        )
+        included_artifacts.append(f"exports/{export_name}/raw/agent_research_trace.json")
+        included_artifacts.append(f"exports/{export_name}/raw/agent_research_evidence.json")
         evaluation_gate = evaluation_gate_payload()
         (raw_dir / "agent_evaluation_battery.json").write_text(
             json.dumps(evaluation_gate, indent=2, sort_keys=True, default=str),
@@ -479,6 +505,11 @@ class ExportPackageService:
                 encoding="utf-8",
             )
             included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-evaluation-summary.md")
+            (audit_dir / "agentic-research-summary.md").write_text(
+                research_summary_markdown(research_trace),
+                encoding="utf-8",
+            )
+            included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-research-summary.md")
 
         # Scenario simulations — only on explicit overrides or the default-set flag.
         scenario_manifest_summary = None
