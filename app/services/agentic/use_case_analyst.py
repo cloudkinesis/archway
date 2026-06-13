@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings
 from app.services.agentic.contracts import AgentDecision
+from app.services.agentic.live_audit import LiveCallAudit
+from app.services.agentic.live_bedrock_harness import LiveRunContext, live_call
 from app.services.dossier_manifest import stable_json_hash
+from app.services.llm.base import LLMMessage, LLMTaskType
 
 AnalystConfidence = Literal["low", "medium", "high"]
 AnalystProvenance = Literal["deterministic", "catalog_backed", "model_proposed", "user_input", "derived"]
@@ -67,6 +71,7 @@ class UseCaseAnalystTrace(BaseModel):
     conflicts: list[str] = Field(default_factory=list)
     prompt_hash: str | None = None
     response_hash: str | None = None
+    live_call: LiveCallAudit | None = None
     input_hash: str
     output_hash: str
 
@@ -174,13 +179,58 @@ class DeterministicFixtureUseCaseAnalystProvider:
 
 
 class LiveUseCaseAnalystProvider:
-    provider_name = "live_stub"
+    provider_name = "bedrock"
+
+    def __init__(self, *, session_id: str | None = None, run_context: LiveRunContext | None = None):
+        self.session_id = session_id
+        self.run_context = run_context
+        self.last_call: LiveCallAudit | None = None
 
     def propose(self, context: dict[str, Any]) -> UseCaseAnalystProposal:
-        raise NotImplementedError("Live use-case analyst provider is intentionally unavailable in this audit-only branch.")
+        input_hash = stable_json_hash(context)
+        messages = [
+            LLMMessage(role="system", content=(
+                "You are Archway's live use-case analyst. Return JSON only. "
+                "Propose candidates, missing facts, follow-up questions, and assumptions. "
+                "Do not claim authority: deterministic facts outrank your proposal."
+            )),
+            LLMMessage(role="user", content=json.dumps(context, default=str)[:22000]),
+        ]
+        result = live_call(
+            LLMTaskType.live_use_case_analyst,
+            messages,
+            UseCaseAnalystProposal,
+            session_id=self.session_id,
+            lane="use_case_analyst",
+            run_context=self.run_context,
+            sensitivity_text=str(context.get("raw_use_case") or ""),
+        )
+        self.last_call = result.audit
+        if isinstance(result.parsed, UseCaseAnalystProposal):
+            proposal = result.parsed
+            return proposal.model_copy(update={
+                "input_hash": proposal.input_hash or input_hash,
+                "output_hash": stable_json_hash(_proposal_payload(proposal)),
+            })
+        proposal = _proposal(
+            proposal_id="proposal_" + input_hash.removeprefix("sha256:")[:12],
+            input_hash=input_hash,
+            provenance="model_proposed",
+            uncertainties=[result.audit.error_message or result.audit.skip_reason or "Live use-case analyst did not return a usable proposal."],
+        )
+        return proposal.model_copy(update={"output_hash": stable_json_hash(_proposal_payload(proposal))})
 
     def validate(self, proposal: UseCaseAnalystProposal, deterministic_context: dict[str, Any]) -> UseCaseAnalystTrace:
-        raise NotImplementedError("Live use-case analyst validation is intentionally unavailable in this branch.")
+        trace = validate_use_case_analyst_proposal(proposal, deterministic_context, provider_name=self.provider_name)
+        if self.last_call:
+            decision = "downgraded" if self.last_call.status == "accepted" else self.last_call.status
+            trace = trace.model_copy(update={
+                "provider": self.last_call.provider,
+                "prompt_hash": self.last_call.prompt_hash,
+                "response_hash": self.last_call.response_hash,
+                "live_call": self.last_call.model_copy(update={"status": decision}) if decision in {"rejected", "skipped", "failed", "not_attempted", "setup_required"} else self.last_call,
+            })
+        return trace
 
 
 def build_use_case_analyst_context(
@@ -230,9 +280,13 @@ def build_use_case_analyst_trace(
     settings: Settings,
     context: dict[str, Any],
     provider: UseCaseAnalystProvider | None = None,
+    live_run_context: LiveRunContext | None = None,
+    session_id: str | None = None,
 ) -> UseCaseAnalystTrace:
     if not settings.enable_agentic_use_case_analyst:
         return DisabledUseCaseAnalystProvider().trace(context)
+    if provider is None and settings.agentic_mode == "live_demo":
+        provider = LiveUseCaseAnalystProvider(session_id=session_id, run_context=live_run_context)
     provider = provider or DeterministicFixtureUseCaseAnalystProvider()
     proposal = provider.propose(context)
     return provider.validate(proposal, context)

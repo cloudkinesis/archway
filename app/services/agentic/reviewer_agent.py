@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings
+from app.services.agentic.live_audit import LiveCallAudit
+from app.services.agentic.live_bedrock_harness import LiveRunContext, live_call
 from app.services.dossier_manifest import stable_json_hash
+from app.services.llm.base import LLMMessage, LLMTaskType
 
 ReviewerSeverity = Literal["info", "advisory", "warning", "blocker"]
 ReviewerCategory = Literal[
@@ -47,6 +51,10 @@ class ReviewerDecision(BaseModel):
     deterministic_gate: str
 
 
+class ReviewerFindingSet(BaseModel):
+    findings: list[ReviewerFindingProposal] = Field(default_factory=list)
+
+
 class ReviewerTrace(BaseModel):
     run_id: str
     enabled: bool = False
@@ -61,6 +69,7 @@ class ReviewerTrace(BaseModel):
     output_hash: str
     prompt_hash: str | None = None
     response_hash: str | None = None
+    live_call: LiveCallAudit | None = None
 
 
 class ReviewerProvider(Protocol):
@@ -134,13 +143,56 @@ class DeterministicFixtureReviewerProvider:
 
 
 class LiveReviewerProvider:
-    provider_name = "live_stub"
+    provider_name = "bedrock"
+
+    def __init__(self, *, session_id: str | None = None, run_context: LiveRunContext | None = None, sensitivity_text: str | None = None):
+        self.session_id = session_id
+        self.run_context = run_context
+        self.sensitivity_text = sensitivity_text
+        self.last_call: LiveCallAudit | None = None
 
     def propose_findings(self, context: dict[str, Any]) -> list[ReviewerFindingProposal]:
-        raise NotImplementedError("Live reviewer provider is intentionally unavailable in this audit-only branch.")
+        messages = [
+            LLMMessage(role="system", content=(
+                "You are Archway's live reviewer. Return JSON only. "
+                "Propose additive findings only. Do not remove deterministic findings and set can_downgrade_readiness=false."
+            )),
+            LLMMessage(role="user", content=json.dumps(context, default=str)[:22000]),
+        ]
+        result = live_call(
+            LLMTaskType.live_reviewer_critique,
+            messages,
+            ReviewerFindingSet,
+            session_id=self.session_id,
+            lane="reviewer",
+            run_context=self.run_context,
+            sensitivity_text=self.sensitivity_text,
+        )
+        self.last_call = result.audit
+        if isinstance(result.parsed, ReviewerFindingSet):
+            return sorted(result.parsed.findings, key=lambda item: item.finding_id)
+        return [
+            ReviewerFindingProposal(
+                finding_id="live_reviewer_unavailable",
+                severity="advisory",
+                category="evidence_gap",
+                target_artifact="audit_pack/agentic-reviewer-findings.md",
+                message=result.audit.error_message or result.audit.skip_reason or "Live reviewer did not return usable findings.",
+                provenance="model_proposed",
+                can_downgrade_readiness=False,
+            )
+        ]
 
     def validate_findings(self, findings: list[ReviewerFindingProposal], deterministic_context: dict[str, Any]) -> ReviewerTrace:
-        raise NotImplementedError("Live reviewer validation is intentionally unavailable in this branch.")
+        trace = validate_reviewer_findings(findings, deterministic_context, provider_name=self.provider_name)
+        if self.last_call:
+            trace = trace.model_copy(update={
+                "provider": self.last_call.provider,
+                "prompt_hash": self.last_call.prompt_hash,
+                "response_hash": self.last_call.response_hash,
+                "live_call": self.last_call,
+            })
+        return trace
 
 
 def build_reviewer_context(
@@ -174,9 +226,14 @@ def build_reviewer_trace(
     settings: Settings,
     context: dict[str, Any],
     provider: ReviewerProvider | None = None,
+    live_run_context: LiveRunContext | None = None,
+    session_id: str | None = None,
+    sensitivity_text: str | None = None,
 ) -> ReviewerTrace:
     if not settings.enable_agentic_reviewer:
         return DisabledReviewerProvider().trace(context)
+    if provider is None and settings.agentic_mode == "live_demo":
+        provider = LiveReviewerProvider(session_id=session_id, run_context=live_run_context, sensitivity_text=sensitivity_text)
     provider = provider or DeterministicFixtureReviewerProvider()
     findings = provider.propose_findings(context)
     return provider.validate_findings(findings, context)

@@ -75,10 +75,13 @@ def test_research_contracts_and_fixture_provider_are_deterministic(monkeypatch, 
     assert all(finding.status == "grounded" for finding in trace.synthesis.findings)
 
 
-def test_live_research_provider_is_unavailable_by_default():
+def test_live_research_provider_degrades_without_live_demo():
     provider = LiveResearchProvider()
-    with pytest.raises(NotImplementedError):
-        provider.plan_queries({})
+    plan = provider.plan_queries({})
+    synthesis = provider.synthesize(plan, [])
+    assert provider.last_call is not None
+    assert provider.last_call.status == "not_attempted"
+    assert synthesis.gaps
 
 
 def test_research_claim_rules_require_source_kind_appropriate_evidence():

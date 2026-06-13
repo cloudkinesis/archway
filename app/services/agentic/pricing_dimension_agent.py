@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings
 from app.services.agentic.contracts import AgentDecision
+from app.services.agentic.live_audit import LiveCallAudit
+from app.services.agentic.live_bedrock_harness import LiveRunContext, live_call
 from app.services.dossier_manifest import stable_json_hash
+from app.services.llm.base import LLMMessage, LLMTaskType
 
 PricingConfidence = Literal["low", "medium", "high"]
 PricingProvenance = Literal["deterministic", "catalog_backed", "model_proposed", "user_input", "derived", "scenario_profile"]
@@ -100,6 +104,7 @@ class PricingDimensionTrace(BaseModel):
     output_hash: str
     prompt_hash: str | None = None
     response_hash: str | None = None
+    live_call: LiveCallAudit | None = None
 
 
 class PricingDimensionProvider(Protocol):
@@ -177,13 +182,58 @@ class DeterministicFixturePricingDimensionProvider:
 
 
 class LivePricingDimensionProvider:
-    provider_name = "live_stub"
+    provider_name = "bedrock"
+
+    def __init__(self, *, session_id: str | None = None, run_context: LiveRunContext | None = None, sensitivity_text: str | None = None):
+        self.session_id = session_id
+        self.run_context = run_context
+        self.sensitivity_text = sensitivity_text
+        self.last_call: LiveCallAudit | None = None
 
     def propose(self, context: dict[str, Any]) -> PricingDimensionProposal:
-        raise NotImplementedError("Live pricing-dimension provider is intentionally unavailable in this audit-only branch.")
+        input_hash = stable_json_hash(context)
+        messages = [
+            LLMMessage(role="system", content=(
+                "You are Archway's live pricing-dimension analyst. Return JSON only. "
+                "Propose generic AWS service usage dimensions, required customer drivers, "
+                "ambiguities, and scenario assumptions. Do not produce totals or procurement claims."
+            )),
+            LLMMessage(role="user", content=json.dumps(context, default=str)[:22000]),
+        ]
+        result = live_call(
+            LLMTaskType.live_pricing_dimension,
+            messages,
+            PricingDimensionProposal,
+            session_id=self.session_id,
+            lane="pricing_dimension",
+            run_context=self.run_context,
+            sensitivity_text=self.sensitivity_text,
+        )
+        self.last_call = result.audit
+        if isinstance(result.parsed, PricingDimensionProposal):
+            proposal = result.parsed
+            return proposal.model_copy(update={
+                "input_hash": proposal.input_hash or input_hash,
+                "output_hash": stable_json_hash(_proposal_payload(proposal)),
+            })
+        proposal = _proposal(
+            proposal_id="pricing_dim_proposal_" + input_hash.removeprefix("sha256:")[:12],
+            input_hash=input_hash,
+            provenance="model_proposed",
+            not_estimated_reasons=[result.audit.error_message or result.audit.skip_reason or "Live pricing-dimension response was not usable."],
+        )
+        return proposal.model_copy(update={"output_hash": stable_json_hash(_proposal_payload(proposal))})
 
     def validate(self, proposal: PricingDimensionProposal, deterministic_context: dict[str, Any]) -> PricingDimensionTrace:
-        raise NotImplementedError("Live pricing-dimension validation is intentionally unavailable in this branch.")
+        trace = validate_pricing_dimension_proposal(proposal, deterministic_context, provider_name=self.provider_name)
+        if self.last_call:
+            trace = trace.model_copy(update={
+                "provider": self.last_call.provider,
+                "prompt_hash": self.last_call.prompt_hash,
+                "response_hash": self.last_call.response_hash,
+                "live_call": self.last_call,
+            })
+        return trace
 
 
 def build_pricing_dimension_context(
@@ -222,9 +272,14 @@ def build_pricing_dimension_trace(
     settings: Settings,
     context: dict[str, Any],
     provider: PricingDimensionProvider | None = None,
+    live_run_context: LiveRunContext | None = None,
+    session_id: str | None = None,
+    sensitivity_text: str | None = None,
 ) -> PricingDimensionTrace:
     if not settings.enable_agentic_pricing:
         return DisabledPricingDimensionProvider().trace(context)
+    if provider is None and settings.agentic_mode == "live_demo":
+        provider = LivePricingDimensionProvider(session_id=session_id, run_context=live_run_context, sensitivity_text=sensitivity_text)
     provider = provider or DeterministicFixturePricingDimensionProvider()
     proposal = provider.propose(context)
     return provider.validate(proposal, context)

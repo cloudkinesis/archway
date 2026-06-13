@@ -70,11 +70,18 @@ def test_narrative_and_reviewer_flags_default_false_and_providers_are_not_invoke
     assert reviewer.decisions[0].decision == "rejected"
 
 
-def test_live_narrative_and_reviewer_providers_are_unavailable():
-    with pytest.raises(NotImplementedError):
-        LiveNarrativeProvider().propose({})
-    with pytest.raises(NotImplementedError):
-        LiveReviewerProvider().propose_findings({})
+def test_live_narrative_and_reviewer_providers_degrade_without_live_demo():
+    narrative = LiveNarrativeProvider()
+    proposal = narrative.propose({})
+    assert narrative.last_call is not None
+    assert narrative.last_call.status == "not_attempted"
+    assert proposal.unsupported_sentence_ids
+
+    reviewer = LiveReviewerProvider()
+    findings = reviewer.propose_findings({})
+    assert reviewer.last_call is not None
+    assert reviewer.last_call.status == "not_attempted"
+    assert findings
 
 
 def test_narrative_fixture_provider_is_deterministic(monkeypatch, tmp_path):

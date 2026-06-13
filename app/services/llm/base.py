@@ -23,6 +23,13 @@ class LLMTaskType(str, Enum):
     architecture_critique = "architecture_critique"
     dossier_quality_review = "dossier_quality_review"
     executive_summary_writing = "executive_summary_writing"
+    live_use_case_analyst = "live_use_case_analyst"
+    live_pricing_dimension = "live_pricing_dimension"
+    live_research_synthesis = "live_research_synthesis"
+    live_architecture_candidate = "live_architecture_candidate"
+    live_diagram_planning = "live_diagram_planning"
+    live_narrative_synthesis = "live_narrative_synthesis"
+    live_reviewer_critique = "live_reviewer_critique"
 
 
 class LLMTask(BaseModel):

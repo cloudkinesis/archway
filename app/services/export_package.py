@@ -68,6 +68,8 @@ from app.services.agentic.architecture_candidate_agent import (
     build_architecture_candidate_context,
     build_architecture_candidate_trace,
 )
+from app.services.agentic.live_audit import LiveCallAudit
+from app.services.agentic.live_bedrock_harness import LiveRunContext
 from app.services.reviewer_mode import (
     build_reviewer_report,
     reviewer_summary_markdown,
@@ -451,9 +453,15 @@ class ExportPackageService:
             ),
         }
 
-        # D21 Phase 0 agentic control-plane traces. These are deterministic raw/audit
-        # artifacts only: no model calls, no network calls, no client_pack output,
-        # and no authority over readiness/pricing/compiler/manifest semantics.
+        # D21/D22 agentic control-plane traces. D22 live_demo may call Bedrock
+        # through bounded providers, but the outputs remain raw/audit-only and
+        # have no authority over readiness/pricing/compiler/manifest semantics.
+        raw_use_case = (
+            getattr(session, "initial_use_case", None)
+            or getattr(getattr(session, "current_summary", None), "raw_use_case", None)
+            or ""
+        )
+        live_run_context = LiveRunContext(session_id=session.id, raw_use_case=raw_use_case)
         agentic_trace = build_agentic_trace(
             settings=settings,
             report=report,
@@ -481,6 +489,8 @@ class ExportPackageService:
                 diagrams=diagrams,
                 reviewer_findings=reviewer_report.findings,
             ),
+            live_run_context=live_run_context,
+            session_id=session.id,
         )
         (raw_dir / "agent_use_case_analyst_trace.json").write_text(
             use_case_analyst_trace.model_dump_json(indent=2),
@@ -499,6 +509,9 @@ class ExportPackageService:
                 architectures=architectures,
                 use_case_analyst_trace=use_case_analyst_trace,
             ),
+            live_run_context=live_run_context,
+            session_id=session.id,
+            sensitivity_text=raw_use_case,
         )
         (raw_dir / "agent_pricing_dimension_trace.json").write_text(
             pricing_dimension_trace.model_dump_json(indent=2),
@@ -520,6 +533,9 @@ class ExportPackageService:
                 diagrams=diagrams,
                 reviewer_findings=reviewer_report.findings,
             ),
+            live_run_context=live_run_context,
+            session_id=session.id,
+            sensitivity_text=raw_use_case,
         )
         (raw_dir / "agent_research_trace.json").write_text(
             research_trace.model_dump_json(indent=2),
@@ -539,6 +555,9 @@ class ExportPackageService:
                 architectures=architectures,
                 reviewer_findings=reviewer_report.findings,
             ),
+            live_run_context=live_run_context,
+            session_id=session.id,
+            sensitivity_text=raw_use_case,
         )
         (raw_dir / "agent_narrative_trace.json").write_text(
             narrative_trace.model_dump_json(indent=2),
@@ -557,6 +576,9 @@ class ExportPackageService:
                 pricing=pricing,
                 reviewer_report=reviewer_report,
             ),
+            live_run_context=live_run_context,
+            session_id=session.id,
+            sensitivity_text=raw_use_case,
         )
         (raw_dir / "agent_reviewer_trace.json").write_text(
             agentic_reviewer_trace.model_dump_json(indent=2),
@@ -575,6 +597,9 @@ class ExportPackageService:
                 diagrams=diagrams,
                 diagram_fidelity=_diagram_fidelity(architectures, diagrams),
             ),
+            live_run_context=live_run_context,
+            session_id=session.id,
+            sensitivity_text=raw_use_case,
         )
         (raw_dir / "agent_diagram_plan_trace.json").write_text(
             diagram_plan_trace.model_dump_json(indent=2),
@@ -593,6 +618,9 @@ class ExportPackageService:
                 pricing=pricing,
                 report=report,
             ),
+            live_run_context=live_run_context,
+            session_id=session.id,
+            sensitivity_text=raw_use_case,
         )
         (raw_dir / "agent_architecture_candidate_trace.json").write_text(
             architecture_candidate_trace.model_dump_json(indent=2),
@@ -610,6 +638,12 @@ class ExportPackageService:
             encoding="utf-8",
         )
         included_artifacts.append(f"exports/{export_name}/raw/agent_evaluation_battery.json")
+        live_agent_calls = [audit.model_dump(mode="json") for audit in live_run_context.audits]
+        (raw_dir / "live_agent_calls.json").write_text(
+            json.dumps(live_agent_calls, indent=2, sort_keys=True, default=str),
+            encoding="utf-8",
+        )
+        included_artifacts.append(f"exports/{export_name}/raw/live_agent_calls.json")
 
         # Client/audit pack split — additive presentation layer rendered from the
         # SAME payloads as the root artifacts (no new claims, numbers, readiness
@@ -683,6 +717,11 @@ class ExportPackageService:
                 encoding="utf-8",
             )
             included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-architecture-candidates.md")
+            (audit_dir / "live-agent-calls.md").write_text(
+                live_agent_calls_markdown(settings.agentic_mode, live_run_context.audits),
+                encoding="utf-8",
+            )
+            included_artifacts.append(f"exports/{export_name}/audit_pack/live-agent-calls.md")
 
         # Scenario simulations — only on explicit overrides or the default-set flag.
         scenario_manifest_summary = None
@@ -728,6 +767,10 @@ class ExportPackageService:
             "enable_sku_pricing_pilot": settings.enable_sku_pricing_pilot,
             "sku_pricing_snapshot_configured": bool(settings.sku_pricing_snapshot_path),
             "llm_provider": settings.llm_provider,
+            "agentic_mode": settings.agentic_mode,
+            "agentic_max_bedrock_calls": settings.agentic_max_bedrock_calls,
+            "live_bedrock_call_count": sum(1 for audit in live_run_context.audits if audit.provider == "bedrock"),
+            "live_agent_call_count": len(live_run_context.audits),
             **agentic_feature_flags(settings),
         }
         dossier = build_dossier_manifest(
@@ -1486,6 +1529,58 @@ def quality_findings_from_payload(payload) -> list:
         findings = payload.get("findings")
         return findings if isinstance(findings, list) else []
     return []
+
+
+def live_agent_calls_markdown(agentic_mode: str, audits: list[LiveCallAudit]) -> str:
+    if not audits:
+        return "\n".join([
+            "# Live Agent Calls",
+            "",
+            f"- Agentic mode: `{agentic_mode}`",
+            "- Bedrock calls attempted: 0",
+            "- Status: no live-capable agent lanes recorded a call attempt for this export.",
+            "",
+        ])
+    attempted = [audit for audit in audits if audit.status == "accepted" and audit.provider == "bedrock"]
+    setup_required = [audit for audit in audits if audit.status == "setup_required"]
+    skipped = [audit for audit in audits if audit.status == "skipped"]
+    failed = [audit for audit in audits if audit.status == "failed"]
+    lines = [
+        "# Live Agent Calls",
+        "",
+        f"- Agentic mode: `{agentic_mode}`",
+        f"- Total audit records: {len(audits)}",
+        f"- Bedrock calls accepted: {len(attempted)}",
+        f"- Setup-required records: {len(setup_required)}",
+        f"- Skipped records: {len(skipped)}",
+        f"- Failed records: {len(failed)}",
+        "",
+        "| Lane | Task | Status | Provider | Model | Duration | Prompt hash | Response hash | Notes |",
+        "|---|---|---:|---|---|---:|---|---|---|",
+    ]
+    for audit in audits:
+        note = audit.error_message or audit.skip_reason or ("token usage unavailable" if audit.token_usage_unavailable else "")
+        lines.append(
+            "| "
+            + " | ".join([
+                str(audit.lane),
+                str(audit.task_type),
+                str(audit.status),
+                str(audit.provider),
+                str(audit.model_id or "not configured"),
+                f"{audit.duration_ms}ms",
+                str(audit.prompt_hash),
+                str(audit.response_hash or "not produced"),
+                str(note).replace("|", "/"),
+            ])
+            + " |"
+        )
+    lines.extend([
+        "",
+        "These records are audit evidence only. They do not change readiness, pricing math, architecture truth, diagram truth, or client-pack content.",
+        "",
+    ])
+    return "\n".join(lines)
 
 
 def _agentic_state_from_trace(trace: dict) -> ArtifactCompletenessState:

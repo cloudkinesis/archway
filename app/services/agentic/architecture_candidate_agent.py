@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings
+from app.services.agentic.live_audit import LiveCallAudit
+from app.services.agentic.live_bedrock_harness import LiveRunContext, live_call
 from app.services.dossier_manifest import stable_json_hash
+from app.services.llm.base import LLMMessage, LLMTaskType
 
 ArchitectureProvenance = Literal["deterministic", "catalog_backed", "model_proposed", "derived", "user_input", "skipped"]
 ArchitectureConfidence = Literal["low", "medium", "high"]
@@ -134,6 +138,7 @@ class ArchitectureCandidateTrace(BaseModel):
     output_hash: str
     prompt_hash: str | None = None
     response_hash: str | None = None
+    live_call: LiveCallAudit | None = None
 
 
 class ArchitectureCandidateProvider(Protocol):
@@ -289,13 +294,62 @@ class DeterministicFixtureArchitectureCandidateProvider:
 
 
 class LiveArchitectureCandidateProvider:
-    provider_name = "live_stub"
+    provider_name = "bedrock"
+
+    def __init__(self, *, session_id: str | None = None, run_context: LiveRunContext | None = None, sensitivity_text: str | None = None):
+        self.session_id = session_id
+        self.run_context = run_context
+        self.sensitivity_text = sensitivity_text
+        self.last_call: LiveCallAudit | None = None
 
     def propose(self, context: dict[str, Any]) -> ArchitectureCandidateProposal:
-        raise NotImplementedError("Live architecture candidate provider is intentionally unavailable in this audit-only branch.")
+        input_hash = stable_json_hash(context)
+        messages = [
+            LLMMessage(role="system", content=(
+                "You are Archway's live architecture candidate generator. Return JSON only. "
+                "Propose candidate components, flows, trust boundaries, controls, assumptions, risks, and open questions. "
+                "Keep human_review_required=true and procurement_cap=true."
+            )),
+            LLMMessage(role="user", content=json.dumps(context, default=str)[:22000]),
+        ]
+        result = live_call(
+            LLMTaskType.live_architecture_candidate,
+            messages,
+            ArchitectureCandidateProposal,
+            session_id=self.session_id,
+            lane="architecture",
+            run_context=self.run_context,
+            sensitivity_text=self.sensitivity_text,
+        )
+        self.last_call = result.audit
+        if isinstance(result.parsed, ArchitectureCandidateProposal):
+            proposal = result.parsed
+            return proposal.model_copy(update={
+                "input_hash": proposal.input_hash or input_hash,
+                "output_hash": stable_json_hash(_proposal_payload(proposal)),
+                "human_review_required": True,
+                "procurement_cap": True,
+            })
+        proposal = _proposal(
+            proposal_id="architecture_candidate_" + input_hash.removeprefix("sha256:")[:12],
+            title="Live architecture candidate unavailable",
+            input_hash=input_hash,
+            provenance="model_proposed",
+            risks=[result.audit.error_message or result.audit.skip_reason or "Live architecture candidate did not return a usable proposal."],
+            open_questions=["Review deterministic architecture and live-call audit before relying on any candidate."],
+        )
+        return proposal.model_copy(update={"output_hash": stable_json_hash(_proposal_payload(proposal))})
 
     def validate(self, proposal: ArchitectureCandidateProposal, deterministic_context: dict[str, Any]) -> ArchitectureCandidateTrace:
-        raise NotImplementedError("Live architecture candidate validation is intentionally unavailable in this branch.")
+        trace = validate_architecture_candidate_proposal(proposal, deterministic_context, provider_name=self.provider_name)
+        if self.last_call:
+            trace = trace.model_copy(update={
+                "provider": self.last_call.provider,
+                "prompt_hash": self.last_call.prompt_hash,
+                "response_hash": self.last_call.response_hash,
+                "live_call": self.last_call,
+            })
+        return trace
 
 
 def build_architecture_candidate_context(
@@ -366,9 +420,14 @@ def build_architecture_candidate_trace(
     settings: Settings,
     context: dict[str, Any],
     provider: ArchitectureCandidateProvider | None = None,
+    live_run_context: LiveRunContext | None = None,
+    session_id: str | None = None,
+    sensitivity_text: str | None = None,
 ) -> ArchitectureCandidateTrace:
     if not settings.enable_agentic_architecture:
         return DisabledArchitectureCandidateProvider().trace(context)
+    if provider is None and settings.agentic_mode == "live_demo":
+        provider = LiveArchitectureCandidateProvider(session_id=session_id, run_context=live_run_context, sensitivity_text=sensitivity_text)
     provider = provider or DeterministicFixtureArchitectureCandidateProvider()
     proposal = provider.propose(context)
     return provider.validate(proposal, context)

@@ -136,10 +136,12 @@ def test_pricing_dimension_fixture_provider_is_deterministic(monkeypatch, tmp_pa
     assert [item.service_name for item in trace.proposal.service_candidates] == sorted(item.service_name for item in trace.proposal.service_candidates)
 
 
-def test_live_pricing_dimension_provider_is_unavailable():
+def test_live_pricing_dimension_provider_degrades_without_live_demo():
     provider = LivePricingDimensionProvider()
-    with pytest.raises(NotImplementedError):
-        provider.propose({})
+    proposal = provider.propose({})
+    assert provider.last_call is not None
+    assert provider.last_call.status == "not_attempted"
+    assert proposal.not_estimated_reasons
 
 
 def test_multi_service_fixture_labels_missing_ambiguous_assumed_and_not_estimated(monkeypatch, tmp_path):

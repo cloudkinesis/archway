@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings
+from app.services.agentic.live_audit import LiveCallAudit
+from app.services.agentic.live_bedrock_harness import LiveRunContext, live_call
 from app.services.dossier_manifest import stable_json_hash
+from app.services.llm.base import LLMMessage, LLMTaskType
 from app.services.view_planner import SEMANTIC_TO_COMPILER_VIEW
 
 DiagramPlanProvenance = Literal["deterministic", "catalog_backed", "model_proposed", "derived", "user_input", "skipped"]
@@ -72,6 +76,7 @@ class DiagramPlanningTrace(BaseModel):
     output_hash: str
     prompt_hash: str | None = None
     response_hash: str | None = None
+    live_call: LiveCallAudit | None = None
 
 
 class DiagramPlanningProvider(Protocol):
@@ -155,13 +160,58 @@ class DeterministicFixtureDiagramPlanningProvider:
 
 
 class LiveDiagramPlanningProvider:
-    provider_name = "live_stub"
+    provider_name = "bedrock"
+
+    def __init__(self, *, session_id: str | None = None, run_context: LiveRunContext | None = None, sensitivity_text: str | None = None):
+        self.session_id = session_id
+        self.run_context = run_context
+        self.sensitivity_text = sensitivity_text
+        self.last_call: LiveCallAudit | None = None
 
     def propose(self, context: dict[str, Any]) -> DiagramViewPlanProposal:
-        raise NotImplementedError("Live diagram planning provider is intentionally unavailable in this audit-only branch.")
+        input_hash = stable_json_hash(context)
+        messages = [
+            LLMMessage(role="system", content=(
+                "You are Archway's live diagram planner. Return JSON only. "
+                "Propose semantic diagram views and missing-view disclosures. "
+                "Do not claim a view is rendered unless the deterministic context lists it as rendered."
+            )),
+            LLMMessage(role="user", content=json.dumps(context, default=str)[:22000]),
+        ]
+        result = live_call(
+            LLMTaskType.live_diagram_planning,
+            messages,
+            DiagramViewPlanProposal,
+            session_id=self.session_id,
+            lane="diagram_planner",
+            run_context=self.run_context,
+            sensitivity_text=self.sensitivity_text,
+        )
+        self.last_call = result.audit
+        if isinstance(result.parsed, DiagramViewPlanProposal):
+            proposal = result.parsed
+            return proposal.model_copy(update={
+                "input_hash": proposal.input_hash or input_hash,
+                "output_hash": stable_json_hash(_proposal_payload(proposal)),
+            })
+        proposal = _proposal(
+            proposal_id="diagram_plan_" + input_hash.removeprefix("sha256:")[:12],
+            input_hash=input_hash,
+            rationale=result.audit.error_message or result.audit.skip_reason or "Live diagram planner did not return a usable proposal.",
+            provenance="model_proposed",
+        )
+        return proposal.model_copy(update={"output_hash": stable_json_hash(_proposal_payload(proposal))})
 
     def validate(self, proposal: DiagramViewPlanProposal, deterministic_context: dict[str, Any]) -> DiagramPlanningTrace:
-        raise NotImplementedError("Live diagram planning validation is intentionally unavailable in this branch.")
+        trace = validate_diagram_plan_proposal(proposal, deterministic_context, provider_name=self.provider_name)
+        if self.last_call:
+            trace = trace.model_copy(update={
+                "provider": self.last_call.provider,
+                "prompt_hash": self.last_call.prompt_hash,
+                "response_hash": self.last_call.response_hash,
+                "live_call": self.last_call,
+            })
+        return trace
 
 
 def build_diagram_planning_context(*, architectures: list | None, diagrams: list | None, diagram_fidelity: dict | None = None) -> dict[str, Any]:
@@ -239,9 +289,14 @@ def build_diagram_planning_trace(
     settings: Settings,
     context: dict[str, Any],
     provider: DiagramPlanningProvider | None = None,
+    live_run_context: LiveRunContext | None = None,
+    session_id: str | None = None,
+    sensitivity_text: str | None = None,
 ) -> DiagramPlanningTrace:
     if not settings.enable_agentic_diagram_planner:
         return DisabledDiagramPlanningProvider().trace(context)
+    if provider is None and settings.agentic_mode == "live_demo":
+        provider = LiveDiagramPlanningProvider(session_id=session_id, run_context=live_run_context, sensitivity_text=sensitivity_text)
     provider = provider or DeterministicFixtureDiagramPlanningProvider()
     proposal = provider.propose(context)
     return provider.validate(proposal, context)

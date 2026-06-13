@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings
+from app.services.agentic.live_audit import LiveCallAudit
+from app.services.agentic.live_bedrock_harness import LiveRunContext, live_call
 from app.services.dossier_manifest import stable_json_hash
+from app.services.llm.base import LLMMessage, LLMTaskType
 
 NarrativeClaimKind = Literal[
     "aws_docs",
@@ -69,6 +73,7 @@ class NarrativeTrace(BaseModel):
     output_hash: str
     prompt_hash: str | None = None
     response_hash: str | None = None
+    live_call: LiveCallAudit | None = None
 
 
 class NarrativeProvider(Protocol):
@@ -153,13 +158,62 @@ class DeterministicFixtureNarrativeProvider:
 
 
 class LiveNarrativeProvider:
-    provider_name = "live_stub"
+    provider_name = "bedrock"
+
+    def __init__(self, *, session_id: str | None = None, run_context: LiveRunContext | None = None, sensitivity_text: str | None = None):
+        self.session_id = session_id
+        self.run_context = run_context
+        self.sensitivity_text = sensitivity_text
+        self.last_call: LiveCallAudit | None = None
 
     def propose(self, context: dict[str, Any]) -> NarrativeRewriteProposal:
-        raise NotImplementedError("Live narrative provider is intentionally unavailable in this audit-only branch.")
+        input_hash = stable_json_hash(context)
+        messages = [
+            LLMMessage(role="system", content=(
+                "You are Archway's live narrative synthesizer. Return JSON only. "
+                "Only rewrite using provided verified, assumption, not_estimated, or narrative_only claims. "
+                "Do not invent services, prices, readiness, compliance, or architecture claims."
+            )),
+            LLMMessage(role="user", content=json.dumps(context, default=str)[:22000]),
+        ]
+        result = live_call(
+            LLMTaskType.live_narrative_synthesis,
+            messages,
+            NarrativeRewriteProposal,
+            session_id=self.session_id,
+            lane="narrative",
+            run_context=self.run_context,
+            sensitivity_text=self.sensitivity_text,
+        )
+        self.last_call = result.audit
+        if isinstance(result.parsed, NarrativeRewriteProposal):
+            proposal = result.parsed
+            return proposal.model_copy(update={
+                "input_hash": proposal.input_hash or input_hash,
+                "output_hash": stable_json_hash(_proposal_payload(proposal)),
+            })
+        proposal = _proposal(
+            proposal_id="narrative_proposal_" + input_hash.removeprefix("sha256:")[:12],
+            input_hash=input_hash,
+            target_artifact=str(context.get("target_artifact") or "01-solution-brief.md"),
+            target_section=str(context.get("target_section") or "Executive summary"),
+            original_text=str(context.get("original_text") or ""),
+            proposed_text="",
+            provenance="model_proposed",
+            unsupported_sentence_ids=["live_narrative_unavailable"],
+        )
+        return proposal.model_copy(update={"output_hash": stable_json_hash(_proposal_payload(proposal))})
 
     def validate(self, proposal: NarrativeRewriteProposal, deterministic_context: dict[str, Any]) -> NarrativeTrace:
-        raise NotImplementedError("Live narrative validation is intentionally unavailable in this branch.")
+        trace = validate_narrative_proposal(proposal, deterministic_context, provider_name=self.provider_name)
+        if self.last_call:
+            trace = trace.model_copy(update={
+                "provider": self.last_call.provider,
+                "prompt_hash": self.last_call.prompt_hash,
+                "response_hash": self.last_call.response_hash,
+                "live_call": self.last_call,
+            })
+        return trace
 
 
 def build_narrative_context(
@@ -207,9 +261,14 @@ def build_narrative_trace(
     settings: Settings,
     context: dict[str, Any],
     provider: NarrativeProvider | None = None,
+    live_run_context: LiveRunContext | None = None,
+    session_id: str | None = None,
+    sensitivity_text: str | None = None,
 ) -> NarrativeTrace:
     if not settings.enable_agentic_narrative:
         return DisabledNarrativeProvider().trace(context)
+    if provider is None and settings.agentic_mode == "live_demo":
+        provider = LiveNarrativeProvider(session_id=session_id, run_context=live_run_context, sensitivity_text=sensitivity_text)
     provider = provider or DeterministicFixtureNarrativeProvider()
     proposal = provider.propose(context)
     return provider.validate(proposal, context)
@@ -348,6 +407,7 @@ def _proposal(
     evidence_refs: list[str] | None = None,
     assumptions: list[str] | None = None,
     not_estimated_refs: list[str] | None = None,
+    unsupported_sentence_ids: list[str] | None = None,
     provenance: NarrativeProvenance,
 ) -> NarrativeRewriteProposal:
     proposal = NarrativeRewriteProposal(
@@ -360,7 +420,7 @@ def _proposal(
         evidence_refs=sorted(set(evidence_refs or [])),
         assumptions=sorted(set(assumptions or [])),
         not_estimated_refs=sorted(set(not_estimated_refs or [])),
-        unsupported_sentence_ids=[],
+        unsupported_sentence_ids=sorted(set(unsupported_sentence_ids or [])),
         provenance=provenance,
         input_hash=input_hash,
         output_hash="sha256:pending",

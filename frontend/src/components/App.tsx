@@ -38,7 +38,7 @@ import {
 } from "lucide-react";
 import { api, artifactUrl } from "../lib/api";
 import { TrustPanel } from "./TrustPanel";
-import type { ArchitectureRevision, ArchitectureSpec, ArchitectureValidationIssue, BuildStatusSummary, DiagramGalleryResult, ExportBundle, HealthCheckResult, HealthSummary, JobRun, PricingCheckpoint, PricingViewModel, Readiness, ResearchDigest, ResearchNarrative, ResearchReport, ResearchViewModel, Session } from "../lib/types";
+import type { ArchitectureRevision, ArchitectureSpec, ArchitectureValidationIssue, BuildStatusSummary, DiagramGalleryResult, ExportBundle, HealthCheckResult, HealthSummary, JobRun, LiveAgentStatus, PricingCheckpoint, PricingViewModel, Readiness, ResearchDigest, ResearchNarrative, ResearchReport, ResearchViewModel, Session } from "../lib/types";
 import { sanitizeMarkdown } from "../lib/markdown";
 
 type View = "synthesis" | "research" | "architecture" | "diagrams" | "diagnostics";
@@ -783,6 +783,10 @@ function JobProgress({ job, onCancel }: { job: JobRun; onCancel: () => void }) {
 
 function DiagnosticsView({ session, latestExport, setLatestExport }: Parameters<typeof Workspace>[0]) {
   const diagnostics = useQuery({ queryKey: ["diagnostics", session.id], queryFn: () => api.diagnostics(session.id) });
+  const liveAgentStatus = useQuery({
+    queryKey: ["live-agent-status", session.id, latestExport?.name],
+    queryFn: () => api.getLiveAgentStatus(session.id)
+  });
   const [jobId, setJobId] = useState<string | null>(null);
   const bundle = latestExport;
   const dossierArtifacts = bundle ? {
@@ -836,11 +840,55 @@ function DiagnosticsView({ session, latestExport, setLatestExport }: Parameters<
             {bundle.warnings.length ? <p className="mt-2 text-xs text-awsTextMuted">{bundle.warnings.length} optional artifact warnings included in manifest.</p> : null}
           </div>
         ) : null}
+        <LiveAgentStatusCard sessionId={session.id} status={liveAgentStatus.data} bundle={bundle} />
         {generate.error ? <Banner tone="danger" text={(generate.error as Error).message} /> : null}
         {job.job?.status === "failed" ? <Banner tone="danger" text={job.job.error ?? "Export failed. Diagnostics were recorded."} /> : null}
       </div>
       <pre className="archway-scroll max-h-[640px] overflow-auto border border-awsBorder bg-white p-4 text-xs text-awsTextSecondary">{JSON.stringify(diagnostics.data ?? { loading: true }, null, 2)}</pre>
     </Panel>
+  );
+}
+
+function LiveAgentStatusCard({ sessionId, status, bundle }: { sessionId: string; status?: LiveAgentStatus; bundle: ExportBundle | null }) {
+  const rawTrace = bundle ? findIncludedArtifact(bundle, "raw/live_agent_calls.json") : undefined;
+  const auditTrace = bundle ? findIncludedArtifact(bundle, "audit_pack/live-agent-calls.md") : undefined;
+  const tone = !status || !status.has_export_trace ? "neutral" : status.bedrock_accepted > 0 ? "good" : status.setup_required > 0 ? "warn" : "neutral";
+  const toneClass = tone === "good" ? "border-awsSuccess/40 bg-awsSuccess/5" : tone === "warn" ? "border-awsWarning/40 bg-awsWarning/5" : "border-awsBorder bg-white";
+  return (
+    <div className={`border p-3 text-sm ${toneClass}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 font-semibold"><Bot className="h-4 w-4 text-awsOrange" /> Live Bedrock agent status</div>
+          <p className="mt-1 text-sm text-awsTextSecondary">{status?.message ?? "Generate an export to see live-agent audit status."}</p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs text-awsTextMuted">
+          <span className="border border-awsBorder bg-surface px-2 py-1">mode: {status?.agentic_mode ?? "unknown"}</span>
+          <span className="border border-awsBorder bg-surface px-2 py-1">provider: {status?.configured_provider ?? "unknown"}</span>
+          <span className="border border-awsBorder bg-surface px-2 py-1">model: {status?.configured_model ?? "not configured"}</span>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-4">
+        <LiveMetricPill label="Bedrock accepted" value={status?.bedrock_accepted ?? 0} />
+        <LiveMetricPill label="Setup required" value={status?.setup_required ?? 0} />
+        <LiveMetricPill label="Skipped" value={status?.skipped ?? 0} />
+        <LiveMetricPill label="Failed" value={status?.failed ?? 0} />
+      </div>
+      {rawTrace || auditTrace ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {rawTrace ? <DossierLink sessionId={sessionId} artifactId={rawTrace} label="Live raw trace" /> : null}
+          {auditTrace ? <DossierLink sessionId={sessionId} artifactId={auditTrace} label="Live audit summary" /> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function LiveMetricPill({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="border border-awsBorder bg-surface px-3 py-2">
+      <div className="text-xs uppercase text-awsTextMuted">{label}</div>
+      <div className="mt-1 text-lg font-semibold text-awsTextPrimary">{value}</div>
+    </div>
   );
 }
 
