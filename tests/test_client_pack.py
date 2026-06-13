@@ -199,11 +199,15 @@ def test_client_pack_copy_contract(name):
         for caveat in BROADER_CAVEATS:
             assert caveat not in lowered, f"{path}: compiler caveat leaked: {caveat}"
 
-    # Statuses human-readable: the dossier readiness appears as its display
-    # label, never as the raw enum.
-    from app.services.display_labels import display_label
+    # Statuses human-readable: the readiness tier appears as its display
+    # label, never as a raw enum (Branch 4 vocabulary).
+    from app.services.customer_readiness import compute_readiness_tier
+    tier = compute_readiness_tier(
+        report=scenario["report"], pricing=scenario["pricing"], architectures=scenario["architectures"],
+    )
     memo = client["01-executive-memo.md"]
-    assert display_label(dossier.quality_score.readiness_status.value) in memo
+    assert f"**Readiness tier:** {tier['display']}" in memo
+    assert tier["tier"] not in memo
     assert dossier.quality_score.readiness_status.value not in memo
     pricing_summary = client["04-pricing-summary.md"]
     assert "not headline-safe" in pricing_summary or "not procurement-ready" in pricing_summary
@@ -242,9 +246,15 @@ def test_client_pack_does_not_diverge_from_source(name):
     for path in ("01-executive-memo.md", "04-pricing-summary.md"):
         assert set(re.findall(r"\$[\d,]+(?:\.\d+)?", client[path])) <= source_dollars, path
 
-    # Readiness state matches the dossier readiness exactly (display-labeled).
-    from app.services.display_labels import display_label
-    assert display_label(dossier.quality_score.readiness_status.value) in client["01-executive-memo.md"]
+    # Readiness tier shown in the client pack matches the tier recomputed from
+    # the same source payloads — memo and pricing summary cannot diverge.
+    from app.services.customer_readiness import compute_readiness_tier
+    tier = compute_readiness_tier(
+        report=scenario["report"], pricing=scenario["pricing"], architectures=scenario["architectures"],
+    )
+    assert f"**Readiness tier:** {tier['display']}" in client["01-executive-memo.md"]
+    assert f"**Readiness tier:** {tier['display']}" in client["04-pricing-summary.md"]
+    assert f"**Estimate class:** {tier['estimate_display']}" in client["04-pricing-summary.md"]
 
     # Risk content comes from dossier risks only.
     for risk in dossier.risks:

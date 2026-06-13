@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import re
 
+from app.services.customer_readiness import compute_readiness_tier
 from app.services.deep_dossier import _cost_range
 from app.services.display_labels import display_label, gate_display
 
@@ -70,13 +71,16 @@ def client_pack_files(
     architectures = architectures or []
     diagrams = diagrams or []
     decision_records = decision_records or []
+    # One tier computation feeds every client surface — readiness wording can
+    # never diverge between the memo and the pricing summary.
+    tier = compute_readiness_tier(report=report, pricing=pricing, architectures=architectures)
     return {
         "START_HERE.md": _start_here(session_name),
-        "01-executive-memo.md": _executive_memo(report, deep_dossier),
+        "01-executive-memo.md": _executive_memo(report, deep_dossier, tier),
         "02-solution-brief.md": _solution_brief(brief, deep_dossier),
         "03-architecture-summary.md": _architecture_summary(architectures, decision_records),
-        "04-pricing-summary.md": _pricing_summary(pricing, deep_dossier),
-        "05-risks-and-gates.md": _risks_and_gates(deep_dossier),
+        "04-pricing-summary.md": _pricing_summary(pricing, deep_dossier, tier),
+        "05-risks-and-gates.md": _risks_and_gates(deep_dossier, tier),
         "06-evidence-summary.md": _evidence_summary(report, deep_dossier),
         "07-diagrams-index.md": _diagrams_index(diagrams),
     }
@@ -116,18 +120,27 @@ def _start_here(session_name: str) -> str:
     ])
 
 
-def _executive_memo(report: dict, dossier) -> str:
+def _executive_memo(report: dict, dossier, tier: dict) -> str:
     top_risk = dossier.risks[0].risk if dossier.risks else "Pricing and operational validation remain open."
     direction = report.get("recommended_production_direction") or (
         "an AWS-native architecture with governed operations, evidence discipline, and explicit pricing validation"
     )
     gates = [gate_display(item) for item in dossier.top_validation_gates[:3]]
+    cap = tier.get("reasons") or []
     lines = [
         "# Executive Memo",
         "",
         f"**Use case:** {dossier.title}",
         f"**Verdict:** {dossier.verdict}",
-        f"**Readiness:** {display_label(dossier.quality_score.readiness_status.value)}",
+        f"**Readiness tier:** {tier['display']}",
+        "",
+        "## Readiness",
+        "",
+        _sentence(
+            f"This package is graded {tier['display']}"
+            + (". It meets every readiness gate" if not cap else f", capped because {cap[0].rstrip('.').lower()}")
+        ),
+        *(["", "To advance to the next tier:", "", *_bullets([_sentence(reason) for reason in cap])] if cap else []),
         "",
         "## Recommendation",
         "",
@@ -137,6 +150,8 @@ def _executive_memo(report: dict, dossier) -> str:
         "## Cost position",
         "",
         _sentence(dossier.estimated_monthly_cost_range),
+        "",
+        _sentence(f"Treat this as a {tier['estimate_display'].lower()} at the {tier['display'].lower()} tier"),
         "",
         "## What must be validated first",
         "",
@@ -226,7 +241,26 @@ def _architecture_summary(architectures: list, decision_records: list) -> str:
     return "\n".join(lines)
 
 
-def _pricing_summary(pricing: dict, dossier) -> str:
+_ESTIMATE_CLASS_GUIDANCE = {
+    "planning_estimate": (
+        "This is a planning estimate: computed deterministically from the stated "
+        "drivers and assumptions, and honest about every quantity that has not "
+        "been confirmed. It is a planning aid, not a quote."
+    ),
+    "budgetary_range": (
+        "This is a budgetary range: the pricing basis supports range-level "
+        "discussion, but quantities still rest on stated assumptions. Suitable "
+        "for workshop budgeting, not for commitment."
+    ),
+    "rate_backed_estimate": (
+        "This is a rate-backed estimate: line items bind to exact AWS SKU/tier "
+        "rates with confirmed drivers. Validate against the AWS Pricing "
+        "Calculator before final commitment."
+    ),
+}
+
+
+def _pricing_summary(pricing: dict, dossier, tier: dict) -> str:
     metadata = pricing.get("metadata") or {}
     closure = metadata.get("pricing_driver_closure") or {}
     procurement_ready = bool(closure.get("procurement_ready", False))
@@ -236,11 +270,14 @@ def _pricing_summary(pricing: dict, dossier) -> str:
         for item in closure.get("missing_drivers", [])
         if isinstance(item, dict) and item.get("display_name")
     ]
+    advance = [_sentence(reason) for reason in tier.get("reasons", [])]
     return "\n".join([
         "# Pricing Summary",
         "",
         f"**Region:** {pricing.get('region') or 'Not selected'}",
         f"**Confidence:** {dossier.quality_score.pricing_score}/10",
+        f"**Readiness tier:** {tier['display']}",
+        f"**Estimate class:** {tier['estimate_display']}",
         f"**Procurement-ready:** {'Yes' if procurement_ready else 'No'}",
         "",
         "## Current estimate",
@@ -255,25 +292,34 @@ def _pricing_summary(pricing: dict, dossier) -> str:
         "",
         *_bullets(missing or ["Confirm workload quantities and exact AWS rates before procurement."]),
         "",
+        "## To advance beyond this tier",
+        "",
+        *_bullets(advance or ["This package meets every readiness gate; validate final quantities with the customer."]),
+        "",
         "## How to read these numbers",
         "",
-        "This estimate is directional: it is computed deterministically from the "
-        "stated drivers and assumptions, and it is honest about every quantity "
-        "that has not been confirmed. It is a planning aid, not a quote. The full "
+        _ESTIMATE_CLASS_GUIDANCE[tier["estimate_class"]] + " The full "
         "calculation trace and evidence are preserved in the audit record.",
         "",
     ])
 
 
-def _risks_and_gates(dossier) -> str:
+def _risks_and_gates(dossier, tier: dict) -> str:
     risks = [
         f"**{display_label(str(risk.severity), capitalize=True)}** — {_sentence(str(risk.risk))} "
         f"Mitigation: {_sentence(str(risk.mitigation))}"
         for risk in dossier.risks
     ]
     gates = [gate_display(item) for item in dossier.top_validation_gates]
+    cap = [_sentence(reason) for reason in tier.get("reasons") or []]
     return "\n".join([
         "# Risks and Validation Gates",
+        "",
+        f"**Readiness tier:** {tier['display']}",
+        "",
+        "## Why this tier",
+        "",
+        *_bullets(cap or [f"This package meets every readiness gate for {tier['display'].lower()}."]),
         "",
         "## Key risks",
         "",
