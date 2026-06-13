@@ -135,6 +135,21 @@ class ScenarioObservation(BaseModel):
     pricing_dimension_no_deterministic_overwrite: bool = True
     pricing_dimension_no_readiness_promotion: bool = True
     pricing_dimension_no_client_surface: bool = True
+    narrative_verified_claim_only: bool = True
+    narrative_no_new_service_claim: bool = True
+    narrative_no_new_price: bool = True
+    narrative_no_new_readiness: bool = True
+    narrative_unsupported_sentence_blocked: bool = True
+    narrative_trace_hash_present: bool = True
+    narrative_prose_reviewed_by_human: bool = False
+    reviewer_additive_only: bool = True
+    reviewer_deterministic_findings_not_removed: bool = True
+    reviewer_duplicates_handled: bool = True
+    reviewer_no_readiness_unlock: bool = True
+    reviewer_no_client_surface: bool = True
+    reviewer_target_artifact_coverage: bool = True
+    reviewer_trace_hash_present: bool = True
+    reviewer_usefulness_reviewed_by_human: bool = False
 
 
 class EvaluationGateStatus(BaseModel):
@@ -243,6 +258,21 @@ def score_scenario(scenario: EvaluationScenario, observation: ScenarioObservatio
         _pricing_dimension_no_overwrite_metric(scenario, observation),
         _pricing_dimension_no_readiness_metric(scenario, observation),
         _pricing_dimension_client_surface_metric(scenario, observation),
+        _narrative_verified_claim_metric(scenario, observation),
+        _narrative_no_new_service_metric(scenario, observation),
+        _narrative_no_new_price_metric(scenario, observation),
+        _narrative_no_new_readiness_metric(scenario, observation),
+        _narrative_unsupported_sentence_metric(scenario, observation),
+        _narrative_trace_metric(scenario, observation),
+        _narrative_prose_human_metric(scenario, observation),
+        _reviewer_additive_metric(scenario, observation),
+        _reviewer_deterministic_findings_metric(scenario, observation),
+        _reviewer_duplicate_metric(scenario, observation),
+        _reviewer_no_readiness_metric(scenario, observation),
+        _reviewer_client_surface_metric(scenario, observation),
+        _reviewer_target_metric(scenario, observation),
+        _reviewer_trace_metric(scenario, observation),
+        _reviewer_usefulness_human_metric(scenario, observation),
         _pricing_metric(scenario, observation),
         _reproducibility_metric(scenario, observation),
         _diagram_metric(scenario, observation),
@@ -581,6 +611,171 @@ def _pricing_dimension_client_surface_metric(scenario: EvaluationScenario, obser
         value=observation.pricing_dimension_no_client_surface,
         passed=observation.pricing_dimension_no_client_surface,
         reason="Pricing-dimension output stays out of client_pack." if observation.pricing_dimension_no_client_surface else "Pricing-dimension output reached client_pack.",
+    )
+
+
+def _narrative_verified_claim_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.narrative_verified_claim_only",
+        lane="narrative",
+        score_type="auto",
+        value=observation.narrative_verified_claim_only,
+        passed=observation.narrative_verified_claim_only,
+        reason="Narrative proposals are limited to verified, assumed, not-estimated, or narrative-only sentences." if observation.narrative_verified_claim_only else "Narrative proposal included unsupported factual sentences.",
+    )
+
+
+def _narrative_no_new_service_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.narrative_no_new_service_claim",
+        lane="narrative",
+        score_type="auto",
+        value=observation.narrative_no_new_service_claim,
+        passed=observation.narrative_no_new_service_claim,
+        reason="Narrative proposal does not introduce new service claims." if observation.narrative_no_new_service_claim else "Narrative proposal introduced a service not present in deterministic architecture.",
+    )
+
+
+def _narrative_no_new_price_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.narrative_no_new_price",
+        lane="narrative",
+        score_type="auto",
+        value=observation.narrative_no_new_price,
+        passed=observation.narrative_no_new_price,
+        reason="Narrative proposal does not introduce or alter pricing numbers." if observation.narrative_no_new_price else "Narrative proposal introduced or altered pricing numbers.",
+    )
+
+
+def _narrative_no_new_readiness_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.narrative_no_new_readiness",
+        lane="narrative",
+        score_type="auto",
+        value=observation.narrative_no_new_readiness,
+        passed=observation.narrative_no_new_readiness,
+        reason="Narrative proposal does not promote readiness." if observation.narrative_no_new_readiness else "Narrative proposal promoted readiness.",
+    )
+
+
+def _narrative_unsupported_sentence_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.narrative_unsupported_sentence_blocked",
+        lane="narrative",
+        score_type="auto",
+        value=observation.narrative_unsupported_sentence_blocked,
+        passed=observation.narrative_unsupported_sentence_blocked,
+        reason="Unsupported narrative sentences are blocked from client surfaces." if observation.narrative_unsupported_sentence_blocked else "Unsupported narrative sentence was not blocked.",
+    )
+
+
+def _narrative_trace_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.narrative_trace_reproducibility",
+        lane="narrative",
+        score_type="auto",
+        value=observation.narrative_trace_hash_present,
+        passed=observation.narrative_trace_hash_present,
+        reason="Narrative trace carries stable hashes." if observation.narrative_trace_hash_present else "Narrative trace is missing stable hashes.",
+    )
+
+
+def _narrative_prose_human_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.narrative_prose_quality",
+        lane="narrative",
+        score_type="human",
+        value="reviewed" if observation.narrative_prose_reviewed_by_human else "not_auto_scored",
+        passed=observation.narrative_prose_reviewed_by_human,
+        reason="Narrative prose quality is human-reviewed; no automatic prose-quality oracle is claimed." if observation.narrative_prose_reviewed_by_human else "Narrative prose quality requires human review and is not auto-scored.",
+    )
+
+
+def _reviewer_additive_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.reviewer_additive_only",
+        lane="reviewer",
+        score_type="auto",
+        value=observation.reviewer_additive_only,
+        passed=observation.reviewer_additive_only,
+        reason="Reviewer-agent findings are additive only." if observation.reviewer_additive_only else "Reviewer-agent output removed or rewrote findings.",
+    )
+
+
+def _reviewer_deterministic_findings_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.reviewer_deterministic_findings_not_removed",
+        lane="reviewer",
+        score_type="auto",
+        value=observation.reviewer_deterministic_findings_not_removed,
+        passed=observation.reviewer_deterministic_findings_not_removed,
+        reason="Deterministic reviewer findings remain authoritative." if observation.reviewer_deterministic_findings_not_removed else "Deterministic reviewer findings were removed or downgraded.",
+    )
+
+
+def _reviewer_duplicate_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.reviewer_duplicate_handling",
+        lane="reviewer",
+        score_type="auto",
+        value=observation.reviewer_duplicates_handled,
+        passed=observation.reviewer_duplicates_handled,
+        reason="Duplicate reviewer findings are labeled instead of added repeatedly." if observation.reviewer_duplicates_handled else "Duplicate reviewer findings were not handled.",
+    )
+
+
+def _reviewer_no_readiness_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.reviewer_no_readiness_unlock",
+        lane="reviewer",
+        score_type="auto",
+        value=observation.reviewer_no_readiness_unlock,
+        passed=observation.reviewer_no_readiness_unlock,
+        reason="Reviewer-agent output cannot unlock readiness." if observation.reviewer_no_readiness_unlock else "Reviewer-agent output unlocked readiness.",
+    )
+
+
+def _reviewer_client_surface_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.reviewer_client_surface",
+        lane="reviewer",
+        score_type="auto",
+        value=observation.reviewer_no_client_surface,
+        passed=observation.reviewer_no_client_surface,
+        reason="Reviewer-agent output stays out of client_pack." if observation.reviewer_no_client_surface else "Reviewer-agent output reached client_pack.",
+    )
+
+
+def _reviewer_target_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.reviewer_target_artifact_coverage",
+        lane="reviewer",
+        score_type="auto",
+        value=observation.reviewer_target_artifact_coverage,
+        passed=observation.reviewer_target_artifact_coverage,
+        reason="Reviewer findings carry target artifact or section context." if observation.reviewer_target_artifact_coverage else "Reviewer findings lack target artifact coverage.",
+    )
+
+
+def _reviewer_trace_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.reviewer_trace_reproducibility",
+        lane="reviewer",
+        score_type="auto",
+        value=observation.reviewer_trace_hash_present,
+        passed=observation.reviewer_trace_hash_present,
+        reason="Reviewer trace carries stable hashes." if observation.reviewer_trace_hash_present else "Reviewer trace is missing stable hashes.",
+    )
+
+
+def _reviewer_usefulness_human_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.reviewer_finding_usefulness",
+        lane="reviewer",
+        score_type="human",
+        value="reviewed" if observation.reviewer_usefulness_reviewed_by_human else "not_auto_scored",
+        passed=observation.reviewer_usefulness_reviewed_by_human,
+        reason="Reviewer finding usefulness is human-reviewed; no automatic usefulness oracle is claimed." if observation.reviewer_usefulness_reviewed_by_human else "Reviewer finding usefulness requires human review and is not auto-scored.",
     )
 
 

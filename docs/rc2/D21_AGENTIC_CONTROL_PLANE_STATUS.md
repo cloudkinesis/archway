@@ -1,11 +1,12 @@
 # D21 Agentic Control Plane Status
 
-Status: consolidation checkpoint after pricing-dimension audit-only lane.
+Status: narrative and reviewer audit-only lanes added after the control-plane consolidation checkpoint.
 
-Baseline master: `d9878ae75f02730688abfc4d121c890e258ff324`
+Baseline master: `90379059468612fe0088303eefb095c9ecb9cdd7`
 
-This document records the current D21 control-plane state before narrative,
-reviewer, diagram-planning, or architecture-candidate agents are implemented.
+This document records the current D21 control-plane state after the narrative
+and reviewer/red-team audit-only lanes are implemented. Diagram-planning and
+architecture-candidate agents remain future work.
 The system now has an agentic proposal substrate, but deterministic Archway
 still owns truth.
 
@@ -18,6 +19,7 @@ still owns truth.
 | Research agent audit-only lane | `archway-v2-d21-research-agent-audit` | `a632ced19087e34c0af8ce4a53ee731f4176d620` |
 | Use-case analyst audit-only lane | `archway-v2-d21-use-case-analyst-audit` | `7b4ed96bfe759bf87d658d48873484307f9be346` |
 | Pricing-dimension audit-only lane | `archway-v2-d21-pricing-dimension-audit` | `d9878ae75f02730688abfc4d121c890e258ff324` |
+| Control-plane consolidation checkpoint | `archway-v2-d21-control-plane` | `90379059468612fe0088303eefb095c9ecb9cdd7` |
 
 ## Current Lane Status
 
@@ -29,8 +31,8 @@ still owns truth.
 | Research agent | Implemented as audit-only proposal lane; default off. |
 | Use-case analyst agent | Implemented as audit-only proposal lane; default off. |
 | Pricing-dimension agent | Implemented as audit-only proposal lane; default off. |
-| Narrative agent | Not implemented. |
-| Reviewer agent | Not implemented as an agentic lane; deterministic reviewer mode remains separate. |
+| Narrative agent | Implemented as audit-only proposal lane; default off. |
+| Reviewer agent | Implemented as audit-only proposal lane; default off; deterministic reviewer mode remains authoritative. |
 | Diagram-planning agent | Not implemented. |
 | Architecture-candidate agent | Not implemented. |
 
@@ -44,8 +46,8 @@ still owns truth.
 | Research agent | No | Yes | Yes | Yes | No | No | No | No | No | No | Yes |
 | Use-case analyst agent | No | Yes | Yes | Yes | No | No | No | No | No | No | Yes |
 | Pricing-dimension agent | No | Yes | Yes | Yes | No | No | No | No | No | No | Yes |
-| Future narrative agent | No | No | No | No | No | No | No | No | No | No | Yes |
-| Future reviewer agent | No | No | No | No | No | No | No | No | No | No | Yes |
+| Narrative agent | No | Yes | Yes | Yes | No | No | No | No | No | No | Yes |
+| Reviewer agent | No | Yes | Yes | Yes | No | No | No | No | No | No | Yes |
 | Future diagram-planning agent | No | No | No | No | No | No | No | No | No | No | Yes |
 | Future architecture-candidate agent | No | No | No | No | No | No | No | No | No | No | Yes |
 
@@ -55,7 +57,8 @@ still owns truth.
 - Deterministic repair planning from existing readiness, pricing, evidence,
   reviewer, linter, and diagram signals.
 - Raw/audit traces for current D21 lanes.
-- Research, use-case, and pricing-dimension proposals as auditable candidates.
+- Research, use-case, pricing-dimension, narrative, and reviewer proposals as
+  auditable candidates.
 - Deterministic validation, downgrade, rejection, or assumption labeling of
   proposals.
 - Evaluation-battery scoring that records human-review requirements.
@@ -86,6 +89,10 @@ Current D21 exports should include raw traces:
 - `raw/agent_use_case_analyst_proposal.json`
 - `raw/agent_pricing_dimension_trace.json`
 - `raw/agent_pricing_dimension_proposal.json`
+- `raw/agent_narrative_trace.json`
+- `raw/agent_narrative_proposals.json`
+- `raw/agent_reviewer_trace.json`
+- `raw/agent_reviewer_findings.json`
 
 Current D21 exports should include audit summaries:
 
@@ -94,14 +101,16 @@ Current D21 exports should include audit summaries:
 - `audit_pack/agentic-research-summary.md`
 - `audit_pack/agentic-use-case-analysis.md`
 - `audit_pack/agentic-pricing-dimensions.md`
+- `audit_pack/agentic-narrative-proposals.md`
+- `audit_pack/agentic-reviewer-findings.md`
 
 These artifacts are manifest-inventoried and verifier-covered. They are not
 client-pack authority.
 
 ## Next Recommended Branch
 
-`feature/d21-narrative-and-reviewer-agents-audit-first`
+`feature/d21-diagram-planning-agent-audit-only`
 
-That branch should stay audit-first. It must not enable client-facing agent
-language until deterministic gates, human-review boundaries, and evaluation
-coverage explicitly allow it.
+That branch should stay audit-first. It may propose semantic view plans only;
+the deterministic compiler must remain the sole renderer and diagram truth
+authority.

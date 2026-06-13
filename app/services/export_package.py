@@ -48,6 +48,16 @@ from app.services.agentic.pricing_dimension_agent import (
     build_pricing_dimension_trace,
     pricing_dimension_summary_markdown,
 )
+from app.services.agentic.narrative_agent import (
+    build_narrative_context,
+    build_narrative_trace,
+    narrative_summary_markdown,
+)
+from app.services.agentic.reviewer_agent import (
+    build_reviewer_context,
+    build_reviewer_trace,
+    reviewer_summary_markdown as agentic_reviewer_summary_markdown,
+)
 from app.services.reviewer_mode import (
     build_reviewer_report,
     reviewer_summary_markdown,
@@ -511,6 +521,43 @@ class ExportPackageService:
         )
         included_artifacts.append(f"exports/{export_name}/raw/agent_research_trace.json")
         included_artifacts.append(f"exports/{export_name}/raw/agent_research_evidence.json")
+        narrative_trace = build_narrative_trace(
+            settings=settings,
+            context=build_narrative_context(
+                report=report,
+                pricing=pricing,
+                architectures=architectures,
+                reviewer_findings=reviewer_report.findings,
+            ),
+        )
+        (raw_dir / "agent_narrative_trace.json").write_text(
+            narrative_trace.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        (raw_dir / "agent_narrative_proposals.json").write_text(
+            narrative_trace.proposal.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        included_artifacts.append(f"exports/{export_name}/raw/agent_narrative_trace.json")
+        included_artifacts.append(f"exports/{export_name}/raw/agent_narrative_proposals.json")
+        agentic_reviewer_trace = build_reviewer_trace(
+            settings=settings,
+            context=build_reviewer_context(
+                report=report,
+                pricing=pricing,
+                reviewer_report=reviewer_report,
+            ),
+        )
+        (raw_dir / "agent_reviewer_trace.json").write_text(
+            agentic_reviewer_trace.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        (raw_dir / "agent_reviewer_findings.json").write_text(
+            json.dumps([item.model_dump(mode="json") for item in agentic_reviewer_trace.accepted_findings], indent=2, sort_keys=True, default=str),
+            encoding="utf-8",
+        )
+        included_artifacts.append(f"exports/{export_name}/raw/agent_reviewer_trace.json")
+        included_artifacts.append(f"exports/{export_name}/raw/agent_reviewer_findings.json")
         evaluation_gate = evaluation_gate_payload()
         (raw_dir / "agent_evaluation_battery.json").write_text(
             json.dumps(evaluation_gate, indent=2, sort_keys=True, default=str),
@@ -570,6 +617,16 @@ class ExportPackageService:
                 encoding="utf-8",
             )
             included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-research-summary.md")
+            (audit_dir / "agentic-narrative-proposals.md").write_text(
+                narrative_summary_markdown(narrative_trace),
+                encoding="utf-8",
+            )
+            included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-narrative-proposals.md")
+            (audit_dir / "agentic-reviewer-findings.md").write_text(
+                agentic_reviewer_summary_markdown(agentic_reviewer_trace),
+                encoding="utf-8",
+            )
+            included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-reviewer-findings.md")
 
         # Scenario simulations — only on explicit overrides or the default-set flag.
         scenario_manifest_summary = None

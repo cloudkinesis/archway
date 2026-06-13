@@ -327,9 +327,9 @@ Authorized for Phase 0 implementation by `docs/rc2/D21_AGENTIC_PROPOSAL_LANES.md
 - No D21 Phase 0 output may change pricing math, readiness promotion, compiler
   output, governance enforcement, manifest/verifier semantics, or client-facing
   artifacts.
-- Live research, use-case analyst, pricing, narrative, reviewer, diagram-planning,
-  and architecture-candidate agents remain future lanes and default-off until their
-  evaluation gates exist.
+- Live providers and any client-facing authority for research, use-case analyst,
+  pricing, narrative, reviewer, diagram-planning, and architecture-candidate lanes
+  remain future work and default-off until their evaluation gates exist.
 - Phase 1 adds the thin evaluation battery documented in
   `docs/rc2/D21_EVALUATION_BATTERY.md`; it measures future lanes but does not grant
   client-facing authority by itself.
@@ -339,10 +339,13 @@ Authorized for Phase 0 implementation by `docs/rc2/D21_AGENTIC_PROPOSAL_LANES.md
   - thin evaluation battery,
   - research audit-only lane,
   - use-case analyst audit-only lane,
-  - pricing-dimension audit-only lane.
+  - pricing-dimension audit-only lane,
+  - narrative audit-only lane,
+  - reviewer/red-team audit-only lane.
 - These milestones create an agentic proposal substrate only. They do NOT enable
   client-facing agent output, live default-path model/network calls, readiness
   promotion, pricing math changes, headline pricing changes, architecture/compiler
   truth changes, diagram rendering changes, governance changes, or verifier changes.
-- Narrative/reviewer/diagram-planning/architecture-candidate agent lanes remain
-  future work and must start audit-first.
+- Diagram-planning/architecture-candidate agent lanes remain future work and must
+  start audit-first. Narrative/reviewer lanes are audit-only and do not rewrite
+  client surfaces or remove/downgrade deterministic reviewer findings.
