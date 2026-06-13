@@ -113,6 +113,10 @@ class ScenarioObservation(BaseModel):
     repair_actions: list[str] = Field(default_factory=list)
     architecture_reviewed_by_human: bool = False
     model_proposed_unlocks_readiness: bool = False
+    research_source_kind_correct: bool = True
+    research_unsupported_claims_labeled: bool = True
+    research_trace_hash_present: bool = True
+    research_synthesis_reviewed_by_human: bool = False
 
 
 class EvaluationGateStatus(BaseModel):
@@ -199,6 +203,10 @@ def run_evaluation_battery(
 def score_scenario(scenario: EvaluationScenario, observation: ScenarioObservation) -> tuple[list[EvaluationMetric], list[EvaluationFinding]]:
     metrics = [
         _citation_metric(scenario, observation),
+        _research_source_kind_metric(scenario, observation),
+        _research_unsupported_labeling_metric(scenario, observation),
+        _research_trace_reproducibility_metric(scenario, observation),
+        _research_synthesis_human_metric(scenario, observation),
         _pricing_metric(scenario, observation),
         _reproducibility_metric(scenario, observation),
         _diagram_metric(scenario, observation),
@@ -295,6 +303,50 @@ def _citation_metric(scenario: EvaluationScenario, observation: ScenarioObservat
         max_value=1.0,
         passed=passed,
         reason="AWS evidence is present or the missing evidence is explicitly labeled." if passed else "AWS/service claim evidence is missing and unlabeled.",
+    )
+
+
+def _research_source_kind_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.research_source_kind",
+        lane="research",
+        score_type="auto",
+        value=observation.research_source_kind_correct,
+        passed=observation.research_source_kind_correct,
+        reason="Research evidence source kind matches the claim kind." if observation.research_source_kind_correct else "Research evidence source kind does not satisfy the claim kind.",
+    )
+
+
+def _research_unsupported_labeling_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.research_unsupported_labeling",
+        lane="research",
+        score_type="auto",
+        value=observation.research_unsupported_claims_labeled,
+        passed=observation.research_unsupported_claims_labeled,
+        reason="Unsupported research claims are labeled as gaps/unsupported/needs review." if observation.research_unsupported_claims_labeled else "Unsupported research claims were not labeled.",
+    )
+
+
+def _research_trace_reproducibility_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.research_trace_reproducibility",
+        lane="research",
+        score_type="auto",
+        value=observation.research_trace_hash_present,
+        passed=observation.research_trace_hash_present,
+        reason="Research trace carries stable hashes." if observation.research_trace_hash_present else "Research trace is missing stable hashes.",
+    )
+
+
+def _research_synthesis_human_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.research_synthesis_quality",
+        lane="research",
+        score_type="human",
+        value="reviewed" if observation.research_synthesis_reviewed_by_human else "not_auto_scored",
+        passed=observation.research_synthesis_reviewed_by_human,
+        reason="Research synthesis quality is human-reviewed; no automatic insight-quality oracle is claimed." if observation.research_synthesis_reviewed_by_human else "Research synthesis quality requires human review and is not auto-scored.",
     )
 
 

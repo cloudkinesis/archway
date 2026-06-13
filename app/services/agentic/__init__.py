@@ -25,6 +25,13 @@ from app.services.agentic.evaluation import (
     EvaluationScenario,
     ScenarioObservation,
 )
+from app.services.agentic.research_agent import (
+    ResearchAgentTrace,
+    ResearchEvidenceItem,
+    ResearchQueryPlan,
+    ResearchQuestion,
+    ResearchSynthesis,
+)
 
 __all__ = [
     "AgentDecision",
@@ -43,4 +50,9 @@ __all__ = [
     "EvaluationRunMetadata",
     "EvaluationScenario",
     "ScenarioObservation",
+    "ResearchAgentTrace",
+    "ResearchEvidenceItem",
+    "ResearchQueryPlan",
+    "ResearchQuestion",
+    "ResearchSynthesis",
 ]
