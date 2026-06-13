@@ -191,6 +191,8 @@ def authority_matrix(settings: Settings) -> list[dict[str, Any]]:
         ("research", True, True, True, False, False, False),
         ("pricing_dimension", True, True, True, False, False, False),
         ("pricing", True, True, True, False, False, False),
+        ("narrative", True, True, True, False, False, False),
+        ("reviewer", True, True, True, False, False, False),
         ("architecture", True, True, True, False, False, False),
     ]
     return [
@@ -310,8 +312,8 @@ def _lane_purpose(lane: str) -> str:
         "use_case_analyst": "Future lane: propose missing facts and scenario profile candidates.",
         "pricing_dimension": "Future lane: propose service usage dimensions and pricing-driver questions.",
         "pricing": "Future lane: propose service usage dimensions and pricing-driver questions.",
-        "narrative": "Future lane: propose narrative polish after validation.",
-        "reviewer": "Future lane: add model-assisted critiques without removing deterministic findings.",
+        "narrative": "Audit-only lane: propose evidence-bound narrative polish after validation.",
+        "reviewer": "Audit-only lane: add reviewer critiques without removing deterministic findings.",
         "diagram_planner": "Future lane: propose semantic view plans.",
         "architecture": "Future lane: propose architecture candidates under human/pattern authority.",
     }.get(lane, "D21 lane")

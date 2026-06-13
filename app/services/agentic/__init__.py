@@ -46,6 +46,15 @@ from app.services.agentic.use_case_analyst import (
     UseCaseAnalystProposal,
     UseCaseAnalystTrace,
 )
+from app.services.agentic.narrative_agent import (
+    NarrativeRewriteProposal,
+    NarrativeSentenceClaim,
+    NarrativeTrace,
+)
+from app.services.agentic.reviewer_agent import (
+    ReviewerFindingProposal,
+    ReviewerTrace,
+)
 
 __all__ = [
     "AgentDecision",
@@ -79,4 +88,9 @@ __all__ = [
     "AnalystFinding",
     "UseCaseAnalystProposal",
     "UseCaseAnalystTrace",
+    "NarrativeRewriteProposal",
+    "NarrativeSentenceClaim",
+    "NarrativeTrace",
+    "ReviewerFindingProposal",
+    "ReviewerTrace",
 ]

@@ -20,8 +20,8 @@ from app.core.config import get_settings  # noqa: E402
 from app.services.agentic.repair_planner import agentic_feature_flags  # noqa: E402
 from app.services.dossier_manifest import stable_json_hash  # noqa: E402
 
-BASELINE_COMMIT = "d9878ae75f02730688abfc4d121c890e258ff324"
-NEXT_BRANCH = "feature/d21-narrative-and-reviewer-agents-audit-first"
+BASELINE_COMMIT = "90379059468612fe0088303eefb095c9ecb9cdd7"
+NEXT_BRANCH = "feature/d21-diagram-planning-agent-audit-only"
 
 D21_TAGS = (
     ("archway-v2-agentic-foundation", "D21 foundation + deterministic repair planner"),
@@ -29,6 +29,7 @@ D21_TAGS = (
     ("archway-v2-d21-research-agent-audit", "D21 research agent audit-only lane"),
     ("archway-v2-d21-use-case-analyst-audit", "D21 use-case analyst audit-only lane"),
     ("archway-v2-d21-pricing-dimension-audit", "D21 pricing-dimension audit-only lane"),
+    ("archway-v2-d21-control-plane", "D21 control-plane consolidation checkpoint"),
 )
 
 RAW_ARTIFACTS = (
@@ -42,6 +43,10 @@ RAW_ARTIFACTS = (
     "raw/agent_use_case_analyst_proposal.json",
     "raw/agent_pricing_dimension_trace.json",
     "raw/agent_pricing_dimension_proposal.json",
+    "raw/agent_narrative_trace.json",
+    "raw/agent_narrative_proposals.json",
+    "raw/agent_reviewer_trace.json",
+    "raw/agent_reviewer_findings.json",
 )
 
 AUDIT_ARTIFACTS = (
@@ -50,6 +55,8 @@ AUDIT_ARTIFACTS = (
     "audit_pack/agentic-research-summary.md",
     "audit_pack/agentic-use-case-analysis.md",
     "audit_pack/agentic-pricing-dimensions.md",
+    "audit_pack/agentic-narrative-proposals.md",
+    "audit_pack/agentic-reviewer-findings.md",
 )
 
 
@@ -61,8 +68,8 @@ def authority_matrix() -> list[dict[str, Any]]:
         ("research agent", False, True, True, True, False, False, False, False, False, False, True),
         ("use-case analyst agent", False, True, True, True, False, False, False, False, False, False, True),
         ("pricing-dimension agent", False, True, True, True, False, False, False, False, False, False, True),
-        ("future narrative agent", False, False, False, False, False, False, False, False, False, False, True),
-        ("future reviewer agent", False, False, False, False, False, False, False, False, False, False, True),
+        ("narrative agent", False, True, True, True, False, False, False, False, False, False, True),
+        ("reviewer agent", False, True, True, True, False, False, False, False, False, False, True),
         ("future diagram planning agent", False, False, False, False, False, False, False, False, False, False, True),
         ("future architecture candidate agent", False, False, False, False, False, False, False, False, False, False, True),
     ]
@@ -106,7 +113,7 @@ def build_status() -> dict[str, Any]:
         "notes": [
             "Current D21 lanes are default-off and raw/audit-only.",
             "Deterministic Archway remains the only authority-bearing baseline.",
-            "Narrative/reviewer/diagram/architecture candidate lanes are not implemented yet.",
+            "Diagram/architecture candidate lanes are not implemented yet.",
         ],
     }
     payload["status_hash"] = stable_json_hash({k: v for k, v in payload.items() if k != "status_hash"})
