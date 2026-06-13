@@ -16,6 +16,15 @@ from app.services.agentic.contracts import (
     AgentTask,
     ArtifactCompletenessState,
 )
+from app.services.agentic.evaluation import (
+    EvaluationBatteryResult,
+    EvaluationFinding,
+    EvaluationLaneScore,
+    EvaluationMetric,
+    EvaluationRunMetadata,
+    EvaluationScenario,
+    ScenarioObservation,
+)
 
 __all__ = [
     "AgentDecision",
@@ -27,4 +36,11 @@ __all__ = [
     "AgentRun",
     "AgentTask",
     "ArtifactCompletenessState",
+    "EvaluationBatteryResult",
+    "EvaluationFinding",
+    "EvaluationLaneScore",
+    "EvaluationMetric",
+    "EvaluationRunMetadata",
+    "EvaluationScenario",
+    "ScenarioObservation",
 ]
