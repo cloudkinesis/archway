@@ -333,3 +333,16 @@ Authorized for Phase 0 implementation by `docs/rc2/D21_AGENTIC_PROPOSAL_LANES.md
 - Phase 1 adds the thin evaluation battery documented in
   `docs/rc2/D21_EVALUATION_BATTERY.md`; it measures future lanes but does not grant
   client-facing authority by itself.
+- Current landed D21 milestones are recorded in
+  `docs/rc2/D21_AGENTIC_CONTROL_PLANE_STATUS.md`:
+  - foundation + deterministic repair planner,
+  - thin evaluation battery,
+  - research audit-only lane,
+  - use-case analyst audit-only lane,
+  - pricing-dimension audit-only lane.
+- These milestones create an agentic proposal substrate only. They do NOT enable
+  client-facing agent output, live default-path model/network calls, readiness
+  promotion, pricing math changes, headline pricing changes, architecture/compiler
+  truth changes, diagram rendering changes, governance changes, or verifier changes.
+- Narrative/reviewer/diagram-planning/architecture-candidate agent lanes remain
+  future work and must start audit-first.
