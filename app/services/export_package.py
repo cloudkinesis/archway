@@ -26,6 +26,12 @@ from app.services.architecture_decision_records import (
     decision_records_markdown,
     decision_records_summary,
 )
+from app.services.agentic.repair_planner import (
+    agentic_feature_flags,
+    build_agentic_trace,
+    repair_plan_markdown,
+)
+from app.services.agentic.contracts import ArtifactCompletenessState
 from app.services.reviewer_mode import (
     build_reviewer_report,
     reviewer_summary_markdown,
@@ -409,6 +415,26 @@ class ExportPackageService:
             ),
         }
 
+        # D21 Phase 0 agentic control-plane traces. These are deterministic raw/audit
+        # artifacts only: no model calls, no network calls, no client_pack output,
+        # and no authority over readiness/pricing/compiler/manifest semantics.
+        agentic_trace = build_agentic_trace(
+            settings=settings,
+            report=report,
+            pricing=pricing,
+            architectures=architectures,
+            diagrams=diagrams,
+            diagram_fidelity=_diagram_fidelity(architectures, diagrams),
+            artifact_linter_findings=quality_findings_from_payload(_read_json_quiet(export_dir, "raw/quality_findings.json")),
+            reviewer_findings=reviewer_report.findings,
+        )
+        for name in ("agent_runs", "agent_proposals", "agent_repair_plan"):
+            (raw_dir / f"{name}.json").write_text(
+                json.dumps(agentic_trace[name], indent=2, sort_keys=True, default=str),
+                encoding="utf-8",
+            )
+            included_artifacts.append(f"exports/{export_name}/raw/{name}.json")
+
         # Client/audit pack split — additive presentation layer rendered from the
         # SAME payloads as the root artifacts (no new claims, numbers, readiness
         # states, risks, or decisions). Root numbered files stay untouched; the
@@ -433,6 +459,14 @@ class ExportPackageService:
             for relative, content in audit_pack_files(diagrams=diagrams).items():
                 (audit_dir / relative).write_text(content, encoding="utf-8")
                 included_artifacts.append(f"exports/{export_name}/audit_pack/{relative}")
+            (audit_dir / "agentic-repair-plan.md").write_text(
+                repair_plan_markdown(
+                    state=_agentic_state_from_trace(agentic_trace),
+                    matrix=agentic_trace["authority_matrix"],
+                ),
+                encoding="utf-8",
+            )
+            included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-repair-plan.md")
 
         # Scenario simulations — only on explicit overrides or the default-set flag.
         scenario_manifest_summary = None
@@ -478,6 +512,7 @@ class ExportPackageService:
             "enable_sku_pricing_pilot": settings.enable_sku_pricing_pilot,
             "sku_pricing_snapshot_configured": bool(settings.sku_pricing_snapshot_path),
             "llm_provider": settings.llm_provider,
+            **agentic_feature_flags(settings),
         }
         dossier = build_dossier_manifest(
             export_dir,
@@ -1226,6 +1261,19 @@ def _report_metadata(report: dict | None, key: str):
 
 def _pricing_metadata(pricing: dict | None, key: str):
     return ((pricing or {}).get("metadata") or {}).get(key)
+
+
+def quality_findings_from_payload(payload) -> list:
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        findings = payload.get("findings")
+        return findings if isinstance(findings, list) else []
+    return []
+
+
+def _agentic_state_from_trace(trace: dict) -> ArtifactCompletenessState:
+    return ArtifactCompletenessState.model_validate(trace["agent_repair_plan"])
 
 
 def _source_policy_payload(report: dict | None) -> dict:
