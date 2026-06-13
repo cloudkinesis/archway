@@ -63,6 +63,11 @@ from app.services.agentic.diagram_planning_agent import (
     build_diagram_planning_trace,
     diagram_planning_summary_markdown,
 )
+from app.services.agentic.architecture_candidate_agent import (
+    architecture_candidate_summary_markdown,
+    build_architecture_candidate_context,
+    build_architecture_candidate_trace,
+)
 from app.services.reviewer_mode import (
     build_reviewer_report,
     reviewer_summary_markdown,
@@ -581,6 +586,24 @@ class ExportPackageService:
         )
         included_artifacts.append(f"exports/{export_name}/raw/agent_diagram_plan_trace.json")
         included_artifacts.append(f"exports/{export_name}/raw/agent_diagram_plan_proposal.json")
+        architecture_candidate_trace = build_architecture_candidate_trace(
+            settings=settings,
+            context=build_architecture_candidate_context(
+                architectures=architectures,
+                pricing=pricing,
+                report=report,
+            ),
+        )
+        (raw_dir / "agent_architecture_candidate_trace.json").write_text(
+            architecture_candidate_trace.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        (raw_dir / "agent_architecture_candidate_proposal.json").write_text(
+            architecture_candidate_trace.proposal.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        included_artifacts.append(f"exports/{export_name}/raw/agent_architecture_candidate_trace.json")
+        included_artifacts.append(f"exports/{export_name}/raw/agent_architecture_candidate_proposal.json")
         evaluation_gate = evaluation_gate_payload()
         (raw_dir / "agent_evaluation_battery.json").write_text(
             json.dumps(evaluation_gate, indent=2, sort_keys=True, default=str),
@@ -655,6 +678,11 @@ class ExportPackageService:
                 encoding="utf-8",
             )
             included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-diagram-plan.md")
+            (audit_dir / "agentic-architecture-candidates.md").write_text(
+                architecture_candidate_summary_markdown(architecture_candidate_trace),
+                encoding="utf-8",
+            )
+            included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-architecture-candidates.md")
 
         # Scenario simulations — only on explicit overrides or the default-set flag.
         scenario_manifest_summary = None

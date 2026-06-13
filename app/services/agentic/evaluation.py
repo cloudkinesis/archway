@@ -159,6 +159,17 @@ class ScenarioObservation(BaseModel):
     diagram_plan_no_compiler_mutation: bool = True
     diagram_plan_trace_hash_present: bool = True
     diagram_plan_view_usefulness_reviewed_by_human: bool = False
+    architecture_candidate_schema_valid: bool = True
+    architecture_candidate_no_semantic_spec_mutation: bool = True
+    architecture_candidate_no_flowledger_mutation: bool = True
+    architecture_candidate_no_diagram_mutation: bool = True
+    architecture_candidate_no_client_surface: bool = True
+    architecture_candidate_human_review_gate_present: bool = True
+    architecture_candidate_procurement_cap_enforced: bool = True
+    architecture_candidate_critique_ref_present: bool = True
+    architecture_candidate_unsupported_claims_flagged: bool = True
+    architecture_candidate_trace_hash_present: bool = True
+    architecture_candidate_soundness_reviewed_by_human: bool = False
 
 
 class EvaluationGateStatus(BaseModel):
@@ -291,6 +302,17 @@ def score_scenario(scenario: EvaluationScenario, observation: ScenarioObservatio
         _diagram_plan_compiler_mutation_metric(scenario, observation),
         _diagram_plan_trace_metric(scenario, observation),
         _diagram_plan_usefulness_human_metric(scenario, observation),
+        _architecture_candidate_schema_metric(scenario, observation),
+        _architecture_candidate_semantic_spec_metric(scenario, observation),
+        _architecture_candidate_flowledger_metric(scenario, observation),
+        _architecture_candidate_diagram_metric(scenario, observation),
+        _architecture_candidate_client_surface_metric(scenario, observation),
+        _architecture_candidate_human_gate_metric(scenario, observation),
+        _architecture_candidate_procurement_cap_metric(scenario, observation),
+        _architecture_candidate_critique_ref_metric(scenario, observation),
+        _architecture_candidate_unsupported_claims_metric(scenario, observation),
+        _architecture_candidate_trace_metric(scenario, observation),
+        _architecture_candidate_soundness_human_metric(scenario, observation),
         _pricing_metric(scenario, observation),
         _reproducibility_metric(scenario, observation),
         _diagram_metric(scenario, observation),
@@ -893,6 +915,127 @@ def _diagram_plan_usefulness_human_metric(scenario: EvaluationScenario, observat
         value="reviewed" if observation.diagram_plan_view_usefulness_reviewed_by_human else "not_auto_scored",
         passed=observation.diagram_plan_view_usefulness_reviewed_by_human,
         reason="Diagram view usefulness is human-reviewed; no automatic diagram-planning usefulness oracle is claimed." if observation.diagram_plan_view_usefulness_reviewed_by_human else "Diagram view usefulness requires human review and is not auto-scored.",
+    )
+
+
+def _architecture_candidate_schema_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.architecture_candidate_schema_valid",
+        lane="architecture",
+        score_type="auto",
+        value=observation.architecture_candidate_schema_valid,
+        passed=observation.architecture_candidate_schema_valid,
+        reason="Architecture candidate proposals use typed schema fields." if observation.architecture_candidate_schema_valid else "Architecture candidate proposal schema validation failed.",
+    )
+
+
+def _architecture_candidate_semantic_spec_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.architecture_candidate_no_semantic_spec_mutation",
+        lane="architecture",
+        score_type="auto",
+        value=observation.architecture_candidate_no_semantic_spec_mutation,
+        passed=observation.architecture_candidate_no_semantic_spec_mutation,
+        reason="Architecture candidates do not mutate SemanticArchitectureSpec or deterministic nodes/flows." if observation.architecture_candidate_no_semantic_spec_mutation else "Architecture candidate mutated deterministic architecture truth.",
+    )
+
+
+def _architecture_candidate_flowledger_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.architecture_candidate_no_flowledger_mutation",
+        lane="architecture",
+        score_type="auto",
+        value=observation.architecture_candidate_no_flowledger_mutation,
+        passed=observation.architecture_candidate_no_flowledger_mutation,
+        reason="Architecture candidates do not mutate FlowLedger." if observation.architecture_candidate_no_flowledger_mutation else "Architecture candidate mutated FlowLedger.",
+    )
+
+
+def _architecture_candidate_diagram_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.architecture_candidate_no_diagram_mutation",
+        lane="architecture",
+        score_type="auto",
+        value=observation.architecture_candidate_no_diagram_mutation,
+        passed=observation.architecture_candidate_no_diagram_mutation,
+        reason="Architecture candidates do not mutate ViewPlanner, Layout IR, compiler output, or rendered diagrams." if observation.architecture_candidate_no_diagram_mutation else "Architecture candidate mutated diagram authority.",
+    )
+
+
+def _architecture_candidate_client_surface_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.architecture_candidate_client_surface",
+        lane="architecture",
+        score_type="auto",
+        value=observation.architecture_candidate_no_client_surface,
+        passed=observation.architecture_candidate_no_client_surface,
+        reason="Architecture candidate output stays out of client_pack." if observation.architecture_candidate_no_client_surface else "Architecture candidate output reached client_pack.",
+    )
+
+
+def _architecture_candidate_human_gate_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.architecture_candidate_human_review_gate",
+        lane="architecture",
+        score_type="auto",
+        value=observation.architecture_candidate_human_review_gate_present,
+        passed=observation.architecture_candidate_human_review_gate_present,
+        reason="Architecture candidate trace carries an explicit not-reviewed human-review gate." if observation.architecture_candidate_human_review_gate_present else "Architecture candidate trace is missing the human-review gate.",
+    )
+
+
+def _architecture_candidate_procurement_cap_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.architecture_candidate_procurement_cap",
+        lane="architecture",
+        score_type="auto",
+        value=observation.architecture_candidate_procurement_cap_enforced,
+        passed=observation.architecture_candidate_procurement_cap_enforced,
+        reason="Model-proposed architecture candidates cannot become procurement-ready while unreviewed." if observation.architecture_candidate_procurement_cap_enforced else "Architecture candidate removed or bypassed procurement cap.",
+    )
+
+
+def _architecture_candidate_critique_ref_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.architecture_candidate_critique_ref",
+        lane="architecture",
+        score_type="auto",
+        value=observation.architecture_candidate_critique_ref_present,
+        passed=observation.architecture_candidate_critique_ref_present,
+        reason="Architecture candidate trace records structural critique results or critique-reference context." if observation.architecture_candidate_critique_ref_present else "Architecture candidate trace is missing critique context.",
+    )
+
+
+def _architecture_candidate_unsupported_claims_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.architecture_candidate_unsupported_claims_flagged",
+        lane="architecture",
+        score_type="auto",
+        value=observation.architecture_candidate_unsupported_claims_flagged,
+        passed=observation.architecture_candidate_unsupported_claims_flagged,
+        reason="Unsupported architecture service/control claims are flagged for human review." if observation.architecture_candidate_unsupported_claims_flagged else "Unsupported architecture claims were not flagged.",
+    )
+
+
+def _architecture_candidate_trace_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.architecture_candidate_trace_reproducibility",
+        lane="architecture",
+        score_type="auto",
+        value=observation.architecture_candidate_trace_hash_present,
+        passed=observation.architecture_candidate_trace_hash_present,
+        reason="Architecture candidate trace carries stable hashes." if observation.architecture_candidate_trace_hash_present else "Architecture candidate trace is missing stable hashes.",
+    )
+
+
+def _architecture_candidate_soundness_human_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.architecture_candidate_design_soundness",
+        lane="architecture",
+        score_type="human",
+        value="reviewed" if observation.architecture_candidate_soundness_reviewed_by_human else "not_auto_scored",
+        passed=observation.architecture_candidate_soundness_reviewed_by_human,
+        reason="Architecture candidate design soundness is human-reviewed; deterministic critique is structural only." if observation.architecture_candidate_soundness_reviewed_by_human else "Architecture candidate design soundness requires human review and is not auto-scored.",
     )
 
 
