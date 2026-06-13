@@ -60,6 +60,13 @@ from app.services.agentic.diagram_planning_agent import (
     DiagramViewCandidate,
     DiagramViewPlanProposal,
 )
+from app.services.agentic.architecture_candidate_agent import (
+    ArchitectureCandidateProposal,
+    ArchitectureCandidateTrace,
+    ArchitectureComponentCandidate,
+    ArchitectureFlowCandidate,
+    ArchitectureHumanReviewGate,
+)
 
 __all__ = [
     "AgentDecision",
@@ -101,4 +108,9 @@ __all__ = [
     "DiagramPlanningTrace",
     "DiagramViewCandidate",
     "DiagramViewPlanProposal",
+    "ArchitectureCandidateProposal",
+    "ArchitectureCandidateTrace",
+    "ArchitectureComponentCandidate",
+    "ArchitectureFlowCandidate",
+    "ArchitectureHumanReviewGate",
 ]

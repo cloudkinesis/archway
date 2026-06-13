@@ -37,6 +37,8 @@ RAW_AGENT_ARTIFACTS = {
     "raw/agent_reviewer_findings.json",
     "raw/agent_diagram_plan_trace.json",
     "raw/agent_diagram_plan_proposal.json",
+    "raw/agent_architecture_candidate_trace.json",
+    "raw/agent_architecture_candidate_proposal.json",
 }
 
 AUDIT_AGENT_ARTIFACTS = {
@@ -48,6 +50,7 @@ AUDIT_AGENT_ARTIFACTS = {
     "audit_pack/agentic-narrative-proposals.md",
     "audit_pack/agentic-reviewer-findings.md",
     "audit_pack/agentic-diagram-plan.md",
+    "audit_pack/agentic-architecture-candidates.md",
 }
 
 CLIENT_FORBIDDEN_TERMS = {
@@ -70,6 +73,9 @@ CLIENT_FORBIDDEN_TERMS = {
     "agentic narrative",
     "agentic reviewer",
     "agentic diagram plan",
+    "agent_architecture_candidate",
+    "agentic architecture candidate",
+    "architecture candidate",
 }
 
 
@@ -113,21 +119,24 @@ def test_control_plane_status_doc_and_script_pin_current_d21_checkpoint(monkeypa
     status = _load_status_script().build_status()
     matrix = {row["component"]: row for row in status["authority_matrix"]}
 
-    assert "5791b1a60a33e4aaf4aee4a882b3457c8efa588e" in doc
+    assert "9ccf6ff3a90825ab4d00470e64a103f43e7a7dd8" in doc
     assert "archway-v2-d21-pricing-dimension-audit" in doc
     assert "archway-v2-d21-control-plane" in doc
     assert "archway-v2-d21-narrative-reviewer-audit" in doc
+    assert "archway-v2-d21-diagram-planning-audit" in doc
+    assert "Architecture-candidate agent | Implemented" in doc
     assert "Client-facing agent output" in doc
-    assert status["baseline_commit"] == "5791b1a60a33e4aaf4aee4a882b3457c8efa588e"
+    assert status["baseline_commit"] == "9ccf6ff3a90825ab4d00470e64a103f43e7a7dd8"
     assert any(item["tag"] == "archway-v2-d21-control-plane" for item in status["d21_tags"])
     assert any(item["tag"] == "archway-v2-d21-narrative-reviewer-audit" for item in status["d21_tags"])
+    assert any(item["tag"] == "archway-v2-d21-diagram-planning-audit" for item in status["d21_tags"])
     assert status["client_pack_agent_output_enabled"] is False
     assert all(value is False for value in status["feature_flags"].values())
     assert status["llm_provider"] == "deterministic"
 
     assert matrix["deterministic baseline"]["writes_client_pack"] is True
     assert matrix["deterministic baseline"]["can_affect_readiness"] is True
-    for component in ("repair planner", "research agent", "use-case analyst agent", "pricing-dimension agent", "narrative agent", "reviewer agent", "diagram planning agent"):
+    for component in ("repair planner", "research agent", "use-case analyst agent", "pricing-dimension agent", "narrative agent", "reviewer agent", "diagram planning agent", "architecture candidate agent"):
         assert matrix[component]["default_enabled"] is False
         assert matrix[component]["writes_raw"] is True
         assert matrix[component]["writes_audit_pack"] is True
@@ -137,10 +146,7 @@ def test_control_plane_status_doc_and_script_pin_current_d21_checkpoint(monkeypa
         assert matrix[component]["can_affect_headline_pricing"] is False
         assert matrix[component]["can_affect_architecture_compiler_truth"] is False
         assert matrix[component]["can_affect_diagram_rendering"] is False
-
-    for component in ("future architecture candidate agent",):
-        assert matrix[component]["default_enabled"] is False
-        assert matrix[component]["writes_client_pack"] is False
+    assert matrix["architecture candidate agent"]["requires_human_review"] is True
 
 
 def test_current_agentic_lanes_are_default_off_raw_audit_only_and_manifest_verified(tmp_path, monkeypatch):
@@ -155,6 +161,7 @@ def test_current_agentic_lanes_are_default_off_raw_audit_only_and_manifest_verif
         narrative_trace = json.loads(archive.read("raw/agent_narrative_trace.json").decode("utf-8"))
         reviewer_trace = json.loads(archive.read("raw/agent_reviewer_trace.json").decode("utf-8"))
         diagram_plan_trace = json.loads(archive.read("raw/agent_diagram_plan_trace.json").decode("utf-8"))
+        architecture_trace = json.loads(archive.read("raw/agent_architecture_candidate_trace.json").decode("utf-8"))
         evaluation_gate = json.loads(archive.read("raw/agent_evaluation_battery.json").decode("utf-8"))
 
     assert RAW_AGENT_ARTIFACTS.issubset(names)
@@ -169,6 +176,9 @@ def test_current_agentic_lanes_are_default_off_raw_audit_only_and_manifest_verif
     assert narrative_trace["enabled"] is False and narrative_trace["provider"] == "disabled"
     assert reviewer_trace["enabled"] is False and reviewer_trace["provider"] == "disabled"
     assert diagram_plan_trace["enabled"] is False and diagram_plan_trace["provider"] == "disabled"
+    assert architecture_trace["enabled"] is False and architecture_trace["provider"] == "disabled"
+    assert architecture_trace["human_review_gate"]["status"] == "not_reviewed"
+    assert architecture_trace["proposal"]["procurement_cap"] is True
     assert research_trace["output_hash"].startswith("sha256:")
     assert use_case_trace["output_hash"].startswith("sha256:")
     assert pricing_trace["output_hash"].startswith("sha256:")
@@ -182,6 +192,7 @@ def test_current_agentic_lanes_are_default_off_raw_audit_only_and_manifest_verif
     assert manifest["identity"]["feature_flags"]["enable_agentic_use_case_analyst"] is False
     assert manifest["identity"]["feature_flags"]["enable_agentic_pricing"] is False
     assert manifest["identity"]["feature_flags"]["enable_agentic_diagram_planner"] is False
+    assert manifest["identity"]["feature_flags"]["enable_agentic_architecture"] is False
 
     ok, errors, _ = _load_verifier().verify(export_dir)
     assert ok, errors
@@ -228,7 +239,7 @@ def test_control_plane_evaluation_and_authority_invariants(monkeypatch, tmp_path
     assert all(value is False for value in flags.values())
     assert len(result.scenarios) == 10
     assert not result.has_critical_findings
-    assert sum(1 for finding in result.findings if finding.severity == "advisory") == 60
+    assert sum(1 for finding in result.findings if finding.severity == "advisory") == 70
     assert lane_scores["research"].confidence_label == "requires_human_review"
     assert lane_scores["use_case_analyst"].confidence_label == "requires_human_review"
     assert lane_scores["pricing_dimension"].confidence_label == "auto_passed"
