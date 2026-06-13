@@ -357,3 +357,7 @@ Authorized for Phase 0 implementation by `docs/rc2/D21_AGENTIC_PROPOSAL_LANES.md
   remove/downgrade deterministic reviewer findings. Diagram-planning lane is
   audit-only and does not alter ViewPlanner, FlowLedger, Layout IR, compiler
   output, rendered diagrams, or client-pack diagram claims.
+- The final D21 demo-readiness freeze is documentation/test/validation only.
+  It does not add another agent lane. Full client-facing agent output remains
+  disabled until a future explicit promotion decision defines human approval,
+  deterministic pattern backing, evidence gates, and rollback rules.

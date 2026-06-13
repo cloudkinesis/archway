@@ -21,7 +21,8 @@ from app.services.agentic.repair_planner import agentic_feature_flags  # noqa: E
 from app.services.dossier_manifest import stable_json_hash  # noqa: E402
 
 BASELINE_COMMIT = "9ccf6ff3a90825ab4d00470e64a103f43e7a7dd8"
-NEXT_BRANCH = "feature/d21-agentic-demo-readiness-freeze"
+NEXT_BRANCH = "none - D21 lane development complete"
+NEXT_MODE = "demo/readiness freeze"
 
 D21_TAGS = (
     ("archway-v2-agentic-foundation", "D21 foundation + deterministic repair planner"),
@@ -32,6 +33,7 @@ D21_TAGS = (
     ("archway-v2-d21-control-plane", "D21 control-plane consolidation checkpoint"),
     ("archway-v2-d21-narrative-reviewer-audit", "D21 narrative and reviewer audit-only lanes"),
     ("archway-v2-d21-diagram-planning-audit", "D21 diagram-planning audit-only lane"),
+    ("archway-v2-d21-architecture-candidate-audit", "D21 architecture-candidate audit-only lane"),
 )
 
 RAW_ARTIFACTS = (
@@ -117,11 +119,14 @@ def build_status() -> dict[str, Any]:
         "raw_artifacts": list(RAW_ARTIFACTS),
         "audit_artifacts": list(AUDIT_ARTIFACTS),
         "client_pack_agent_output_enabled": False,
+        "live_agent_providers_enabled": False,
         "next_recommended_branch": NEXT_BRANCH,
+        "next_recommended_mode": NEXT_MODE,
         "notes": [
             "Current D21 lanes are default-off and raw/audit-only.",
             "Deterministic Archway remains the only authority-bearing baseline.",
             "Architecture candidate output is typed candidate material only; design soundness remains human-review gated.",
+            "Do not add more D21 agent lanes before demo; freeze, validate, tag, and prepare the demo.",
         ],
     }
     payload["status_hash"] = stable_json_hash({k: v for k, v in payload.items() if k != "status_hash"})
@@ -164,8 +169,10 @@ def markdown(payload: dict[str, Any]) -> str:
         "## Current Boundary",
         "",
         "- No client-facing agent output is enabled.",
+        "- No live agent provider is enabled in the default/golden path.",
         "- Agentic proposal lanes cannot promote readiness, pricing math, headline pricing, architecture truth, diagram rendering, governance, or verifier semantics.",
         f"- Next recommended branch: `{payload['next_recommended_branch']}`.",
+        f"- Next recommended mode: `{payload['next_recommended_mode']}`.",
         "",
     ])
     return "\n".join(lines)
