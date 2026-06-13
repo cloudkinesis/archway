@@ -100,9 +100,21 @@ ESTIMATE_CLASS_DISPLAY = {
     "rate_backed_estimate": "Rate-backed estimate",
 }
 
-# Quality-machinery readiness statuses that cap a package below workshop use.
-_DEMO_CAP_STATUSES = {"internal_only", "internal_demo_only"}
-_BLOCKING_STATUSES = {"failed", "failed_validation"}
+# HARD-failure quality statuses: the quality review explicitly grades the
+# package failed or internal-only, so it is not suitable even for a controlled
+# demo (→ internal_only tier).
+_HARD_QUALITY_STATUSES = {"failed", "failed_validation", "internal_only", "internal_demo_only"}
+
+# HARD-failure pricing-metadata status values: the pricing basis is not even
+# directionally coherent (→ internal_only tier).
+_HARD_PRICING_STATUSES = {
+    "invalid_extracted_scale_not_applied",
+    "directional_only_missing_core_compute_drivers",
+}
+
+# Evidence-authority grades too weak for workshop discussion. These cap a
+# coherent package at demo_ready — they NEVER force internal_only.
+_WEAK_EVIDENCE_AUTHORITY = {"limited", "weak"}
 
 
 def compute_readiness_tier(*, report: dict | None, pricing: dict | None, architectures: list | None) -> dict:
@@ -123,35 +135,48 @@ def compute_readiness_tier(*, report: dict | None, pricing: dict | None, archite
     ledger_summary = (pricing_metadata.get("pricing_ledger") or {}).get("summary") or {}
     coverage = report.get("citation_coverage") or {}
 
-    reasons: list[str] = []
-
-    # --- internal_only: package not coherent, or explicitly blocked ---------
-    coherent = bool(architectures) and bool(pricing)
-    blockers = [str(item) for item in readiness.get("blockers") or []]
     quality_status = str(readiness.get("status") or "")
-    if not coherent:
-        reasons.append("Architecture or pricing output is missing; the package is not yet coherent.")
-    reasons.extend(blockers)
-    if quality_status in _BLOCKING_STATUSES:
-        reasons.append("Quality validation failed for this package.")
-    if pricing_metadata.get("status") == "invalid_extracted_scale_not_applied":
-        reasons.append("Pricing scale validation failed; extracted workload metrics were not applied.")
-    if reasons:
-        return _tier_result("internal_only", pricing_metadata, closure, ledger_summary, reasons)
+    pricing_status = str(pricing_metadata.get("status") or "")
 
-    # --- demo_ready and the evidence-on gate for workshop_ready -------------
+    # --- internal_only: HARD failures only ----------------------------------
+    # Evidence/citation failures do NOT belong here: an otherwise-coherent
+    # package whose citation gate has not passed is still demo-able. internal
+    # is reserved for incoherence, an explicit failed/internal quality grade,
+    # or a pricing basis that is not even directionally coherent.
+    hard_reasons: list[str] = []
+    coherent = bool(architectures) and bool(pricing)
+    if not coherent:
+        hard_reasons.append("Architecture or pricing output is missing; the package is not yet coherent.")
+    if quality_status in _HARD_QUALITY_STATUSES:
+        hard_reasons.append(
+            "Quality review explicitly grades this package for internal use; it is not suitable even for a controlled demo."
+        )
+    if pricing_status in _HARD_PRICING_STATUSES:
+        hard_reasons.append(
+            "Pricing basis is not directionally coherent (core scale/compute drivers were not applied)."
+        )
+    if hard_reasons:
+        return _tier_result("internal_only", pricing_metadata, closure, ledger_summary, hard_reasons)
+
+    # --- demo_ready: the evidence-on gate for workshop_ready ----------------
+    # A coherent package is at least demo_ready. It is capped here (not
+    # promoted to workshop_ready) whenever the evidence/citation gate is
+    # incomplete or evidence authority is too weak.
     citation_passed = bool(coverage.get("passed", False))
     authoritative_evidence = bool(
         evidence_quality.get("aws_docs_available") or evidence_quality.get("aws_pricing_available")
     )
+    authority = str(evidence_quality.get("evidence_authority") or "")
+    cap_reasons: list[str] = []
     if not citation_passed:
-        reasons.append("Citation coverage has not passed; claims are not fully evidence-backed yet.")
+        cap_reasons.append("Evidence/citation gate incomplete (citation coverage has not passed); capped at Demo ready.")
     if not authoritative_evidence:
-        reasons.append("Authoritative AWS documentation or pricing evidence is not present for this run.")
-    if quality_status in _DEMO_CAP_STATUSES:
-        reasons.append("Quality review currently grades this package for internal demo use; resolve its findings first.")
-    if reasons:
-        return _tier_result("demo_ready", pricing_metadata, closure, ledger_summary, reasons)
+        cap_reasons.append("Evidence/citation gate incomplete (no authoritative AWS documentation or pricing evidence present); capped at Demo ready.")
+    if authority in _WEAK_EVIDENCE_AUTHORITY:
+        cap_reasons.append(f"Evidence authority is {authority}; capped at Demo ready until authoritative sources are refreshed.")
+    if cap_reasons:
+        return _tier_result("demo_ready", pricing_metadata, closure, ledger_summary, cap_reasons)
+    reasons: list[str] = []
 
     # --- procurement_ready gates (hard to reach by design) ------------------
     missing_drivers = closure.get("missing_drivers") or []

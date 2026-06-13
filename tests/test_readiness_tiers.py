@@ -75,29 +75,56 @@ def test_tier_ordering_and_display_labels():
     assert set(ESTIMATE_CLASS_DISPLAY.values()) == {"Planning estimate", "Budgetary range", "Rate-backed estimate"}
 
 
-def test_internal_only_default_when_signals_insufficient():
-    assert _tier(architectures=[])["tier"] == "internal_only"
-    assert _tier(pricing={})["tier"] == "internal_only"
-    assert _tier(report=_report(blockers=("Citation gate failed.",)))["tier"] == "internal_only"
+def test_internal_only_reserved_for_hard_failures():
+    # internal_only is only for HARD failures — never for evidence/citation.
+    assert _tier(architectures=[])["tier"] == "internal_only"          # incoherent
+    assert _tier(pricing={})["tier"] == "internal_only"                # incoherent
+    assert _tier(report=_report(status="failed"))["tier"] == "internal_only"
+    assert _tier(report=_report(status="internal_demo_only"))["tier"] == "internal_only"
     assert _tier(pricing=_pricing(status="invalid_extracted_scale_not_applied"))["tier"] == "internal_only"
+    assert _tier(pricing=_pricing(status="directional_only_missing_core_compute_drivers"))["tier"] == "internal_only"
     result = _tier(architectures=[])
     assert result["reasons"]
+    assert result["estimate_display"] == "Planning estimate"
+
+
+def test_evidence_failure_does_not_collapse_coherent_package_to_internal_only():
+    # The Codex-discovered regression: a coherent package whose citation gate
+    # has not passed must NOT collapse to internal_only.
+    capped = _tier(report=_report(citation_passed=False, docs=False, pricing_evidence=True))
+    assert capped["tier"] == "demo_ready"
+    assert capped["tier"] != "internal_only"
+
+
+def test_codex_fresh_metadata_case_is_demo_ready():
+    # Exact fresh metadata Codex observed: citation not passed, AWS Docs MCP
+    # unavailable, AWS Pricing evidence present, otherwise coherent.
+    result = _tier(report=_report(citation_passed=False, docs=False, pricing_evidence=True))
+    assert result["tier"] == "demo_ready"
+    assert result["tier"] not in {"internal_only", "workshop_ready", "procurement_ready"}
+    assert any("Evidence/citation gate incomplete" in reason for reason in result["reasons"])
+    assert all("capped at Demo ready" in reason for reason in result["reasons"])
     assert result["estimate_display"] == "Planning estimate"
 
 
 def test_demo_ready_not_over_promoted_without_evidence():
     no_citation = _tier(report=_report(citation_passed=False))
     assert no_citation["tier"] == "demo_ready"
-    assert any("Citation coverage" in reason for reason in no_citation["reasons"])
+    assert any("citation coverage has not passed" in reason for reason in no_citation["reasons"])
     no_sources = _tier(report=_report(docs=False, pricing_evidence=False))
     assert no_sources["tier"] == "demo_ready"
-    assert any("Authoritative" in reason for reason in no_sources["reasons"])
+    assert any("no authoritative AWS documentation or pricing evidence" in reason for reason in no_sources["reasons"])
+    weak = _tier(report=_report())
+    weak_report = _report()
+    weak_report["metadata"]["evidence_quality"]["evidence_authority"] = "limited"
+    assert _tier(report=weak_report)["tier"] == "demo_ready"
 
 
-def test_quality_internal_status_caps_at_demo_ready():
-    capped = _tier(report=_report(status="internal_only"))
-    assert capped["tier"] == "demo_ready"
-    assert any("internal demo use" in reason for reason in capped["reasons"])
+def test_quality_internal_status_caps_at_internal_only():
+    # An explicit internal-only/internal-demo quality grade is a HARD cap.
+    capped = _tier(report=_report(status="internal_demo_only"))
+    assert capped["tier"] == "internal_only"
+    assert any("not suitable even for a controlled demo" in reason for reason in capped["reasons"])
 
 
 def test_workshop_ready_requires_evidence_and_citation():
@@ -189,6 +216,56 @@ def test_pricing_summary_copy_matches_tier(monkeypatch):
         assert "workshop_ready" not in content
         assert "budgetary_range" not in content
         assert lint_markdown(content, "client_pack/x.md") == []
+
+
+def test_rendered_client_pack_matches_codex_fresh_metadata():
+    # End to end: under the exact fresh metadata Codex observed, the rendered
+    # client pack must claim Demo ready — never Workshop/Procurement/Internal.
+    from app.services.client_pack import client_pack_files
+    from app.services.deep_dossier import DeepDossierService
+
+    report = _report(citation_passed=False, docs=False, pricing_evidence=True)
+    pricing = _pricing()
+    dossier = DeepDossierService().build(
+        session_id="s", brief={"title": "Codex Case", "use_case_profile": {}},
+        report=report, pricing=pricing, architectures=_ARCH, diagrams=[],
+    )
+    client = client_pack_files(
+        session_name="Codex Case", brief={"title": "Codex Case"}, report=report, pricing=pricing,
+        architectures=_ARCH, diagrams=[], deep_dossier=dossier, decision_records=[],
+    )
+    for path in ("01-executive-memo.md", "04-pricing-summary.md", "05-risks-and-gates.md"):
+        content = client[path]
+        assert "**Readiness tier:** Demo ready" in content, path
+        assert "Workshop ready" not in content, path
+        assert "Procurement ready" not in content, path
+        assert "Internal only" not in content, path
+        assert lint_markdown(content, f"client_pack/{path}") == [], path
+    # The cap reason is rendered in business language on the memo.
+    assert "Evidence/citation gate incomplete" in client["01-executive-memo.md"]
+
+
+def test_rendered_internal_only_package_has_no_enum_leak():
+    # An explicit internal-only quality grade must render lint-clean — the raw
+    # status enum must never reach client prose via a cap reason.
+    from app.services.client_pack import client_pack_files
+    from app.services.deep_dossier import DeepDossierService
+
+    report = _report(status="internal_demo_only")
+    pricing = _pricing()
+    dossier = DeepDossierService().build(
+        session_id="s", brief={"title": "Internal Case", "use_case_profile": {}},
+        report=report, pricing=pricing, architectures=_ARCH, diagrams=[],
+    )
+    client = client_pack_files(
+        session_name="Internal Case", brief={"title": "Internal Case"}, report=report, pricing=pricing,
+        architectures=_ARCH, diagrams=[], deep_dossier=dossier, decision_records=[],
+    )
+    for path in ("01-executive-memo.md", "04-pricing-summary.md", "05-risks-and-gates.md"):
+        content = client[path]
+        assert "**Readiness tier:** Internal only" in content, path
+        assert "internal_demo_only" not in content and "internal_only" not in content, path
+        assert lint_markdown(content, f"client_pack/{path}") == [], path
 
 
 def test_strict_linting_never_applies_to_audit_or_machine_surfaces():

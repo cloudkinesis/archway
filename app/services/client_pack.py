@@ -80,7 +80,7 @@ def client_pack_files(
         "02-solution-brief.md": _solution_brief(brief, deep_dossier),
         "03-architecture-summary.md": _architecture_summary(architectures, decision_records),
         "04-pricing-summary.md": _pricing_summary(pricing, deep_dossier, tier),
-        "05-risks-and-gates.md": _risks_and_gates(deep_dossier),
+        "05-risks-and-gates.md": _risks_and_gates(deep_dossier, tier),
         "06-evidence-summary.md": _evidence_summary(report, deep_dossier),
         "07-diagrams-index.md": _diagrams_index(diagrams),
     }
@@ -126,12 +126,21 @@ def _executive_memo(report: dict, dossier, tier: dict) -> str:
         "an AWS-native architecture with governed operations, evidence discipline, and explicit pricing validation"
     )
     gates = [gate_display(item) for item in dossier.top_validation_gates[:3]]
+    cap = tier.get("reasons") or []
     lines = [
         "# Executive Memo",
         "",
         f"**Use case:** {dossier.title}",
         f"**Verdict:** {dossier.verdict}",
         f"**Readiness tier:** {tier['display']}",
+        "",
+        "## Readiness",
+        "",
+        _sentence(
+            f"This package is graded {tier['display']}"
+            + (". It meets every readiness gate" if not cap else f", capped because {cap[0].rstrip('.').lower()}")
+        ),
+        *(["", "To advance to the next tier:", "", *_bullets([_sentence(reason) for reason in cap])] if cap else []),
         "",
         "## Recommendation",
         "",
@@ -295,15 +304,22 @@ def _pricing_summary(pricing: dict, dossier, tier: dict) -> str:
     ])
 
 
-def _risks_and_gates(dossier) -> str:
+def _risks_and_gates(dossier, tier: dict) -> str:
     risks = [
         f"**{display_label(str(risk.severity), capitalize=True)}** — {_sentence(str(risk.risk))} "
         f"Mitigation: {_sentence(str(risk.mitigation))}"
         for risk in dossier.risks
     ]
     gates = [gate_display(item) for item in dossier.top_validation_gates]
+    cap = [_sentence(reason) for reason in tier.get("reasons") or []]
     return "\n".join([
         "# Risks and Validation Gates",
+        "",
+        f"**Readiness tier:** {tier['display']}",
+        "",
+        "## Why this tier",
+        "",
+        *_bullets(cap or [f"This package meets every readiness gate for {tier['display'].lower()}."]),
         "",
         "## Key risks",
         "",
