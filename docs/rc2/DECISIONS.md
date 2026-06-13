@@ -330,3 +330,6 @@ Authorized for Phase 0 implementation by `docs/rc2/D21_AGENTIC_PROPOSAL_LANES.md
 - Live research, use-case analyst, pricing, narrative, reviewer, diagram-planning,
   and architecture-candidate agents remain future lanes and default-off until their
   evaluation gates exist.
+- Phase 1 adds the thin evaluation battery documented in
+  `docs/rc2/D21_EVALUATION_BATTERY.md`; it measures future lanes but does not grant
+  client-facing authority by itself.

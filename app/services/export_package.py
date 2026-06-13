@@ -31,6 +31,7 @@ from app.services.agentic.repair_planner import (
     build_agentic_trace,
     repair_plan_markdown,
 )
+from app.services.agentic.evaluation import evaluation_gate_markdown, evaluation_gate_payload
 from app.services.agentic.contracts import ArtifactCompletenessState
 from app.services.reviewer_mode import (
     build_reviewer_report,
@@ -434,6 +435,12 @@ class ExportPackageService:
                 encoding="utf-8",
             )
             included_artifacts.append(f"exports/{export_name}/raw/{name}.json")
+        evaluation_gate = evaluation_gate_payload()
+        (raw_dir / "agent_evaluation_battery.json").write_text(
+            json.dumps(evaluation_gate, indent=2, sort_keys=True, default=str),
+            encoding="utf-8",
+        )
+        included_artifacts.append(f"exports/{export_name}/raw/agent_evaluation_battery.json")
 
         # Client/audit pack split — additive presentation layer rendered from the
         # SAME payloads as the root artifacts (no new claims, numbers, readiness
@@ -467,6 +474,11 @@ class ExportPackageService:
                 encoding="utf-8",
             )
             included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-repair-plan.md")
+            (audit_dir / "agentic-evaluation-summary.md").write_text(
+                evaluation_gate_markdown(evaluation_gate),
+                encoding="utf-8",
+            )
+            included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-evaluation-summary.md")
 
         # Scenario simulations — only on explicit overrides or the default-set flag.
         scenario_manifest_summary = None
