@@ -73,9 +73,12 @@ def test_architecture_candidate_flag_defaults_false_and_provider_not_invoked(mon
     assert trace.decisions[0].decision == "blocked_from_authority"
 
 
-def test_live_architecture_candidate_provider_is_unavailable():
-    with pytest.raises(NotImplementedError):
-        LiveArchitectureCandidateProvider().propose({})
+def test_live_architecture_candidate_provider_degrades_without_live_demo():
+    provider = LiveArchitectureCandidateProvider()
+    proposal = provider.propose({})
+    assert provider.last_call is not None
+    assert provider.last_call.status == "not_attempted"
+    assert proposal.open_questions
 
 
 def test_architecture_candidate_fixture_provider_is_deterministic(monkeypatch, tmp_path):

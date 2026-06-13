@@ -542,6 +542,12 @@ async def diagnostics(session_id: str):
             "mcp_security": mcp_security_status(get_settings())}
 
 
+@router.get("/sessions/{session_id}/agentic/live-status")
+async def agentic_live_status(session_id: str):
+    _require_session(session_id)
+    return _latest_live_agent_status(session_id)
+
+
 @router.get("/sessions/{session_id}/export")
 async def export_debug_bundle(session_id: str):
     session = _require_session(session_id)
@@ -612,6 +618,62 @@ def _latest_export_bundle(session_id: str):
         "manifest_artifact_id": artifacts.to_artifact_id(session_id, manifests[0]),
         "included_artifacts": manifest.get("included_artifacts", []),
         "warnings": manifest.get("warnings", []),
+    }
+
+
+def _latest_live_agent_status(session_id: str):
+    settings = get_settings()
+    root = artifacts.session_root(session_id) / "exports"
+    live_files = sorted(root.glob("archway-solution-package-*/raw/live_agent_calls.json"), reverse=True)
+    if not live_files:
+        return {
+            "agentic_mode": settings.agentic_mode,
+            "configured_provider": settings.llm_provider,
+            "configured_model": settings.bedrock_model_id,
+            "has_export_trace": False,
+            "total_records": 0,
+            "bedrock_accepted": 0,
+            "setup_required": 0,
+            "skipped": 0,
+            "failed": 0,
+            "statuses": {},
+            "lanes": {},
+            "message": "Generate an export to produce live agent call audit records.",
+        }
+    records = __import__("json").loads(live_files[0].read_text(encoding="utf-8"))
+    statuses: dict[str, int] = {}
+    lanes: dict[str, dict[str, int]] = {}
+    for record in records:
+        status = str(record.get("status") or "unknown")
+        lane = str(record.get("lane") or "unknown")
+        statuses[status] = statuses.get(status, 0) + 1
+        lane_statuses = lanes.setdefault(lane, {})
+        lane_statuses[status] = lane_statuses.get(status, 0) + 1
+    bedrock_accepted = sum(
+        1 for record in records
+        if record.get("provider") == "bedrock" and record.get("status") == "accepted"
+    )
+    setup_required = statuses.get("setup_required", 0)
+    if bedrock_accepted:
+        message = f"{bedrock_accepted} live Bedrock agent call(s) recorded in the latest export."
+    elif setup_required:
+        message = "Latest export completed with setup-required live agent records; configure Bedrock provider/model to enable live calls."
+    else:
+        message = "Latest export completed with audit-only or skipped live agent records."
+    return {
+        "agentic_mode": settings.agentic_mode,
+        "configured_provider": settings.llm_provider,
+        "configured_model": settings.bedrock_model_id,
+        "has_export_trace": True,
+        "export_name": live_files[0].parents[1].name,
+        "total_records": len(records),
+        "bedrock_accepted": bedrock_accepted,
+        "setup_required": setup_required,
+        "skipped": statuses.get("skipped", 0),
+        "failed": statuses.get("failed", 0),
+        "statuses": statuses,
+        "lanes": lanes,
+        "message": message,
     }
 
 

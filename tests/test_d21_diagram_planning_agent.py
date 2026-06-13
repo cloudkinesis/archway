@@ -77,9 +77,12 @@ def test_diagram_planner_flag_defaults_false_and_provider_not_invoked(monkeypatc
     assert trace.output_hash.startswith("sha256:")
 
 
-def test_live_diagram_planner_provider_is_unavailable():
-    with pytest.raises(NotImplementedError):
-        LiveDiagramPlanningProvider().propose({})
+def test_live_diagram_planner_provider_degrades_without_live_demo():
+    provider = LiveDiagramPlanningProvider()
+    proposal = provider.propose({})
+    assert provider.last_call is not None
+    assert provider.last_call.status == "not_attempted"
+    assert proposal.rationale
 
 
 def test_diagram_planner_fixture_provider_is_deterministic(monkeypatch, tmp_path):

@@ -80,10 +80,12 @@ def test_use_case_analyst_fixture_provider_is_deterministic(monkeypatch, tmp_pat
     assert all(item.accepted_status == "proposed" for item in trace.proposal.candidate_pricing_drivers)
 
 
-def test_live_use_case_analyst_provider_is_unavailable():
+def test_live_use_case_analyst_provider_degrades_without_live_demo():
     provider = LiveUseCaseAnalystProvider()
-    with pytest.raises(NotImplementedError):
-        provider.propose({})
+    proposal = provider.propose({})
+    assert provider.last_call is not None
+    assert provider.last_call.status == "not_attempted"
+    assert proposal.uncertainties
 
 
 def test_use_case_analyst_does_not_overwrite_deterministic_facts():

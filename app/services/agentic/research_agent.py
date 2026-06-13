@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings
 from app.services.agentic.contracts import AgentDecision
+from app.services.agentic.live_audit import LiveCallAudit
+from app.services.agentic.live_bedrock_harness import LiveRunContext, live_call
 from app.services.dossier_manifest import stable_json_hash
+from app.services.llm.base import LLMMessage, LLMTaskType
 
 ResearchClaimKind = Literal[
     "aws_docs",
@@ -89,6 +93,7 @@ class ResearchAgentTrace(BaseModel):
     decisions: list[AgentDecision] = Field(default_factory=list)
     prompt_hash: str | None = None
     response_hash: str | None = None
+    live_call: LiveCallAudit | None = None
     input_hash: str
     output_hash: str
 
@@ -250,16 +255,59 @@ class DeterministicFixtureResearchProvider:
 
 
 class LiveResearchProvider:
-    provider_name = "live_stub"
+    provider_name = "bedrock"
+
+    def __init__(self, *, session_id: str | None = None, run_context: LiveRunContext | None = None, sensitivity_text: str | None = None):
+        self.session_id = session_id
+        self.run_context = run_context
+        self.sensitivity_text = sensitivity_text
+        self.input_context: dict[str, Any] = {}
+        self.last_call: LiveCallAudit | None = None
 
     def plan_queries(self, input_context: dict[str, Any]) -> ResearchQueryPlan:
-        raise NotImplementedError("Live research provider is intentionally not implemented in this audit-only branch.")
+        self.input_context = input_context
+        return DeterministicFixtureResearchProvider().plan_queries(input_context)
 
     def retrieve(self, plan: ResearchQueryPlan) -> list[ResearchEvidenceItem]:
-        raise NotImplementedError("Live research retrieval is intentionally unavailable in this branch.")
+        return []
 
     def synthesize(self, plan: ResearchQueryPlan, evidence_items: list[ResearchEvidenceItem]) -> ResearchSynthesis:
-        raise NotImplementedError("Live research synthesis is intentionally unavailable in this branch.")
+        messages = [
+            LLMMessage(role="system", content=(
+                "You are Archway's live research synthesizer. Return JSON only. "
+                "Use only the supplied deterministic context. Do not claim fresh AWS Docs or Pricing retrieval. "
+                "Mark fresh-evidence requirements as gaps."
+            )),
+            LLMMessage(role="user", content=json.dumps({"plan": plan.model_dump(mode="json"), "context": self.input_context}, default=str)[:22000]),
+        ]
+        result = live_call(
+            LLMTaskType.live_research_synthesis,
+            messages,
+            ResearchSynthesis,
+            session_id=self.session_id,
+            lane="research",
+            run_context=self.run_context,
+            sensitivity_text=self.sensitivity_text,
+        )
+        self.last_call = result.audit
+        if isinstance(result.parsed, ResearchSynthesis):
+            synthesis = result.parsed
+            return synthesis.model_copy(update={"provenance": "model_proposed"})
+        return ResearchSynthesis(
+            synthesis_id="synth_" + plan.deterministic_hash.removeprefix("sha256:")[:12],
+            summary="Live research synthesis was not usable; deterministic context remains authoritative.",
+            findings=[
+                ResearchFinding(
+                    finding_id="live_research_unavailable",
+                    status="gap",
+                    claim_kind="unknown",
+                    statement=result.audit.error_message or result.audit.skip_reason or "Live research synthesis did not complete.",
+                    provenance="model_proposed",
+                )
+            ],
+            gaps=[result.audit.error_message or result.audit.skip_reason or "Live research synthesis unavailable."],
+            provenance="model_proposed",
+        )
 
 
 def classify_research_status(
@@ -320,9 +368,14 @@ def build_research_agent_trace(
     settings: Settings,
     input_context: dict[str, Any],
     provider: ResearchProvider | None = None,
+    live_run_context: LiveRunContext | None = None,
+    session_id: str | None = None,
+    sensitivity_text: str | None = None,
 ) -> ResearchAgentTrace:
     if not settings.enable_agentic_research:
         return DisabledResearchProvider().trace(input_context)
+    if provider is None and settings.agentic_mode == "live_demo":
+        provider = LiveResearchProvider(session_id=session_id, run_context=live_run_context, sensitivity_text=sensitivity_text)
     provider = provider or DeterministicFixtureResearchProvider()
     plan = provider.plan_queries(input_context)
     evidence = provider.retrieve(plan)
@@ -333,10 +386,11 @@ def build_research_agent_trace(
         "evidence_items": [item.model_dump(mode="json") for item in evidence],
         "synthesis": synthesis.model_dump(mode="json"),
     })
+    live_audit = getattr(provider, "last_call", None)
     return ResearchAgentTrace(
         run_id=plan.run_id,
         enabled=True,
-        provider=provider.provider_name,
+        provider=live_audit.provider if live_audit else provider.provider_name,
         query_plan=plan,
         evidence_items=evidence,
         synthesis=synthesis,
@@ -348,6 +402,9 @@ def build_research_agent_trace(
                 deterministic_gate="D21 research audit-only lane",
             )
         ],
+        prompt_hash=live_audit.prompt_hash if live_audit else None,
+        response_hash=live_audit.response_hash if live_audit else None,
+        live_call=live_audit,
         input_hash=input_hash,
         output_hash=output_hash,
     )

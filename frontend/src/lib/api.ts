@@ -1,4 +1,4 @@
-import type { ArchitectureResponse, BuildStatusSummary, DiagramGalleryResult, ExportBundle, HealthSummary, HydratedSession, JobRun, PricingCheckpoint, Readiness, ResearchReport, Session } from "./types";
+import type { ArchitectureResponse, BuildStatusSummary, DiagramGalleryResult, ExportBundle, HealthSummary, HydratedSession, JobRun, LiveAgentStatus, PricingCheckpoint, Readiness, ResearchReport, Session } from "./types";
 
 const API_BASE = import.meta.env.VITE_ARCHWAY_API_BASE ?? "http://127.0.0.1:8000/api";
 
@@ -76,5 +76,7 @@ export const api = {
     request<{ job: JobRun }>(`/sessions/${sessionId}/export/generate`, { method: "POST" }),
   getExport: (sessionId: string) =>
     request<{ export: ExportBundle }>(`/sessions/${sessionId}/export/package`),
+  getLiveAgentStatus: (sessionId: string) =>
+    request<LiveAgentStatus>(`/sessions/${sessionId}/agentic/live-status`),
   diagnostics: (sessionId: string) => request<{ logs: unknown[]; health: HealthSummary }>(`/sessions/${sessionId}/diagnostics`)
 };

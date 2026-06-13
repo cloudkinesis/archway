@@ -336,6 +336,22 @@ export interface ExportBundle {
   warnings: string[];
 }
 
+export interface LiveAgentStatus {
+  agentic_mode: string;
+  configured_provider: string;
+  configured_model?: string | null;
+  has_export_trace: boolean;
+  export_name?: string;
+  total_records: number;
+  bedrock_accepted: number;
+  setup_required: number;
+  skipped: number;
+  failed: number;
+  statuses: Record<string, number>;
+  lanes: Record<string, Record<string, number>>;
+  message: string;
+}
+
 export interface HydratedSession {
   session: Session;
   readiness?: Readiness | null;

@@ -21,6 +21,13 @@ SONNET_TASKS = {
     LLMTaskType.architecture_critique,
     LLMTaskType.dossier_quality_review,
     LLMTaskType.executive_summary_writing,
+    LLMTaskType.live_use_case_analyst,
+    LLMTaskType.live_pricing_dimension,
+    LLMTaskType.live_research_synthesis,
+    LLMTaskType.live_architecture_candidate,
+    LLMTaskType.live_diagram_planning,
+    LLMTaskType.live_narrative_synthesis,
+    LLMTaskType.live_reviewer_critique,
 }
 
 
