@@ -35,6 +35,7 @@ def enabled_lanes_from_settings(settings: Settings) -> list[str]:
         "repair_planner": "enable_agentic_repair_planner",
         "research": "enable_agentic_research",
         "use_case_analyst": "enable_agentic_use_case_analyst",
+        "pricing_dimension": "enable_agentic_pricing",
         "pricing": "enable_agentic_pricing",
         "narrative": "enable_agentic_narrative",
         "reviewer": "enable_agentic_reviewer",
@@ -188,6 +189,7 @@ def authority_matrix(settings: Settings) -> list[dict[str, Any]]:
         ("deterministic_baseline", True, True, True, True, True, True),
         ("repair_planner", True, True, True, False, False, False),
         ("research", True, True, True, False, False, False),
+        ("pricing_dimension", True, True, True, False, False, False),
         ("pricing", True, True, True, False, False, False),
         ("architecture", True, True, True, False, False, False),
     ]
@@ -306,6 +308,7 @@ def _lane_purpose(lane: str) -> str:
         "repair_planner": "Generate deterministic next actions from existing package signals.",
         "research": "Future lane: propose cited research findings after evaluation gates exist.",
         "use_case_analyst": "Future lane: propose missing facts and scenario profile candidates.",
+        "pricing_dimension": "Future lane: propose service usage dimensions and pricing-driver questions.",
         "pricing": "Future lane: propose service usage dimensions and pricing-driver questions.",
         "narrative": "Future lane: propose narrative polish after validation.",
         "reviewer": "Future lane: add model-assisted critiques without removing deterministic findings.",

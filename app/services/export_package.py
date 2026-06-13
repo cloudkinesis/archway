@@ -43,6 +43,11 @@ from app.services.agentic.use_case_analyst import (
     build_use_case_analyst_trace,
     use_case_analyst_summary_markdown,
 )
+from app.services.agentic.pricing_dimension_agent import (
+    build_pricing_dimension_context,
+    build_pricing_dimension_trace,
+    pricing_dimension_summary_markdown,
+)
 from app.services.reviewer_mode import (
     build_reviewer_report,
     reviewer_summary_markdown,
@@ -467,6 +472,24 @@ class ExportPackageService:
         )
         included_artifacts.append(f"exports/{export_name}/raw/agent_use_case_analyst_trace.json")
         included_artifacts.append(f"exports/{export_name}/raw/agent_use_case_analyst_proposal.json")
+        pricing_dimension_trace = build_pricing_dimension_trace(
+            settings=settings,
+            context=build_pricing_dimension_context(
+                pricing=pricing,
+                architectures=architectures,
+                use_case_analyst_trace=use_case_analyst_trace,
+            ),
+        )
+        (raw_dir / "agent_pricing_dimension_trace.json").write_text(
+            pricing_dimension_trace.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        (raw_dir / "agent_pricing_dimension_proposal.json").write_text(
+            pricing_dimension_trace.proposal.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        included_artifacts.append(f"exports/{export_name}/raw/agent_pricing_dimension_trace.json")
+        included_artifacts.append(f"exports/{export_name}/raw/agent_pricing_dimension_proposal.json")
         research_trace = build_research_agent_trace(
             settings=settings,
             input_context=build_research_input_context(
@@ -537,6 +560,11 @@ class ExportPackageService:
                 encoding="utf-8",
             )
             included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-use-case-analysis.md")
+            (audit_dir / "agentic-pricing-dimensions.md").write_text(
+                pricing_dimension_summary_markdown(pricing_dimension_trace),
+                encoding="utf-8",
+            )
+            included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-pricing-dimensions.md")
             (audit_dir / "agentic-research-summary.md").write_text(
                 research_summary_markdown(research_trace),
                 encoding="utf-8",
