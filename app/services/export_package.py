@@ -58,6 +58,11 @@ from app.services.agentic.reviewer_agent import (
     build_reviewer_trace,
     reviewer_summary_markdown as agentic_reviewer_summary_markdown,
 )
+from app.services.agentic.diagram_planning_agent import (
+    build_diagram_planning_context,
+    build_diagram_planning_trace,
+    diagram_planning_summary_markdown,
+)
 from app.services.reviewer_mode import (
     build_reviewer_report,
     reviewer_summary_markdown,
@@ -558,6 +563,24 @@ class ExportPackageService:
         )
         included_artifacts.append(f"exports/{export_name}/raw/agent_reviewer_trace.json")
         included_artifacts.append(f"exports/{export_name}/raw/agent_reviewer_findings.json")
+        diagram_plan_trace = build_diagram_planning_trace(
+            settings=settings,
+            context=build_diagram_planning_context(
+                architectures=architectures,
+                diagrams=diagrams,
+                diagram_fidelity=_diagram_fidelity(architectures, diagrams),
+            ),
+        )
+        (raw_dir / "agent_diagram_plan_trace.json").write_text(
+            diagram_plan_trace.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        (raw_dir / "agent_diagram_plan_proposal.json").write_text(
+            diagram_plan_trace.proposal.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        included_artifacts.append(f"exports/{export_name}/raw/agent_diagram_plan_trace.json")
+        included_artifacts.append(f"exports/{export_name}/raw/agent_diagram_plan_proposal.json")
         evaluation_gate = evaluation_gate_payload()
         (raw_dir / "agent_evaluation_battery.json").write_text(
             json.dumps(evaluation_gate, indent=2, sort_keys=True, default=str),
@@ -627,6 +650,11 @@ class ExportPackageService:
                 encoding="utf-8",
             )
             included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-reviewer-findings.md")
+            (audit_dir / "agentic-diagram-plan.md").write_text(
+                diagram_planning_summary_markdown(diagram_plan_trace),
+                encoding="utf-8",
+            )
+            included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-diagram-plan.md")
 
         # Scenario simulations — only on explicit overrides or the default-set flag.
         scenario_manifest_summary = None

@@ -150,6 +150,15 @@ class ScenarioObservation(BaseModel):
     reviewer_target_artifact_coverage: bool = True
     reviewer_trace_hash_present: bool = True
     reviewer_usefulness_reviewed_by_human: bool = False
+    diagram_plan_proposed_view_labeling: bool = True
+    diagram_plan_unsupported_disclosure: bool = True
+    diagram_plan_no_rendered_claim_without_ledger: bool = True
+    diagram_plan_unknown_node_flow_rejected: bool = True
+    diagram_plan_duplicate_handling: bool = True
+    diagram_plan_no_client_surface: bool = True
+    diagram_plan_no_compiler_mutation: bool = True
+    diagram_plan_trace_hash_present: bool = True
+    diagram_plan_view_usefulness_reviewed_by_human: bool = False
 
 
 class EvaluationGateStatus(BaseModel):
@@ -273,6 +282,15 @@ def score_scenario(scenario: EvaluationScenario, observation: ScenarioObservatio
         _reviewer_target_metric(scenario, observation),
         _reviewer_trace_metric(scenario, observation),
         _reviewer_usefulness_human_metric(scenario, observation),
+        _diagram_plan_labeling_metric(scenario, observation),
+        _diagram_plan_unsupported_metric(scenario, observation),
+        _diagram_plan_rendered_claim_metric(scenario, observation),
+        _diagram_plan_unknown_ref_metric(scenario, observation),
+        _diagram_plan_duplicate_metric(scenario, observation),
+        _diagram_plan_client_surface_metric(scenario, observation),
+        _diagram_plan_compiler_mutation_metric(scenario, observation),
+        _diagram_plan_trace_metric(scenario, observation),
+        _diagram_plan_usefulness_human_metric(scenario, observation),
         _pricing_metric(scenario, observation),
         _reproducibility_metric(scenario, observation),
         _diagram_metric(scenario, observation),
@@ -776,6 +794,105 @@ def _reviewer_usefulness_human_metric(scenario: EvaluationScenario, observation:
         value="reviewed" if observation.reviewer_usefulness_reviewed_by_human else "not_auto_scored",
         passed=observation.reviewer_usefulness_reviewed_by_human,
         reason="Reviewer finding usefulness is human-reviewed; no automatic usefulness oracle is claimed." if observation.reviewer_usefulness_reviewed_by_human else "Reviewer finding usefulness requires human review and is not auto-scored.",
+    )
+
+
+def _diagram_plan_labeling_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.diagram_plan_proposed_view_labeling",
+        lane="diagram_planner",
+        score_type="auto",
+        value=observation.diagram_plan_proposed_view_labeling,
+        passed=observation.diagram_plan_proposed_view_labeling,
+        reason="Diagram-plan candidates carry view labels, purpose, and intended scope." if observation.diagram_plan_proposed_view_labeling else "Diagram-plan candidate lacked required view labeling.",
+    )
+
+
+def _diagram_plan_unsupported_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.diagram_plan_unsupported_disclosure",
+        lane="diagram_planner",
+        score_type="auto",
+        value=observation.diagram_plan_unsupported_disclosure,
+        passed=observation.diagram_plan_unsupported_disclosure,
+        reason="Unsupported diagram view requests are disclosed instead of faked." if observation.diagram_plan_unsupported_disclosure else "Unsupported diagram view request lacked disclosure.",
+    )
+
+
+def _diagram_plan_rendered_claim_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.diagram_plan_no_rendered_claim_without_ledger",
+        lane="diagram_planner",
+        score_type="auto",
+        value=observation.diagram_plan_no_rendered_claim_without_ledger,
+        passed=observation.diagram_plan_no_rendered_claim_without_ledger,
+        reason="Rendered claims require compiler/rendering ledger confirmation." if observation.diagram_plan_no_rendered_claim_without_ledger else "Diagram plan claimed rendering without compiler ledger support.",
+    )
+
+
+def _diagram_plan_unknown_ref_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.diagram_plan_unknown_node_flow_rejected",
+        lane="diagram_planner",
+        score_type="auto",
+        value=observation.diagram_plan_unknown_node_flow_rejected,
+        passed=observation.diagram_plan_unknown_node_flow_rejected,
+        reason="Unknown node/flow references are rejected." if observation.diagram_plan_unknown_node_flow_rejected else "Diagram plan accepted unknown node or flow references.",
+    )
+
+
+def _diagram_plan_duplicate_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.diagram_plan_duplicate_handling",
+        lane="diagram_planner",
+        score_type="auto",
+        value=observation.diagram_plan_duplicate_handling,
+        passed=observation.diagram_plan_duplicate_handling,
+        reason="Duplicate diagram candidates are ignored or labeled." if observation.diagram_plan_duplicate_handling else "Duplicate diagram candidates were not handled.",
+    )
+
+
+def _diagram_plan_client_surface_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.diagram_plan_client_surface",
+        lane="diagram_planner",
+        score_type="auto",
+        value=observation.diagram_plan_no_client_surface,
+        passed=observation.diagram_plan_no_client_surface,
+        reason="Diagram-planning output stays out of client_pack." if observation.diagram_plan_no_client_surface else "Diagram-planning output reached client_pack.",
+    )
+
+
+def _diagram_plan_compiler_mutation_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.diagram_plan_no_compiler_mutation",
+        lane="diagram_planner",
+        score_type="auto",
+        value=observation.diagram_plan_no_compiler_mutation,
+        passed=observation.diagram_plan_no_compiler_mutation,
+        reason="Diagram planner does not mutate ViewPlanner, FlowLedger, Layout IR, compiler, or rendered diagrams." if observation.diagram_plan_no_compiler_mutation else "Diagram planner mutated deterministic diagram authority.",
+    )
+
+
+def _diagram_plan_trace_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.diagram_plan_trace_reproducibility",
+        lane="diagram_planner",
+        score_type="auto",
+        value=observation.diagram_plan_trace_hash_present,
+        passed=observation.diagram_plan_trace_hash_present,
+        reason="Diagram-planning trace carries stable hashes." if observation.diagram_plan_trace_hash_present else "Diagram-planning trace is missing stable hashes.",
+    )
+
+
+def _diagram_plan_usefulness_human_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.diagram_plan_view_usefulness",
+        lane="diagram_planner",
+        score_type="human",
+        value="reviewed" if observation.diagram_plan_view_usefulness_reviewed_by_human else "not_auto_scored",
+        passed=observation.diagram_plan_view_usefulness_reviewed_by_human,
+        reason="Diagram view usefulness is human-reviewed; no automatic diagram-planning usefulness oracle is claimed." if observation.diagram_plan_view_usefulness_reviewed_by_human else "Diagram view usefulness requires human review and is not auto-scored.",
     )
 
 
