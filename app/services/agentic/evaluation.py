@@ -125,6 +125,16 @@ class ScenarioObservation(BaseModel):
     analyst_candidate_services_not_architecture: bool = True
     analyst_pricing_drivers_not_bound: bool = True
     analyst_domain_reviewed_by_human: bool = False
+    pricing_dimension_multi_service_coverage: bool = True
+    pricing_dimension_source_kind_correct: bool = True
+    pricing_dimension_missing_quantities_labeled: bool = True
+    pricing_dimension_scenario_assumptions_labeled: bool = True
+    pricing_dimension_ambiguities_labeled: bool = True
+    pricing_dimension_no_silent_generic_fallback: bool = True
+    pricing_dimension_trace_hash_present: bool = True
+    pricing_dimension_no_deterministic_overwrite: bool = True
+    pricing_dimension_no_readiness_promotion: bool = True
+    pricing_dimension_no_client_surface: bool = True
 
 
 class EvaluationGateStatus(BaseModel):
@@ -223,6 +233,16 @@ def score_scenario(scenario: EvaluationScenario, observation: ScenarioObservatio
         _analyst_candidate_service_metric(scenario, observation),
         _analyst_pricing_driver_metric(scenario, observation),
         _analyst_domain_human_metric(scenario, observation),
+        _pricing_dimension_coverage_metric(scenario, observation),
+        _pricing_dimension_source_kind_metric(scenario, observation),
+        _pricing_dimension_missing_quantity_metric(scenario, observation),
+        _pricing_dimension_scenario_assumption_metric(scenario, observation),
+        _pricing_dimension_ambiguity_metric(scenario, observation),
+        _pricing_dimension_no_fallback_metric(scenario, observation),
+        _pricing_dimension_trace_metric(scenario, observation),
+        _pricing_dimension_no_overwrite_metric(scenario, observation),
+        _pricing_dimension_no_readiness_metric(scenario, observation),
+        _pricing_dimension_client_surface_metric(scenario, observation),
         _pricing_metric(scenario, observation),
         _reproducibility_metric(scenario, observation),
         _diagram_metric(scenario, observation),
@@ -451,6 +471,116 @@ def _analyst_domain_human_metric(scenario: EvaluationScenario, observation: Scen
         value="reviewed" if observation.analyst_domain_reviewed_by_human else "not_auto_scored",
         passed=observation.analyst_domain_reviewed_by_human,
         reason="Use-case/domain appropriateness is human-reviewed; no automatic truth oracle is claimed." if observation.analyst_domain_reviewed_by_human else "Use-case/domain appropriateness requires human review and is not auto-scored.",
+    )
+
+
+def _pricing_dimension_coverage_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.pricing_dimension_multi_service_coverage",
+        lane="pricing_dimension",
+        score_type="auto",
+        value=observation.pricing_dimension_multi_service_coverage,
+        passed=observation.pricing_dimension_multi_service_coverage,
+        reason="Pricing-dimension lane covers multiple service patterns as candidate dimensions." if observation.pricing_dimension_multi_service_coverage else "Pricing-dimension lane lacks multi-service coverage.",
+    )
+
+
+def _pricing_dimension_source_kind_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.pricing_dimension_source_kind",
+        lane="pricing_dimension",
+        score_type="auto",
+        value=observation.pricing_dimension_source_kind_correct,
+        passed=observation.pricing_dimension_source_kind_correct,
+        reason="Pricing-dimension evidence/source requirements are labeled correctly." if observation.pricing_dimension_source_kind_correct else "Pricing-dimension evidence/source requirements are mislabeled.",
+    )
+
+
+def _pricing_dimension_missing_quantity_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.pricing_dimension_missing_quantity",
+        lane="pricing_dimension",
+        score_type="auto",
+        value=observation.pricing_dimension_missing_quantities_labeled,
+        passed=observation.pricing_dimension_missing_quantities_labeled,
+        reason="Missing customer quantities are labeled instead of priced silently." if observation.pricing_dimension_missing_quantities_labeled else "Missing quantities were not labeled.",
+    )
+
+
+def _pricing_dimension_scenario_assumption_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.pricing_dimension_scenario_assumptions",
+        lane="pricing_dimension",
+        score_type="auto",
+        value=observation.pricing_dimension_scenario_assumptions_labeled,
+        passed=observation.pricing_dimension_scenario_assumptions_labeled,
+        reason="Scenario assumptions are labeled as scenario assumptions." if observation.pricing_dimension_scenario_assumptions_labeled else "Scenario assumptions were not labeled.",
+    )
+
+
+def _pricing_dimension_ambiguity_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.pricing_dimension_ambiguity",
+        lane="pricing_dimension",
+        score_type="auto",
+        value=observation.pricing_dimension_ambiguities_labeled,
+        passed=observation.pricing_dimension_ambiguities_labeled,
+        reason="Ambiguous dimensions are labeled and not bound." if observation.pricing_dimension_ambiguities_labeled else "Ambiguous dimensions were not labeled.",
+    )
+
+
+def _pricing_dimension_no_fallback_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.pricing_dimension_no_silent_fallback",
+        lane="pricing_dimension",
+        score_type="auto",
+        value=observation.pricing_dimension_no_silent_generic_fallback,
+        passed=observation.pricing_dimension_no_silent_generic_fallback,
+        reason="Generic fallback is not treated as authoritative or bound." if observation.pricing_dimension_no_silent_generic_fallback else "Generic fallback was treated as authoritative pricing.",
+    )
+
+
+def _pricing_dimension_trace_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.pricing_dimension_trace_reproducibility",
+        lane="pricing_dimension",
+        score_type="auto",
+        value=observation.pricing_dimension_trace_hash_present,
+        passed=observation.pricing_dimension_trace_hash_present,
+        reason="Pricing-dimension trace carries stable hashes." if observation.pricing_dimension_trace_hash_present else "Pricing-dimension trace is missing stable hashes.",
+    )
+
+
+def _pricing_dimension_no_overwrite_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.pricing_dimension_no_deterministic_overwrite",
+        lane="pricing_dimension",
+        score_type="auto",
+        value=observation.pricing_dimension_no_deterministic_overwrite,
+        passed=observation.pricing_dimension_no_deterministic_overwrite,
+        reason="Pricing-dimension proposals cannot overwrite deterministic pricing." if observation.pricing_dimension_no_deterministic_overwrite else "Pricing-dimension proposal overwrote deterministic pricing.",
+    )
+
+
+def _pricing_dimension_no_readiness_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.pricing_dimension_no_readiness_promotion",
+        lane="pricing_dimension",
+        score_type="auto",
+        value=observation.pricing_dimension_no_readiness_promotion,
+        passed=observation.pricing_dimension_no_readiness_promotion,
+        reason="Pricing-dimension output cannot promote readiness." if observation.pricing_dimension_no_readiness_promotion else "Pricing-dimension output promoted readiness.",
+    )
+
+
+def _pricing_dimension_client_surface_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.pricing_dimension_client_surface",
+        lane="pricing_dimension",
+        score_type="auto",
+        value=observation.pricing_dimension_no_client_surface,
+        passed=observation.pricing_dimension_no_client_surface,
+        reason="Pricing-dimension output stays out of client_pack." if observation.pricing_dimension_no_client_surface else "Pricing-dimension output reached client_pack.",
     )
 
 

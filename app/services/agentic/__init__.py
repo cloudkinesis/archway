@@ -32,6 +32,14 @@ from app.services.agentic.research_agent import (
     ResearchQuestion,
     ResearchSynthesis,
 )
+from app.services.agentic.pricing_dimension_agent import (
+    PricingDimensionProposal,
+    PricingDimensionTrace,
+    PricingDriverCandidate,
+    PricingScenarioProfile,
+    PricingServiceCandidate,
+    PricingUsageDimensionCandidate,
+)
 from app.services.agentic.use_case_analyst import (
     AnalystCandidate,
     AnalystFinding,
@@ -61,6 +69,12 @@ __all__ = [
     "ResearchQueryPlan",
     "ResearchQuestion",
     "ResearchSynthesis",
+    "PricingDimensionProposal",
+    "PricingDimensionTrace",
+    "PricingDriverCandidate",
+    "PricingScenarioProfile",
+    "PricingServiceCandidate",
+    "PricingUsageDimensionCandidate",
     "AnalystCandidate",
     "AnalystFinding",
     "UseCaseAnalystProposal",
