@@ -160,6 +160,32 @@ class Settings(BaseModel):
     enable_default_scenario_simulations: bool = Field(
         default_factory=lambda: os.getenv("ARCHWAY_ENABLE_DEFAULT_SCENARIO_SIMULATIONS", "false") == "true"
     )
+    # D21 agentic proposal lanes. Default OFF. Phase 0 may emit deterministic
+    # raw/audit traces; live model lanes require later evaluation gates.
+    enable_agentic_repair_planner: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_AGENTIC_REPAIR_PLANNER", "false") == "true"
+    )
+    enable_agentic_research: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_AGENTIC_RESEARCH", "false") == "true"
+    )
+    enable_agentic_use_case_analyst: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_AGENTIC_USE_CASE_ANALYST", "false") == "true"
+    )
+    enable_agentic_pricing: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_AGENTIC_PRICING", "false") == "true"
+    )
+    enable_agentic_narrative: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_AGENTIC_NARRATIVE", "false") == "true"
+    )
+    enable_agentic_reviewer: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_AGENTIC_REVIEWER", "false") == "true"
+    )
+    enable_agentic_diagram_planner: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_AGENTIC_DIAGRAM_PLANNER", "false") == "true"
+    )
+    enable_agentic_architecture: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_AGENTIC_ARCHITECTURE", "false") == "true"
+    )
 
     @property
     def sessions_dir(self) -> Path:

@@ -313,3 +313,20 @@ Implemented by `feature/reviewer-mode-uncertainty-scenario-simulation` @ `f5e119
 - Global pricing/readiness must NOT be promoted by simulation (reinforces D2/D3/D10).
 - Reviewer/scenario artifacts are manifest-hashed and verifier-covered.
 - This is a NEXT-WAVE review/workbench layer, not part of the frozen RC2 v2 candidate.
+
+## D21. Agentic Proposal Lanes operate under deterministic authority
+Authorized for Phase 0 implementation by `docs/rc2/D21_AGENTIC_PROPOSAL_LANES.md`.
+- D21 is an agentic control-plane design, not a transfer of truth authority to a
+  model. Deterministic Archway remains the baseline and must run first.
+- D21 Phase 0 may add contracts, default-off feature flags, deterministic repair
+  planning, and raw/audit trace artifacts.
+- `model_proposed` is the only new provenance class. It is lowest-trust, may be
+  recorded in raw/audit traces, and must never unlock readiness on its own.
+- Agentic lanes may propose, but validators must accept, downgrade, mark assumed,
+  or reject before any proposal can affect a governed surface.
+- No D21 Phase 0 output may change pricing math, readiness promotion, compiler
+  output, governance enforcement, manifest/verifier semantics, or client-facing
+  artifacts.
+- Live research, use-case analyst, pricing, narrative, reviewer, diagram-planning,
+  and architecture-candidate agents remain future lanes and default-off until their
+  evaluation gates exist.
