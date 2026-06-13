@@ -38,6 +38,11 @@ from app.services.agentic.research_agent import (
     build_research_input_context,
     research_summary_markdown,
 )
+from app.services.agentic.use_case_analyst import (
+    build_use_case_analyst_context,
+    build_use_case_analyst_trace,
+    use_case_analyst_summary_markdown,
+)
 from app.services.reviewer_mode import (
     build_reviewer_report,
     reviewer_summary_markdown,
@@ -440,6 +445,28 @@ class ExportPackageService:
                 encoding="utf-8",
             )
             included_artifacts.append(f"exports/{export_name}/raw/{name}.json")
+        use_case_analyst_trace = build_use_case_analyst_trace(
+            settings=settings,
+            context=build_use_case_analyst_context(
+                session_input=getattr(session, "input", None) or getattr(session, "raw_use_case", None),
+                brief=brief,
+                report=report,
+                pricing=pricing,
+                architectures=architectures,
+                diagrams=diagrams,
+                reviewer_findings=reviewer_report.findings,
+            ),
+        )
+        (raw_dir / "agent_use_case_analyst_trace.json").write_text(
+            use_case_analyst_trace.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        (raw_dir / "agent_use_case_analyst_proposal.json").write_text(
+            use_case_analyst_trace.proposal.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        included_artifacts.append(f"exports/{export_name}/raw/agent_use_case_analyst_trace.json")
+        included_artifacts.append(f"exports/{export_name}/raw/agent_use_case_analyst_proposal.json")
         research_trace = build_research_agent_trace(
             settings=settings,
             input_context=build_research_input_context(
@@ -505,6 +532,11 @@ class ExportPackageService:
                 encoding="utf-8",
             )
             included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-evaluation-summary.md")
+            (audit_dir / "agentic-use-case-analysis.md").write_text(
+                use_case_analyst_summary_markdown(use_case_analyst_trace),
+                encoding="utf-8",
+            )
+            included_artifacts.append(f"exports/{export_name}/audit_pack/agentic-use-case-analysis.md")
             (audit_dir / "agentic-research-summary.md").write_text(
                 research_summary_markdown(research_trace),
                 encoding="utf-8",
