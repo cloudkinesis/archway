@@ -117,6 +117,14 @@ class ScenarioObservation(BaseModel):
     research_unsupported_claims_labeled: bool = True
     research_trace_hash_present: bool = True
     research_synthesis_reviewed_by_human: bool = False
+    analyst_domain_workload_labeled: bool = True
+    analyst_missing_facts_detected: bool = True
+    analyst_conflicts_recorded: bool = True
+    analyst_deterministic_facts_not_overwritten: bool = True
+    analyst_trace_hash_present: bool = True
+    analyst_candidate_services_not_architecture: bool = True
+    analyst_pricing_drivers_not_bound: bool = True
+    analyst_domain_reviewed_by_human: bool = False
 
 
 class EvaluationGateStatus(BaseModel):
@@ -207,6 +215,14 @@ def score_scenario(scenario: EvaluationScenario, observation: ScenarioObservatio
         _research_unsupported_labeling_metric(scenario, observation),
         _research_trace_reproducibility_metric(scenario, observation),
         _research_synthesis_human_metric(scenario, observation),
+        _analyst_domain_workload_metric(scenario, observation),
+        _analyst_missing_facts_metric(scenario, observation),
+        _analyst_conflict_metric(scenario, observation),
+        _analyst_no_overwrite_metric(scenario, observation),
+        _analyst_trace_reproducibility_metric(scenario, observation),
+        _analyst_candidate_service_metric(scenario, observation),
+        _analyst_pricing_driver_metric(scenario, observation),
+        _analyst_domain_human_metric(scenario, observation),
         _pricing_metric(scenario, observation),
         _reproducibility_metric(scenario, observation),
         _diagram_metric(scenario, observation),
@@ -347,6 +363,94 @@ def _research_synthesis_human_metric(scenario: EvaluationScenario, observation: 
         value="reviewed" if observation.research_synthesis_reviewed_by_human else "not_auto_scored",
         passed=observation.research_synthesis_reviewed_by_human,
         reason="Research synthesis quality is human-reviewed; no automatic insight-quality oracle is claimed." if observation.research_synthesis_reviewed_by_human else "Research synthesis quality requires human review and is not auto-scored.",
+    )
+
+
+def _analyst_domain_workload_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.analyst_domain_workload_labeling",
+        lane="use_case_analyst",
+        score_type="auto",
+        value=observation.analyst_domain_workload_labeled,
+        passed=observation.analyst_domain_workload_labeled,
+        reason="Use-case analyst labels domain/workload candidates with confidence and provenance." if observation.analyst_domain_workload_labeled else "Use-case analyst candidates are missing domain/workload labels or provenance.",
+    )
+
+
+def _analyst_missing_facts_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.analyst_missing_facts",
+        lane="use_case_analyst",
+        score_type="auto",
+        value=observation.analyst_missing_facts_detected,
+        passed=observation.analyst_missing_facts_detected,
+        reason="Missing use-case facts are detected and converted into questions." if observation.analyst_missing_facts_detected else "Missing use-case facts were not surfaced.",
+    )
+
+
+def _analyst_conflict_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.analyst_conflict_recording",
+        lane="use_case_analyst",
+        score_type="auto",
+        value=observation.analyst_conflicts_recorded,
+        passed=observation.analyst_conflicts_recorded,
+        reason="Analyst conflicts with deterministic facts are recorded explicitly." if observation.analyst_conflicts_recorded else "Analyst conflicts with deterministic facts were not recorded.",
+    )
+
+
+def _analyst_no_overwrite_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.analyst_no_deterministic_overwrite",
+        lane="use_case_analyst",
+        score_type="auto",
+        value=observation.analyst_deterministic_facts_not_overwritten,
+        passed=observation.analyst_deterministic_facts_not_overwritten,
+        reason="Analyst proposals cannot overwrite deterministic facts." if observation.analyst_deterministic_facts_not_overwritten else "Analyst proposal overwrote deterministic facts.",
+    )
+
+
+def _analyst_trace_reproducibility_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.analyst_trace_reproducibility",
+        lane="use_case_analyst",
+        score_type="auto",
+        value=observation.analyst_trace_hash_present,
+        passed=observation.analyst_trace_hash_present,
+        reason="Use-case analyst trace carries stable hashes." if observation.analyst_trace_hash_present else "Use-case analyst trace is missing stable hashes.",
+    )
+
+
+def _analyst_candidate_service_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.analyst_candidate_services_not_architecture",
+        lane="use_case_analyst",
+        score_type="auto",
+        value=observation.analyst_candidate_services_not_architecture,
+        passed=observation.analyst_candidate_services_not_architecture,
+        reason="Candidate services remain proposals and are not injected into architecture." if observation.analyst_candidate_services_not_architecture else "Candidate services altered architecture output.",
+    )
+
+
+def _analyst_pricing_driver_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.analyst_pricing_drivers_not_bound",
+        lane="use_case_analyst",
+        score_type="auto",
+        value=observation.analyst_pricing_drivers_not_bound,
+        passed=observation.analyst_pricing_drivers_not_bound,
+        reason="Candidate pricing drivers remain proposals and are not bound into pricing math." if observation.analyst_pricing_drivers_not_bound else "Candidate pricing drivers affected pricing math.",
+    )
+
+
+def _analyst_domain_human_metric(scenario: EvaluationScenario, observation: ScenarioObservation) -> EvaluationMetric:
+    return EvaluationMetric(
+        metric_id=f"{scenario.scenario_id}.analyst_domain_appropriateness",
+        lane="use_case_analyst",
+        score_type="human",
+        value="reviewed" if observation.analyst_domain_reviewed_by_human else "not_auto_scored",
+        passed=observation.analyst_domain_reviewed_by_human,
+        reason="Use-case/domain appropriateness is human-reviewed; no automatic truth oracle is claimed." if observation.analyst_domain_reviewed_by_human else "Use-case/domain appropriateness requires human review and is not auto-scored.",
     )
 
 

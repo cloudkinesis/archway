@@ -32,6 +32,12 @@ from app.services.agentic.research_agent import (
     ResearchQuestion,
     ResearchSynthesis,
 )
+from app.services.agentic.use_case_analyst import (
+    AnalystCandidate,
+    AnalystFinding,
+    UseCaseAnalystProposal,
+    UseCaseAnalystTrace,
+)
 
 __all__ = [
     "AgentDecision",
@@ -55,4 +61,8 @@ __all__ = [
     "ResearchQueryPlan",
     "ResearchQuestion",
     "ResearchSynthesis",
+    "AnalystCandidate",
+    "AnalystFinding",
+    "UseCaseAnalystProposal",
+    "UseCaseAnalystTrace",
 ]
