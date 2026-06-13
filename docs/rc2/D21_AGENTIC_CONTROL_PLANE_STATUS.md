@@ -1,6 +1,6 @@
 # D21 Agentic Control Plane Status
 
-Status: architecture-candidate audit-only lane added after diagram-planning audit-only lane.
+Status: all D21 audit-only lanes implemented; demo-readiness freeze in progress.
 
 Baseline master: `9ccf6ff3a90825ab4d00470e64a103f43e7a7dd8`
 
@@ -22,6 +22,7 @@ still owns truth.
 | Control-plane consolidation checkpoint | `archway-v2-d21-control-plane` | `90379059468612fe0088303eefb095c9ecb9cdd7` |
 | Narrative and reviewer audit-only lanes | `archway-v2-d21-narrative-reviewer-audit` | `5791b1a60a33e4aaf4aee4a882b3457c8efa588e` |
 | Diagram-planning audit-only lane | `archway-v2-d21-diagram-planning-audit` | `9ccf6ff3a90825ab4d00470e64a103f43e7a7dd8` |
+| Architecture-candidate audit-only lane | `archway-v2-d21-architecture-candidate-audit` | `9001b20581a39a950eef5b6bb8cd2c2c3e2fd57b` |
 
 ## Current Lane Status
 
@@ -122,8 +123,8 @@ client-pack authority.
 
 ## Next Recommended Branch
 
-`feature/d21-agentic-demo-readiness-freeze`
+No further agent-lane branch is recommended before demo.
 
-That branch should freeze the current agentic substrate for demo readiness:
-final status, validation, tags, smoke report, and demo checklist. It should not
-add another agent lane.
+The current freeze branch should produce final status, validation, tags, smoke
+report, and demo checklist. It should not add another agent lane. After merge,
+create `archway-v2-d21-agentic-demo-readiness` and stop coding for demo prep.
