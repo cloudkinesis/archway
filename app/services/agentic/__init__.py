@@ -55,6 +55,11 @@ from app.services.agentic.reviewer_agent import (
     ReviewerFindingProposal,
     ReviewerTrace,
 )
+from app.services.agentic.diagram_planning_agent import (
+    DiagramPlanningTrace,
+    DiagramViewCandidate,
+    DiagramViewPlanProposal,
+)
 
 __all__ = [
     "AgentDecision",
@@ -93,4 +98,7 @@ __all__ = [
     "NarrativeTrace",
     "ReviewerFindingProposal",
     "ReviewerTrace",
+    "DiagramPlanningTrace",
+    "DiagramViewCandidate",
+    "DiagramViewPlanProposal",
 ]

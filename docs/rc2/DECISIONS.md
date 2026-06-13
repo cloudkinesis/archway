@@ -341,11 +341,14 @@ Authorized for Phase 0 implementation by `docs/rc2/D21_AGENTIC_PROPOSAL_LANES.md
   - use-case analyst audit-only lane,
   - pricing-dimension audit-only lane,
   - narrative audit-only lane,
-  - reviewer/red-team audit-only lane.
+  - reviewer/red-team audit-only lane,
+  - diagram-planning audit-only lane.
 - These milestones create an agentic proposal substrate only. They do NOT enable
   client-facing agent output, live default-path model/network calls, readiness
   promotion, pricing math changes, headline pricing changes, architecture/compiler
   truth changes, diagram rendering changes, governance changes, or verifier changes.
-- Diagram-planning/architecture-candidate agent lanes remain future work and must
-  start audit-first. Narrative/reviewer lanes are audit-only and do not rewrite
-  client surfaces or remove/downgrade deterministic reviewer findings.
+- Architecture-candidate agent lane remains future work and must start
+  audit-first. Narrative/reviewer lanes are audit-only and do not rewrite client
+  surfaces or remove/downgrade deterministic reviewer findings. Diagram-planning
+  lane is audit-only and does not alter ViewPlanner, FlowLedger, Layout IR,
+  compiler output, rendered diagrams, or client-pack diagram claims.

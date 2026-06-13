@@ -314,7 +314,7 @@ def _lane_purpose(lane: str) -> str:
         "pricing": "Future lane: propose service usage dimensions and pricing-driver questions.",
         "narrative": "Audit-only lane: propose evidence-bound narrative polish after validation.",
         "reviewer": "Audit-only lane: add reviewer critiques without removing deterministic findings.",
-        "diagram_planner": "Future lane: propose semantic view plans.",
+        "diagram_planner": "Audit-only lane: propose semantic view plans without changing compiler truth.",
         "architecture": "Future lane: propose architecture candidates under human/pattern authority.",
     }.get(lane, "D21 lane")
 
