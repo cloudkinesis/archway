@@ -565,7 +565,7 @@ def pattern_components(profile: UseCaseProfile, production: bool) -> list[Archit
             id="edge_buffer",
             name="Edge Buffering Gateway",
             service="iot_greengrass",
-            scope="edge_or_regional_control",
+            scope="regional_managed_data",
             logical_group="Sources and edge",
             metadata={"role": "edge_buffering", "connectivity": "intermittent_store_and_forward"},
         ))

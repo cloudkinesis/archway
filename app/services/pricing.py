@@ -1139,6 +1139,17 @@ def _apply_live_demo_pricing_hardening(pricing: PricingAnalysis, profile: UseCas
                 "Confirm exact AWS SKU filters, rate tier bindings, and measured production traffic before procurement."
             ],
         }
+    sanity_findings = list(pricing.metadata.get("pricing_sanity_findings") or [])
+    if provenance and pricing.metadata.get("scale_applied") is True and pricing.metadata.get("status") == "directional_valid_with_extracted_scale":
+        for finding in sanity_findings:
+            if finding.get("code") == "pricing.nonzero_total_without_pricing_ledger":
+                finding["severity"] = "warning"
+                finding["description"] = (
+                    "A non-zero directional estimate exists without a source-truth pricing ledger. "
+                    "Confirmed workload drivers are recorded, but headline and procurement pricing remain disabled."
+                )
+                finding["customer_readiness_impact"] = "cap_to_directional"
+                finding["repair_strategy"] = "Keep estimate directional, non-headline, and procurement-blocked until a workload-specific pricing ledger is produced."
     if closure and provenance:
         confirmed = list(closure.get("confirmed_drivers") or [])
         confirmed.extend(f"{item['driver_key']}={_display_driver_value(item['value'])}" for item in provenance)
@@ -1151,6 +1162,7 @@ def _apply_live_demo_pricing_hardening(pricing: PricingAnalysis, profile: UseCas
         **pricing.metadata,
         "pricing_driver_provenance": provenance,
         "pricing_hardening_findings": findings,
+        "pricing_sanity_findings": sanity_findings,
         "pricing_can_be_displayed_as_headline": bool(closure.get("headline_pricing_allowed")) if closure else pricing.metadata.get("pricing_can_be_displayed_as_headline", False),
         **({"pricing_driver_closure": closure} if closure else {}),
     }
