@@ -82,6 +82,7 @@ class DeepUseCaseUnderstandingService:
         )
         if result.validated and isinstance(result.parsed, DeepUseCaseUnderstanding):
             parsed = result.parsed
+            _merge_deterministic_metrics(parsed, deterministic)
             parsed.enhancement_status = f"{result.provider}_validated"
             return parsed
         deterministic.concerns.extend(result.warnings)
@@ -154,6 +155,15 @@ def deterministic_understanding(raw_use_case: str, profile: UseCaseProfile | Non
         critical_unknowns=list((metrics.assumptions or [])[:5]),
         confidence=profile.confidence if profile.confidence in {"low", "medium", "high"} else "medium",
     )
+
+
+def _merge_deterministic_metrics(parsed: DeepUseCaseUnderstanding, deterministic: DeepUseCaseUnderstanding) -> None:
+    """Preserve deterministic numeric facts when a live model omits them."""
+    existing = {metric.name for metric in parsed.extracted_metrics}
+    for metric in deterministic.extracted_metrics:
+        if metric.name not in existing:
+            parsed.extracted_metrics.append(metric)
+            existing.add(metric.name)
 
 
 def _action_type(action: str) -> str:

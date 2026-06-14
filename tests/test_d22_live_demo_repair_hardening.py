@@ -24,6 +24,7 @@ from app.services.diagnostic_diagrams import diagnostic_diagram_gallery
 from app.services.llm.base import LLMMessage, LLMResult, LLMTaskType
 from app.services.pricing import PricingDrivers, PricingEngine, _apply_live_demo_pricing_hardening, derive_pricing_drivers
 from app.services.synthesis import SynthesisEngine
+from app.services.understanding.deep_use_case_understanding import DeepUseCaseUnderstanding, DeepUseCaseUnderstandingService, UnderstandingMetric
 from app.services.use_case_profile import profile_from_metadata, profile_use_case
 from app.domain.quality_findings import finding
 
@@ -81,6 +82,40 @@ async def test_enhance_brief_preserves_interview_progress_for_live_ui_flow():
     assert answered_after == answered_before == [first_question.id]
     assert next_question is not None
     assert next_question.id != first_question.id
+
+
+@pytest.mark.asyncio
+async def test_live_understanding_preserves_deterministic_derived_metrics(monkeypatch):
+    async def _complete(self, task, messages, response_schema=None, **kwargs):  # noqa: ARG001
+        parsed = DeepUseCaseUnderstanding(
+            industry="aquaculture",
+            domain="aquaculture",
+            workload_families=["industrial_iot_streaming_ml"],
+            extracted_metrics=[
+                UnderstandingMetric(name="underwater_cameras", value=24, unit="count", source_text="24 underwater cameras"),
+                UnderstandingMetric(name="fish_cages", value=6, unit="count", source_text="6 sea cages"),
+                UnderstandingMetric(name="staff_users", value=40, unit="count", source_text="40 staff users"),
+            ],
+        )
+        return LLMResult(
+            provider="bedrock",
+            model_id="us.amazon.nova-pro-v1:0",
+            text=parsed.model_dump_json(),
+            parsed=parsed,
+            validated=True,
+            duration_ms=10,
+        )
+
+    monkeypatch.setattr("app.services.understanding.deep_use_case_understanding.ModelRouter.complete", _complete)
+
+    understanding = await DeepUseCaseUnderstandingService().build(AQUACULTURE_USE_CASE, session_id="sess_understanding_merge")
+
+    metrics = {metric.name: metric for metric in understanding.extracted_metrics}
+    assert metrics["underwater_cameras"].value == 24
+    assert metrics["fish_cages"].value == 6
+    assert metrics["staff_users"].value == 40
+    assert metrics["total_monitored_assets"].value == 70
+    assert metrics["total_monitored_assets"].derived is True
 
 
 def test_wildfire_pricing_binds_towers_and_refresh_cadence_not_placeholder():
