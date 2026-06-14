@@ -131,11 +131,34 @@ class ArchitectureRevisionService:
                     )
                 )
             excluded = set(spec.metadata.get("excluded_families") or [])
+            text_blob = " ".join([
+                spec.title.lower(),
+                spec.summary.lower(),
+                spec.scaling_strategy.lower(),
+                spec.resilience_strategy.lower(),
+                spec.cost_optimization_strategy.lower(),
+                " ".join(service.service.lower() for service in spec.selected_services),
+                " ".join(service.purpose.lower() for service in spec.selected_services),
+                " ".join(service.rationale.lower() for service in spec.selected_services),
+                " ".join(component.name.lower() for component in spec.components),
+                " ".join(component.service.lower() for component in spec.components),
+                " ".join(str(flow.metadata.get("classification", "")).lower() for flow in spec.flows),
+            ])
             if "rag_assistant" in excluded:
-                names = " ".join(component.name.lower() for component in spec.components)
-                classifications = " ".join(str(flow.metadata.get("classification", "")).lower() for flow in spec.flows)
-                if "knowledge retrieval" in names or "rag_" in classifications:
+                if any(term in text_blob for term in ("knowledge retrieval", "rag_", "rag assistant", "embedding", "vector search")):
                     issues.append(ArchitectureValidationIssue(severity="critical", code="excluded_workload_family_present", message="RAG assistant components appeared even though the extracted workload excluded that family.", mode=spec.mode))
+            if "document_intelligence" in excluded:
+                if any(term in text_blob for term in ("document", "contract", "ocr", "textract", "pdf ingestion", "extraction workflow")):
+                    issues.append(ArchitectureValidationIssue(severity="critical", code="excluded_workload_family_present", message="Document-intelligence components appeared even though the extracted workload excluded that family.", mode=spec.mode))
+            if "field_service_automation" in excluded:
+                if any(term in text_blob for term in ("field service", "technician", "crew dispatch", "depot", "work order", "workforce", "spare parts")):
+                    issues.append(ArchitectureValidationIssue(severity="critical", code="excluded_workload_family_present", message="Field-service/depot automation components appeared even though the extracted workload excluded that family.", mode=spec.mode))
+            requirement_coverage = spec.metadata.get("requirement_coverage") or {}
+            for requirement in requirement_coverage.get("requirements") or []:
+                if not isinstance(requirement, dict):
+                    continue
+                if requirement.get("status") == "unmet":
+                    issues.append(ArchitectureValidationIssue(severity="important", code="requirement_not_covered", message=str(requirement.get("message") or "A hard requirement is not covered by the active architecture."), mode=spec.mode))
         return issues
 
     def _append(self, session_id: str, specs: list[ArchitectureSpec], reason: str) -> ArchitectureRevision:

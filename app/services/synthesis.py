@@ -318,11 +318,23 @@ def _assumptions_for_profile(profile) -> list[Assumption]:
 
 
 def _questions_for_profile(profile) -> list[OpenQuestion]:
-    planner_questions = _planner_questions(profile)
+    planner_questions = [] if profile.domain in {"aquaculture", "wildfire_public_safety"} else _planner_questions(profile)
     if planner_questions:
         return planner_questions[:6]
     questions = []
-    if _is_media_profile(profile):
+    if profile.domain == "aquaculture":
+        questions.extend([
+            OpenQuestion(text="How many cages, underwater cameras, sensor streams, and shore/edge sites should Archway model?", impact="pricing"),
+            OpenQuestion(text="What telemetry cadence, video frame/sample rate, and alert latency should be assumed for fish health and water-quality detection?", impact="performance"),
+            OpenQuestion(text="How long should raw video, telemetry, features, and scored events be retained?", impact="pricing"),
+        ])
+    elif profile.domain == "wildfire_public_safety":
+        questions.extend([
+            OpenQuestion(text="How many camera towers, satellite imagery windows, weather feeds, and alert recipients should Archway model?", impact="pricing"),
+            OpenQuestion(text="What smoke/plume detection latency, human approval rule, and public-alert escalation path should be assumed?", impact="security"),
+            OpenQuestion(text="Which sites have intermittent connectivity and need edge buffering or store-and-forward behavior?", impact="architecture"),
+        ])
+    elif _is_media_profile(profile):
         questions.extend([
             OpenQuestion(text="What are expected viewer-hours, peak concurrent viewers, and event hours per month?", impact="pricing"),
             OpenQuestion(text="What bitrate ladder, regional traffic mix, CDN cache-hit ratio, and price class should be assumed?", impact="pricing"),
@@ -457,7 +469,7 @@ def _readiness_assumptions(profile) -> list[Assumption]:
 
 
 def _synthesis_questions(profile, assumptions: list[Assumption]) -> list[SynthesisQuestion]:
-    planner_questions = _planner_questions(profile)
+    planner_questions = [] if profile.domain in {"aquaculture", "wildfire_public_safety"} else _planner_questions(profile)
     if planner_questions:
         return [
             SynthesisQuestion(
@@ -471,7 +483,19 @@ def _synthesis_questions(profile, assumptions: list[Assumption]) -> list[Synthes
             for index, item in enumerate(planner_questions[:5])
         ]
     prompts = []
-    if profile.domain == "healthcare":
+    if profile.domain == "aquaculture":
+        prompts.extend([
+            ("aquaculture-assets", "How many sea cages, underwater cameras, sensor streams, and edge/shore locations should I model?", "These are the primary monitored assets and drive IoT ingestion, streaming, storage, model inference, and alerting cost.", ["Known asset inventory", "Approximate farm scale", "Pilot subset only", "Let Archway assume"], assumptions[0]),
+            ("aquaculture-cadence", "What telemetry cadence, video sampling rate, and alert latency should I assume?", "Fish health detection and oxygen/water-quality response need a clear hot-path latency and retention boundary.", ["Seconds-level telemetry", "Minute-level telemetry", "Video sampled for inference", "Let Archway assume"], assumptions[0]),
+            ("aquaculture-retention", "How long should raw video, telemetry, features, and scored events be retained?", "Retention separates operational monitoring cost from analytics/model-improvement storage cost.", ["Short raw retention", "Long telemetry retention", "Separate raw/features/scored events", "Let Archway assume"], assumptions[0]),
+        ])
+    elif profile.domain == "wildfire_public_safety":
+        prompts.extend([
+            ("wildfire-assets", "How many camera towers, satellite imagery windows, weather feeds, and public alert recipients should I model?", "These quantities drive ingestion, imagery processing, notification fan-out, storage, and operational cost.", ["Known tower/feed counts", "Known alert population", "Pilot geography only", "Let Archway assume"], assumptions[0]),
+            ("wildfire-detection-latency", "What smoke/plume detection latency, human approval rule, and public alert escalation path should I assume?", "Public safety decisions require a visible boundary between automated detection, operator review, and citizen notification.", ["Human approval required", "Low-risk internal alerts", "Public alerts after approval", "Let Archway assume"], assumptions[-1]),
+            ("wildfire-connectivity", "Which towers or remote sites have intermittent connectivity and need edge buffering?", "Disconnected field sites change the architecture toward local buffering, edge inference, and store-and-forward recovery.", ["Known unreliable sites", "Assume intermittent remote connectivity", "Cloud-connected only", "Let Archway assume"], assumptions[0]),
+        ])
+    elif profile.domain == "healthcare":
         prompts.extend([
             ("healthcare-decision-boundary", "Should Archway model this as recommendation-only, approval-required schedule changes, or automated OR reassignment?", "This sets the safety and governance boundary for patient/surgical operations and external system writes.", ["Recommendation-only", "Charge nurse approval required", "Policy-approved automated changes", "Different by site"], assumptions[-1]),
             ("healthcare-source-feeds", "Which OR source feeds are authoritative, and how fresh are they?", "Schedule, patient check-in, anesthesia readiness, staffing, sterile processing, room turnover, and occupancy feeds drive architecture, latency, and pricing.", ["Epic + OR command center", "Multiple hospital systems", "Near-real-time event feeds", "Batch updates are acceptable"], assumptions[0]),
@@ -534,8 +558,27 @@ def _planner_questions(profile) -> list[OpenQuestion]:
         text = str(item.get("question") or "").strip()
         if not text:
             continue
+        if not _question_allowed_for_profile(profile, text):
+            continue
         questions.append(OpenQuestion(text=text, impact=_planner_impact(item)))
     return questions
+
+
+def _question_allowed_for_profile(profile, text: str) -> bool:
+    lower = text.lower()
+    excluded = set(getattr(profile, "excluded_families", []) or []) | set(getattr(profile, "excluded_patterns", []) or [])
+    blocked_terms: list[str] = []
+    if {"rag_assistant", "document_intelligence"} & excluded:
+        blocked_terms.extend([
+            "contract", "contracts", "document", "documents", "pdf", "ocr", "textract",
+            "rag", "embedding", "embeddings", "vector", "knowledge base", "retrieval",
+        ])
+    if "field_service_automation" in excluded:
+        blocked_terms.extend([
+            "field service", "technician", "crew", "depot", "dispatch", "workforce",
+            "inventory", "truck", "work order", "spare parts",
+        ])
+    return not any(term in lower for term in blocked_terms)
 
 
 def _planner_impact(item: dict) -> str:

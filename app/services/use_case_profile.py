@@ -125,6 +125,8 @@ def profile_from_metadata(metadata: dict | None, raw_use_case: str) -> UseCasePr
 
 def refine_profile_with_context(profile: UseCaseProfile, context_text: str) -> UseCaseProfile:
     lower = context_text.lower()
+    profile = _refine_aquaculture_profile(profile, lower)
+    profile = _refine_wildfire_profile(profile, lower)
     if not _is_healthcare_operations_scheduling(lower):
         return profile
     healthcare_families = [
@@ -179,8 +181,78 @@ def refine_profile_with_context(profile: UseCaseProfile, context_text: str) -> U
     return profile
 
 
+def _refine_aquaculture_profile(profile: UseCaseProfile, lower: str) -> UseCaseProfile:
+    if not any(term in lower for term in ("aquaculture", "fish farm", "fish farms", "sea cage", "sea cages", "dissolved oxygen", "fish behavior")):
+        return profile
+    required = [
+        "industrial_iot_streaming_ml",
+        "real_time_anomaly_detection",
+        "computer_vision_quality_inspection",
+        "data_platform_analytics",
+    ]
+    blocked = {"rag_assistant", "document_intelligence", "field_service_automation"}
+    retained = [family for family in profile.workload_families if family not in blocked and family not in required]
+    profile.domain = "aquaculture"
+    profile.workload_families = list(dict.fromkeys(required + retained))[:5]
+    profile.excluded_families = list(dict.fromkeys(profile.excluded_families + sorted(blocked)))
+    profile.excluded_patterns = list(dict.fromkeys(profile.excluded_patterns + sorted(blocked) + ["contract_review", "ocr_document_pipeline"]))
+    profile.capabilities = list(dict.fromkeys(profile.capabilities + [
+        "real_time_ingestion",
+        "time_series_analytics",
+        "computer_vision",
+        "video_stream_processing",
+        "predictive_ml",
+        "anomaly_detection",
+        "alerting_notification",
+        "edge_and_cloud",
+    ]))
+    profile.entities = list(dict.fromkeys(profile.entities + ["fish_cages", "underwater_cameras", "water_quality_sensors", "farm_staff"]))
+    profile.signals = list(dict.fromkeys(profile.signals + ["underwater_video", "dissolved_oxygen", "feed_waste", "weather", "wave_conditions", "fish_behavior"]))
+    profile.actions = list(dict.fromkeys(profile.actions + ["recommend_feeding_window", "alert_operator"]))
+    profile.deployment_posture = list(dict.fromkeys(profile.deployment_posture + ["edge_and_cloud", "hybrid"]))
+    profile.confidence = "high"
+    return profile
+
+
+def _refine_wildfire_profile(profile: UseCaseProfile, lower: str) -> UseCaseProfile:
+    if not any(term in lower for term in ("wildfire", "smoke plume", "evacuation", "lookout tower", "camera towers", "sentinel satellite")):
+        return profile
+    required = [
+        "industrial_iot_streaming_ml",
+        "real_time_anomaly_detection",
+        "computer_vision_quality_inspection",
+        "data_platform_analytics",
+    ]
+    blocked = {"field_service_automation", "rag_assistant", "document_intelligence", "supply_chain_optimization"}
+    retained = [family for family in profile.workload_families if family not in blocked and family not in required]
+    profile.domain = "wildfire_public_safety"
+    profile.workload_families = list(dict.fromkeys(required + retained))[:5]
+    profile.excluded_families = list(dict.fromkeys(profile.excluded_families + sorted(blocked)))
+    profile.excluded_patterns = list(dict.fromkeys(profile.excluded_patterns + sorted(blocked) + ["depot_inventory", "generic_field_service_dispatch"]))
+    profile.capabilities = list(dict.fromkeys(profile.capabilities + [
+        "real_time_ingestion",
+        "computer_vision",
+        "remote_imagery_analytics",
+        "satellite_image_processing",
+        "predictive_ml",
+        "anomaly_detection",
+        "alerting_notification",
+        "human_approval",
+        "edge_processing",
+        "intermittent_connectivity",
+    ]))
+    profile.entities = list(dict.fromkeys(profile.entities + ["camera_towers", "satellite_imagery", "road_closure_feeds", "shelters", "emergency_operators"]))
+    profile.signals = list(dict.fromkeys(profile.signals + ["tower_imagery", "satellite_imagery", "weather_forecasts", "road_closures", "shelter_capacity", "911_summaries"]))
+    profile.actions = list(dict.fromkeys(profile.actions + ["recommend_evacuation_zone", "draft_public_alert"]))
+    profile.deployment_posture = list(dict.fromkeys(profile.deployment_posture + ["edge_and_cloud", "hybrid"]))
+    profile.confidence = "high"
+    return profile
+
+
 def _detect_domain(lower: str) -> str | None:
     domain_markers = [
+        ("aquaculture", ("aquaculture", "fish farm", "fish farms", "sea cage", "sea cages", "dissolved oxygen")),
+        ("wildfire_public_safety", ("wildfire", "smoke plume", "evacuation", "lookout tower", "camera towers")),
         ("semiconductor_manufacturing", ("semiconductor", "fab", "fabs", "wafer", "metrology", "tool", "tools")),
         ("investment_banking", ("derivatives", "portfolio greeks", "capital markets", "margin rules", "monte carlo var")),
         ("telecommunications", ("telecom", "network outage", "cell tower", "subscriber", "5g", "cdr", "trai")),
@@ -211,15 +283,15 @@ def _detect_domain(lower: str) -> str | None:
 
 def _detect_capabilities(lower: str) -> list[str]:
     capability_markers = [
-        ("real_time_ingestion", ("real-time", "realtime", "stream", "sensor", "telemetry", "iot", "smart meter")),
+        ("real_time_ingestion", ("real-time", "realtime", "stream", "sensor", "telemetry", "iot", "smart meter", "camera feeds", "camera streams", "imagery refresh")),
         ("time_series_analytics", ("time-series", "voltage", "temperature", "load imbalance", "trend", "historical pattern")),
         ("anomaly_detection", ("anomaly", "failure detection", "pre-fault", "oscillation", "fraud", "thermal runaway", "imbalance")),
         ("predictive_ml", ("predictive", "prediction", "forecast", "model training", "inference", "failure pattern")),
-        ("event_driven_workflow", ("dispatch", "workflow", "ticket", "notify", "alert", "pre-position", "approval")),
+        ("event_driven_workflow", ("dispatch", "workflow", "ticket", "notify", "alert", "pre-position", "approval", "public alert", "evacuation")),
         ("enterprise_integration", ("existing", "erp", "crm", "workforce", "inventory", "depot", "system integration")),
         ("document_retrieval", ("document", "knowledge base", "policy manual", "manual", "rag", "retrieve", "citation", "contract", "contracts", "clause", "obligation")),
         ("generative_ai", ("assistant", "chatbot", "summarize", "generate", "llm", "foundation model", "agent")),
-        ("computer_vision", ("image", "video", "camera", "vision", "defect", "ocr")),
+        ("computer_vision", ("image", "imagery", "video", "camera", "vision", "defect", "ocr", "smoke plume", "fish behavior")),
         ("video_metadata_processing", ("occupancy signal", "occupancy signals", "video-derived", "ceiling camera", "camera metadata")),
         ("clinical_workflow_decision_support", ("or utilization", "surgical delay", "surgery delay", "operating room", "charge nurse", "clinical workflow")),
         ("ehr_integration", ("epic", "ehr", "patient check-in", "patient/surgery schedule")),
@@ -309,7 +381,7 @@ def _rank_workload_families(lower: str, capabilities: list[str]) -> list[str]:
         "account takeover",
         "claim fraud",
     )
-    industrial_terms = ("sensor", "telemetry", "smart meter", "transformer", "industrial", "equipment", "fab", "semiconductor")
+    industrial_terms = ("sensor", "telemetry", "smart meter", "transformer", "industrial", "equipment", "fab", "semiconductor", "camera feeds", "camera streams", "imagery refresh")
     explicit_financial_fraud = any(term in lower for term in financial_fraud_terms)
     if explicit_financial_fraud:
         scores["financial_fraud_detection"] += 10
@@ -343,6 +415,22 @@ def _rank_workload_families(lower: str, capabilities: list[str]) -> list[str]:
         scores["real_time_anomaly_detection"] = 0
         if not any(term in lower for term in ("dispatch", "field crew", "workforce", "depot", "inventory")):
             scores["field_service_automation"] = 0
+    if any(term in lower for term in ("aquaculture", "fish farm", "sea cage", "dissolved oxygen", "underwater camera", "feeding behavior")):
+        scores["industrial_iot_streaming_ml"] += 8
+        scores["real_time_anomaly_detection"] += 7
+        scores["computer_vision_quality_inspection"] += 6
+        scores["data_platform_analytics"] += 2
+        scores["rag_assistant"] = 0
+        scores["document_intelligence"] = 0
+        scores["field_service_automation"] = 0
+    if any(term in lower for term in ("wildfire", "smoke plume", "lookout tower", "camera towers", "satellite imagery", "evacuation zone")):
+        scores["industrial_iot_streaming_ml"] += 7
+        scores["real_time_anomaly_detection"] += 8
+        scores["computer_vision_quality_inspection"] += 6
+        scores["data_platform_analytics"] += 3
+        scores["rag_assistant"] = 0
+        scores["document_intelligence"] = 0
+        scores["field_service_automation"] = 0
     if "telecom" in lower and any(term in lower for term in ("hbase", "hdfs", "spark", "oss/bss", "oss bss")):
         scores["telecom_network_analytics"] += 8
         scores["data_platform_analytics"] += 5
@@ -393,6 +481,10 @@ def _rank_workload_families(lower: str, capabilities: list[str]) -> list[str]:
 
 def _excluded_families(lower: str, selected: list[str]) -> list[str]:
     excluded = []
+    if any(term in lower for term in ("aquaculture", "fish farm", "sea cage", "underwater camera", "wildfire", "smoke plume", "camera towers", "satellite imagery")):
+        excluded.extend(["rag_assistant", "document_intelligence"])
+    if any(term in lower for term in ("wildfire", "smoke plume", "evacuation", "camera towers")):
+        excluded.extend(["field_service_automation", "supply_chain_optimization"])
     if _is_healthcare_operations_scheduling(lower):
         excluded.extend(["industrial_iot_streaming_ml", "field_service_automation", "computer_vision_quality_inspection"])
     if "rag_assistant" not in selected[:2] and any(term in lower for term in ("sensor", "telemetry", "real-time", "dispatch", "predictive")):

@@ -28,6 +28,11 @@ class ArtifactStore:
         path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
         return self.to_artifact_id(session_id, path)
 
+    def write_text(self, session_id: str, category: str, name: str, content: str) -> Path:
+        path = self._safe_path(session_id, category, name)
+        path.write_text(content, encoding="utf-8")
+        return path
+
     def copy_file(self, session_id: str, category: str, source: Path, name: str | None = None) -> str:
         target = self._safe_path(session_id, category, name or source.name)
         shutil.copy2(source, target)
@@ -63,4 +68,3 @@ class ArtifactStore:
             raise ValueError("Artifact category escapes the session root.")
         directory.mkdir(parents=True, exist_ok=True)
         return directory / safe_name
-

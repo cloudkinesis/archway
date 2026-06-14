@@ -38,6 +38,11 @@ def extract_metrics(text: str) -> ExtractedMetrics:
     _put_match(result.asset_counts, "cell_towers", "count", text, r"(?P<value>\d[\d,]*)\s+cell towers?")
     _put_match(result.asset_counts, "hospital_count", "count", text, r"(?P<value>\d[\d,]*)\s+hospitals?")
     _put_match(result.asset_counts, "operating_room_count", "count", text, r"(?P<value>\d[\d,]*)\s+operating rooms?")
+    _put_match(result.asset_counts, "camera_towers", "count", text, r"(?P<value>\d[\d,]*)\s+(?:remote\s+|lookout\s+)?camera towers?")
+    _put_match(result.asset_counts, "underwater_cameras", "count", text, r"(?P<value>\d[\d,]*)\s+underwater cameras?")
+    _put_match(result.asset_counts, "fish_cages", "count", text, r"(?P<value>\d[\d,]*)\s+(?:sea\s+)?cages?")
+    _put_match(result.asset_counts, "staff_users", "count", text, r"(?P<value>\d[\d,]*)\s+(?:farm\s+staff|staff|responder)\s+users?")
+    _put_match(result.asset_counts, "resident_alert_recipients", "count", text, r"(?P<value>\d[\d,]*)\s+residents?\s+for\s+alerts?")
     _put_match(result.asset_counts, "historical_contract_count", "count", text, r"(?P<value>\d[\d,]*)\s+historical contracts?")
     if "historical_contract_count" not in result.asset_counts:
         _put_match(result.asset_counts, "document_count", "count", text, r"(?P<value>\d[\d,]*)\s+(?:documents?|contracts?|agreements?)")
@@ -75,6 +80,12 @@ def extract_metrics(text: str) -> ExtractedMetrics:
         _put_match(result.business_targets, "refresh_cadence_minutes", "minutes", text, r"predictions?[^\d]{0,30}every\s+(?P<value>\d+(?:\.\d+)?)\s+minutes?")
     if "refresh_cadence_minutes" not in result.business_targets:
         _put_match(result.business_targets, "refresh_cadence_minutes", "minutes", text, r"(?P<value>\d+(?:\.\d+)?)\s*[- ]?minute\s+(?:prediction\s+)?refresh")
+    if "refresh_cadence_minutes" not in result.business_targets:
+        _put_match(result.business_targets, "refresh_cadence_minutes", "minutes", text, r"imagery\s+refresh\s+every\s+(?P<value>\d+(?:\.\d+)?)\s+minutes?")
+    if "refresh_cadence_minutes" not in result.business_targets:
+        _put_match(result.business_targets, "refresh_cadence_minutes", "minutes", text, r"readings?\s+every\s+(?P<value>\d+(?:\.\d+)?)\s+minutes?")
+    _put_match(result.business_targets, "telemetry_frequency_seconds", "seconds", text, r"(?:sensor\s+)?readings?\s+every\s+(?P<value>\d+(?:\.\d+)?)\s+seconds?")
+    _put_match(result.business_targets, "imagery_windows_per_day", "windows_per_day", text, r"(?P<value>\d[\d,]*)\s+(?:satellite/)?imagery\s+refresh\s+windows?\s+per\s+day")
     _put_match(result.business_targets, "scheduled_surgeries_per_day", "surgeries_per_day", text, r"(?P<value>\d[\d,]*)\s+(?:scheduled\s+)?surgeries\s+(?:per\s+day|/day|daily)")
     _put_match(result.business_targets, "country_count", "countries", text, r"(?P<value>\d[\d,]*)\s+countries")
     _put_match(result.asset_counts, "smart_meters", "count", text, r"(?P<value>\d[\d,]*)\s+smart meters?")

@@ -18,6 +18,7 @@ from app.services.build_status import BuildStatusService
 from app.services.convergence.architecture_repairer import ArchitectureRepairer
 from app.services.deep_dossier import DeepDossierService
 from app.services.diagram_compiler_adapter import DiagramCompilerAdapter
+from app.services.diagnostic_diagrams import diagnostic_diagram_gallery
 from app.services.health import HealthService
 from app.services.jobs import job_manager
 from app.services.mcp_security import mcp_security_status
@@ -464,13 +465,25 @@ async def generate_diagrams(session_id: str):
     if repaired is not None:
         active_specs = repaired.specs
     issues = architecture_revisions.validate(active_specs)
-    if any(issue.severity == "critical" for issue in issues):
-        raise HTTPException(status_code=409, detail={"message": "Resolve critical architecture validation issues before generating diagrams.", "issues": [issue.model_dump(mode="json") for issue in issues]})
     specs = active_specs
 
     def work(job_id: str) -> str:
         adapter = DiagramCompilerAdapter()
         results: list[DiagramGalleryResult] = []
+        if any(issue.severity == "critical" for issue in issues):
+            job_manager.update(job_id, progress=30, message="Validation blockers found; generating diagnostic candidate diagrams.")
+            results = diagnostic_diagram_gallery(
+                session_id=session_id,
+                specs=specs,
+                issues=issues,
+                reason="Critical architecture validation issues downgraded diagram generation to diagnostic candidate artifacts.",
+            )
+            gallery_path = artifacts.write_json(session_id, "diagrams", "gallery", [result.model_dump(mode="json") for result in results])
+            current = _require_session(session_id)
+            current.active_phase = SessionPhase.diagrams
+            current.status = SessionStatus.complete
+            store.save(current)
+            return gallery_path
         total = max(1, len(specs))
         for index, spec in enumerate(specs, start=1):
             if job_manager.should_cancel(job_id):

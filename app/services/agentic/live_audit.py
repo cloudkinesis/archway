@@ -31,12 +31,18 @@ class LiveCallAudit(BaseModel):
     task_type: LLMTaskType
     lane: str
     session_id: str | None = None
+    canonical_fact_snapshot_hash_used: str | None = None
     duration_ms: int | None = None
     token_usage: dict[str, Any] | None = None
     retry_count: int = 0
     validated: bool = False
     prompt_hash: str | None = None
     response_hash: str | None = None
+    original_response_hash: str | None = None
+    repaired_response_hash: str | None = None
+    parse_error: str | None = None
+    repair_attempted: bool = False
+    repair_count: int = 0
     status: LiveCallStatus
     error_type: str | None = None
     error_message: str | None = None

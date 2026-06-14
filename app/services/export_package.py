@@ -17,6 +17,8 @@ from app.services.convergence.golden_convergence_orchestrator import GoldenConve
 from app.services.client_pack import audit_pack_files, client_pack_files, front_door_readme
 from app.services.deep_dossier import DeepDossierService
 from app.services.display_labels import display_label, format_usd, status_display
+from app.models.domain import ArchitectureSpec, ArchitectureValidationIssue
+from app.services.diagnostic_diagrams import diagnostic_diagram_gallery
 from app.services.dossier_manifest import MANIFEST_FILENAME, build_dossier_manifest, manifest_markdown
 from app.services.golden_regression import GoldenRegressionExportService
 from app.services.jobs import job_manager
@@ -118,6 +120,11 @@ class ExportPackageService:
         architectures = _read_known_json(root, "architecture/specs.json", warnings)
         architecture_revisions = _read_known_json(root, "architecture/revisions.json", warnings)
         diagrams = _read_known_json(root, "diagrams/gallery.json", warnings)
+        if not diagrams and architectures:
+            diagrams = _diagnostic_gallery_for_export(session_id, architectures, architecture_revisions)
+            if diagrams:
+                self.artifacts.write_json(session_id, "diagrams", "gallery", diagrams)
+                _warn_once(warnings, "Generated diagnostic/candidate diagram gallery because no rendered diagram gallery was available at export time.")
         audit = read_session_audit(session_id)
         logs = audit.events
         if audit.status in {"degraded", "unreadable"}:
@@ -229,6 +236,7 @@ class ExportPackageService:
             "pricing_sanity_review": _report_metadata(report, "pricing_sanity_review"),
             "pricing_driver_closure": _pricing_metadata(pricing, "pricing_driver_closure") or _read_known_json(root, "pricing/pricing_driver_closure.json", warnings),
             "canonical_facts": _pricing_metadata(pricing, "canonical_facts"),
+            "canonical_fact_snapshot": _report_metadata(report, "canonical_fact_snapshot"),
             "assumption_ledger": _pricing_metadata(pricing, "assumption_ledger"),
             "pricing_driver_bindings": _pricing_metadata(pricing, "pricing_driver_bindings"),
             "service_usage_dimensions": _pricing_metadata(pricing, "service_usage_dimensions"),
@@ -461,7 +469,11 @@ class ExportPackageService:
             or getattr(getattr(session, "current_summary", None), "raw_use_case", None)
             or ""
         )
-        live_run_context = LiveRunContext(session_id=session.id, raw_use_case=raw_use_case)
+        live_run_context = LiveRunContext(
+            session_id=session.id,
+            raw_use_case=raw_use_case,
+            canonical_fact_snapshot_hash=((report or {}).get("metadata") or {}).get("canonical_fact_snapshot_hash"),
+        )
         agentic_trace = build_agentic_trace(
             settings=settings,
             report=report,
@@ -927,7 +939,13 @@ class ExportPackageService:
         closure = metadata.get("pricing_driver_closure") or {}
         # Fail closed: only an explicit True is headline-safe.
         headline_safe = metadata.get("pricing_can_be_displayed_as_headline") is True
-        if headline_safe:
+        if metadata.get("pricing_scenario_validity") == "invalid_driver_mismatch" or metadata.get("status") == "invalid_driver_mismatch":
+            headline_lines = [
+                "Pricing scenario needs repair: driver set does not match the confirmed workload.",
+                f"Reason: {metadata.get('reason') or metadata.get('headline_display') or 'Pricing driver mismatch.'}",
+                "No polished monthly range is displayed for this invalid scenario.",
+            ]
+        elif headline_safe:
             headline_lines = [
                 f"Estimated monthly range: {format_usd(pricing.get('low_monthly_usd'))}–{format_usd(pricing.get('high_monthly_usd'))}",
                 f"Expected monthly estimate: {format_usd(pricing.get('expected_monthly_usd'))}",
@@ -1522,6 +1540,41 @@ def _pricing_metadata(pricing: dict | None, key: str):
     return ((pricing or {}).get("metadata") or {}).get(key)
 
 
+def _diagnostic_gallery_for_export(session_id: str, architectures, architecture_revisions) -> list[dict]:
+    try:
+        specs = [ArchitectureSpec.model_validate(item) for item in architectures or []]
+    except Exception:
+        return []
+    issue_payloads = []
+    for revision in architecture_revisions or []:
+        issue_payloads.extend(revision.get("validation_issues") or [])
+    issues = []
+    for item in issue_payloads:
+        try:
+            issues.append(ArchitectureValidationIssue.model_validate(item))
+        except Exception:
+            continue
+    if not issues:
+        issues = [
+            ArchitectureValidationIssue(
+                severity="important",
+                code="diagram_gallery_missing",
+                message="No diagram gallery was available at export time; generated diagnostic candidate entries.",
+                mode=spec.mode,
+            )
+            for spec in specs
+        ]
+    return [
+        gallery.model_dump(mode="json")
+        for gallery in diagnostic_diagram_gallery(
+            session_id=session_id,
+            specs=specs,
+            issues=issues,
+            reason="No rendered diagram gallery was available at export time; diagnostic candidate artifacts preserve completion.",
+        )
+    ]
+
+
 def quality_findings_from_payload(payload) -> list:
     if isinstance(payload, list):
         return payload
@@ -1555,8 +1608,8 @@ def live_agent_calls_markdown(agentic_mode: str, audits: list[LiveCallAudit]) ->
         f"- Skipped records: {len(skipped)}",
         f"- Failed records: {len(failed)}",
         "",
-        "| Lane | Task | Status | Provider | Model | Duration | Prompt hash | Response hash | Notes |",
-        "|---|---|---:|---|---|---:|---|---|---|",
+        "| Lane | Task | Status | Provider | Model | Duration | Repair | Canonical hash | Prompt hash | Response hash | Notes |",
+        "|---|---|---:|---|---|---:|---:|---|---|---|---|",
     ]
     for audit in audits:
         note = audit.error_message or audit.skip_reason or ("token usage unavailable" if audit.token_usage_unavailable else "")
@@ -1569,6 +1622,8 @@ def live_agent_calls_markdown(agentic_mode: str, audits: list[LiveCallAudit]) ->
                 str(audit.provider),
                 str(audit.model_id or "not configured"),
                 f"{audit.duration_ms}ms",
+                str(audit.repair_count or 0),
+                str(audit.canonical_fact_snapshot_hash_used or "n/a"),
                 str(audit.prompt_hash),
                 str(audit.response_hash or "not produced"),
                 str(note).replace("|", "/"),
