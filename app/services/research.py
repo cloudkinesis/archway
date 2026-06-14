@@ -407,7 +407,7 @@ def _feasibility(profile) -> str:
     if "industrial_iot_streaming_ml" in profile.workload_families:
         return (
             "Feasible as an AWS industrial IoT and streaming ML architecture: device ingestion, streaming feature extraction, "
-            "risk scoring, event routing, time-series storage, and governed dispatch can be composed from managed services."
+            "risk scoring, event routing, time-series storage, and governed operations workflow can be composed from managed services."
         )
     if "rag_assistant" in profile.workload_families:
         return "Feasible as a grounded assistant if retrieval quality, citations, prompt-injection controls, identity, and audit are enforced."

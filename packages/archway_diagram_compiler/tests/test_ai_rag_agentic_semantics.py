@@ -218,6 +218,8 @@ def test_primary_view_summarizes_when_specialized_rag_views_exist(tmp_path):
     assert bundle.qa_report.passed
     assert {"rag_retrieval_view", "rag_ingestion_view"} <= {layout.view_id for layout in bundle.layout_models}
     assert "AI/ML layer" in production_labels
+    assert "ai_ml_layer" in production_node_ids
+    assert "ai_rag_layer" not in production_node_ids
     assert {"kb", "vector", "docs", "ingestion", "chunker", "embedder"}.isdisjoint(production_node_ids)
 
 

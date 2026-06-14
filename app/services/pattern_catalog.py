@@ -145,7 +145,7 @@ PATTERNS: dict[str, WorkloadPattern] = {
         ),
         pricing_dimensions=("device_count", "messages_per_device_per_day", "message_size_kb", "stream_retention_hours", "flink_kpu_hours", "inference_frequency", "hot_storage_days", "cold_storage_years"),
         poc_scope="Validate telemetry ingestion, streaming feature extraction, anomaly scoring, and alert quality on a representative asset subset.",
-        production_scope="Operate resilient multi-AZ telemetry ingestion, streaming analytics, model lifecycle, dispatch integration, and governed operational actions.",
+        production_scope="Operate resilient multi-AZ telemetry ingestion, streaming analytics, model lifecycle, operations workflow integration, and governed operational actions.",
         expected_views=("production_logical_service_flow", "async_flow_view", "ai_security_governance_view", "data_access_view", "network_private_connectivity"),
     ),
     "real_time_anomaly_detection": WorkloadPattern(
