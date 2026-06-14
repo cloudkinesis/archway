@@ -19,11 +19,13 @@ from app.services.agentic.use_case_analyst import UseCaseAnalystProposal
 from app.services.architecture import ArchitecturePlanner
 from app.services.architecture_critique import ArchitectureCritiqueFinding, _downgrade_unconfirmed_model_criticals
 from app.services.architecture_revisions import ArchitectureRevisionService
+from app.services.convergence.golden_convergence_orchestrator import GoldenConvergenceOrchestrator
 from app.services.diagnostic_diagrams import diagnostic_diagram_gallery
 from app.services.llm.base import LLMMessage, LLMResult, LLMTaskType
 from app.services.pricing import PricingDrivers, PricingEngine, _apply_live_demo_pricing_hardening, derive_pricing_drivers
 from app.services.synthesis import SynthesisEngine
 from app.services.use_case_profile import profile_from_metadata, profile_use_case
+from app.domain.quality_findings import finding
 
 
 AQUACULTURE_USE_CASE = """
@@ -177,6 +179,37 @@ def test_pricing_hardening_surfaces_confirmed_canonical_drivers_in_closure():
     assert sanity["code"] == "pricing.nonzero_total_without_pricing_ledger"
     assert sanity["severity"] == "warning"
     assert sanity["customer_readiness_impact"] == "cap_to_directional"
+
+
+def test_convergence_does_not_turn_warning_level_directional_pricing_into_invalid_placeholder(tmp_path):
+    pricing = {
+        "metadata": {
+            "status": "directional_valid_with_extracted_scale",
+            "scale_applied": True,
+            "pricing_can_be_displayed_as_headline": False,
+            "pricing_scenario_validity": "directional",
+        }
+    }
+    warning = finding(
+        code="pricing.nonzero_total_without_pricing_ledger",
+        severity="warning",
+        category="pricing",
+        title="Non-Zero Pricing Without Ledger",
+        description="Directional estimate is non-headline until a source-truth pricing ledger exists.",
+        evidence=["pricing.metadata.source_truth_pricing_compiler.enabled=false"],
+        auto_repairable=True,
+        customer_readiness_impact="cap_to_directional",
+    )
+
+    GoldenConvergenceOrchestrator()._apply_repairs(
+        "sess_directional_pricing",
+        tmp_path,
+        {"pricing": pricing},
+        [warning],
+    )
+
+    assert pricing["metadata"]["status"] == "directional_valid_with_extracted_scale"
+    assert pricing["metadata"]["pricing_can_be_displayed_as_headline"] is False
 
 
 def test_pricing_hardening_blocks_excluded_document_driver_leakage():
