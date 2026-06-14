@@ -624,11 +624,22 @@ def _latest_export_bundle(session_id: str):
     if not manifests:
         return None
     manifest = __import__("json").loads(manifests[0].read_text(encoding="utf-8"))
+    package_dir = manifests[0].parent
     zip_path = root / f"{manifest['name']}.zip"
+    artifact_id = artifacts.to_artifact_id(session_id, zip_path)
+    manifest_artifact_id = artifacts.to_artifact_id(session_id, manifests[0])
+    download_url = f"/api/sessions/{session_id}/artifacts/{artifact_id}"
     return {
         "name": manifest["name"],
-        "artifact_id": artifacts.to_artifact_id(session_id, zip_path),
-        "manifest_artifact_id": artifacts.to_artifact_id(session_id, manifests[0]),
+        "session_id": session_id,
+        "export_id": manifest["name"],
+        "artifact_id": artifact_id,
+        "manifest_artifact_id": manifest_artifact_id,
+        "package_dir": str(package_dir),
+        "package_path": str(package_dir),
+        "zip_path": str(zip_path),
+        "download_url": download_url,
+        "export_url": download_url,
         "included_artifacts": manifest.get("included_artifacts", []),
         "warnings": manifest.get("warnings", []),
     }

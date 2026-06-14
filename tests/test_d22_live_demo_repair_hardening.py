@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from app.core.config import get_settings
@@ -60,6 +63,45 @@ def test_aquaculture_questions_and_profile_do_not_fall_back_to_document_rag():
     assert "telemetry" in question_text
     for forbidden in ("contract", "document", "ocr", "rag", "embedding", "vector"):
         assert forbidden not in question_text
+
+
+def test_latest_export_api_response_includes_usable_paths(tmp_path, monkeypatch):
+    monkeypatch.setenv("ARCHWAY_DATA_DIR", str(tmp_path / ".archway"))
+    get_settings.cache_clear()
+
+    import app.api.routes as routes
+    from app.services.artifacts import ArtifactStore
+
+    routes.artifacts = ArtifactStore()
+    session_id = "sess_export_paths"
+    export_name = "archway-solution-package-sess_export_paths-20260614T000000Z"
+    package_dir = routes.artifacts.session_root(session_id) / "exports" / export_name
+    package_dir.mkdir(parents=True)
+    manifest_path = package_dir / "manifest.json"
+    manifest_path.write_text(
+        json.dumps({
+            "name": export_name,
+            "session_id": session_id,
+            "included_artifacts": ["README.md", "manifest.json"],
+            "warnings": [],
+        }),
+        encoding="utf-8",
+    )
+    zip_path = package_dir.parent / f"{export_name}.zip"
+    zip_path.write_bytes(b"PK\\x05\\x06" + b"\\x00" * 18)
+
+    latest = routes._latest_export_bundle(session_id)
+
+    assert latest is not None
+    assert latest["session_id"] == session_id
+    assert latest["export_id"] == export_name
+    assert Path(latest["package_dir"]).is_dir()
+    assert Path(latest["package_path"]).is_dir()
+    assert Path(latest["zip_path"]).is_file()
+    assert latest["artifact_id"] == f"exports/{export_name}.zip"
+    assert latest["manifest_artifact_id"] == f"exports/{export_name}/manifest.json"
+    assert latest["download_url"] == f"/api/sessions/{session_id}/artifacts/exports/{export_name}.zip"
+    assert latest["export_url"] == latest["download_url"]
 
 
 @pytest.mark.asyncio
