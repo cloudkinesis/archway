@@ -104,6 +104,7 @@ class SynthesisEngine:
         )
 
     async def enhance_brief(self, brief: UseCaseBrief, session_id: str | None = None) -> UseCaseBrief:
+        existing_interview = dict(((brief.use_case_profile or {}).get("interview") or {}))
         profile = profile_from_metadata(brief.use_case_profile, brief.raw_use_case)
         previous_answers = [item.text for item in brief.assumptions if item.user_confirmed]
         plan = await DiscoveryPlannerService().plan(
@@ -114,7 +115,10 @@ class SynthesisEngine:
         )
         profile.discovery_plan = plan.model_dump(mode="json")
         _attach_capability_decision(profile, brief.raw_use_case)
-        brief.use_case_profile = profile_to_metadata(profile)
+        metadata = profile_to_metadata(profile)
+        if existing_interview:
+            metadata["interview"] = existing_interview
+        brief.use_case_profile = metadata
         brief.open_questions = _questions_for_profile(profile)
         return brief
 

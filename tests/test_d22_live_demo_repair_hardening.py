@@ -57,6 +57,28 @@ def test_aquaculture_questions_and_profile_do_not_fall_back_to_document_rag():
         assert forbidden not in question_text
 
 
+@pytest.mark.asyncio
+async def test_enhance_brief_preserves_interview_progress_for_live_ui_flow():
+    engine = SynthesisEngine()
+    brief = engine.create_initial_brief(AQUACULTURE_USE_CASE)
+    first_question = engine.next_question(brief)
+
+    response = engine.respond(
+        brief,
+        "Model all 6 sea cages, 24 underwater cameras, oxygen and temperature streams, and one shore operations center.",
+    )
+    answered_before = ((response.brief.use_case_profile or {}).get("interview") or {}).get("answered") or []
+
+    enhanced = await engine.enhance_brief(response.brief, session_id="sess_d22_interview")
+    answered_after = ((enhanced.use_case_profile or {}).get("interview") or {}).get("answered") or []
+    next_question = engine.next_question(enhanced)
+
+    assert first_question is not None
+    assert answered_after == answered_before == [first_question.id]
+    assert next_question is not None
+    assert next_question.id != first_question.id
+
+
 def test_wildfire_pricing_binds_towers_and_refresh_cadence_not_placeholder():
     profile = profile_use_case(WILDFIRE_USE_CASE)
     drivers = derive_pricing_drivers(profile)
