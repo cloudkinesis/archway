@@ -1113,10 +1113,21 @@ def _apply_live_demo_pricing_hardening(pricing: PricingAnalysis, profile: UseCas
                 "canonical_fact_ref": key,
                 "confidence": "high",
             })
+    closure = dict(pricing.metadata.get("pricing_driver_closure") or {})
+    if closure and provenance:
+        confirmed = list(closure.get("confirmed_drivers") or [])
+        confirmed.extend(f"{item['driver_key']}={_display_driver_value(item['value'])}" for item in provenance)
+        closure["confirmed_drivers"] = list(dict.fromkeys(confirmed))
+        if not closure.get("missing_drivers"):
+            closure["next_validation_steps"] = [
+                "Confirm exact AWS SKU filters, rate tier bindings, and measured production traffic before procurement."
+            ]
     pricing.metadata = {
         **pricing.metadata,
         "pricing_driver_provenance": provenance,
         "pricing_hardening_findings": findings,
+        "pricing_can_be_displayed_as_headline": bool(closure.get("headline_pricing_allowed")) if closure else pricing.metadata.get("pricing_can_be_displayed_as_headline", False),
+        **({"pricing_driver_closure": closure} if closure else {}),
     }
     if invalid:
         closure = dict(pricing.metadata.get("pricing_driver_closure") or {})
@@ -1199,6 +1210,12 @@ def _known_dimension_names(profile: UseCaseProfile) -> set[str]:
             "override_rate",
         })
     return known
+
+
+def _display_driver_value(value: Any) -> str:
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
 
 
 def _profile_pricing_overrides(profile: UseCaseProfile) -> dict[str, Any]:

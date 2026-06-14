@@ -92,6 +92,49 @@ def test_wildfire_pricing_binds_towers_and_refresh_cadence_not_placeholder():
     assert "field_service_automation" in profile.excluded_families
 
 
+def test_pricing_hardening_surfaces_confirmed_canonical_drivers_in_closure():
+    profile = profile_use_case(WILDFIRE_USE_CASE)
+    drivers = derive_pricing_drivers(profile)
+    pricing = PricingAnalysis(
+        region="us-east-1",
+        low_monthly_usd=10,
+        expected_monthly_usd=20,
+        high_monthly_usd=30,
+        line_items=[],
+        main_cost_drivers=[
+            "asset_count=12",
+            "telemetry_frequency_seconds=600",
+            "daily_event_volume=1728",
+        ],
+        cost_optimization_recommendations=[],
+        unknown_variables=[],
+        evidence_items=[],
+        metadata={
+            "pricing_driver_closure": {
+                "workload_family": "industrial_iot_streaming",
+                "status": "missing_non_critical",
+                "pricing_maturity": "pricing_directional_with_assumptions",
+                "confirmed_drivers": [],
+                "assumed_drivers": [],
+                "missing_drivers": [],
+                "headline_pricing_allowed": False,
+                "directional_scenario_allowed": True,
+                "procurement_ready": False,
+                "recommended_next_action": "ready_for_directional_pricing",
+                "next_validation_steps": ["Confirm workload-specific usage quantities."],
+            }
+        },
+    )
+
+    _apply_live_demo_pricing_hardening(pricing, profile, drivers)
+
+    closure = pricing.metadata["pricing_driver_closure"]
+    assert "camera_towers=12" in closure["confirmed_drivers"]
+    assert "refresh_cadence_minutes=10" in closure["confirmed_drivers"]
+    assert closure["procurement_ready"] is False
+    assert pricing.metadata["pricing_can_be_displayed_as_headline"] is False
+
+
 def test_pricing_hardening_blocks_excluded_document_driver_leakage():
     profile = profile_use_case(AQUACULTURE_USE_CASE)
     pricing = PricingAnalysis(
