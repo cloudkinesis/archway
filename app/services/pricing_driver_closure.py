@@ -347,7 +347,7 @@ def _binding_still_missing(binding: dict[str, Any], assumptions: dict[str, dict[
 
 def _validation_steps(missing: list[MissingPricingDriver]) -> list[str]:
     if not missing:
-        return ["Replace scenario assumptions with measured traffic forecast, CDN logs, event schedule, and media platform reports before budgeting."]
+        return ["Replace scenario assumptions with measured workload telemetry, event history, customer traffic forecasts, and service-specific usage reports before budgeting."]
     return [f"Confirm {item.display_name}: {item.why_needed}" for item in missing[:8]]
 
 

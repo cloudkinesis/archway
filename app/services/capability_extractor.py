@@ -3,6 +3,40 @@ import re
 from app.domain.capabilities import ArchitectureCapability, CapabilityExtractionResult, DeploymentPosture, LatencyClass
 
 
+NEGATED_PATTERN_CONSTRAINTS: dict[str, dict[str, tuple[str, ...]]] = {
+    "document_rag": {
+        "markers": (
+            "rag",
+            "document rag",
+            "document retrieval",
+            "document assistant",
+            "document intelligence",
+            "document qa",
+            "knowledge base",
+            "contract review",
+            "ocr",
+            "embedding",
+            "vector search",
+        ),
+        "families": ("rag_assistant", "document_intelligence"),
+        "patterns": ("rag_assistant", "document_qa_chatbot", "document_intelligence", "contract_review", "ocr_document_pipeline"),
+        "capabilities": ("rag_retrieval", "document_ingestion", "document_retrieval"),
+    },
+    "field_service": {
+        "markers": ("field service", "field-service", "field crew", "workforce dispatch", "dispatch"),
+        "families": ("field_service_automation",),
+        "patterns": ("field_service_automation", "generic_field_service_dispatch"),
+        "capabilities": ("external_workflow_integration",),
+    },
+    "depot_inventory": {
+        "markers": ("depot", "depot inventory", "inventory management", "inventory"),
+        "families": ("supply_chain_optimization",),
+        "patterns": ("depot_inventory", "inventory_or_depot_integration", "supply_chain_optimization"),
+        "capabilities": ("inventory_or_depot_integration", "inventory_optimization"),
+    },
+}
+
+
 CAPABILITY_MARKERS: list[tuple[ArchitectureCapability, tuple[str, ...]]] = [
     (ArchitectureCapability.DEVICE_TELEMETRY, ("smart meter", "sensor", "telemetry", "iot", "cell tower", "base station", "vehicle", "drone")),
     (ArchitectureCapability.HIGH_VOLUME_EVENT_INGESTION, ("billion", "million", "high-volume", "concurrent", "transactions/day", "cdr")),
@@ -113,7 +147,7 @@ def extract_capabilities(text: str) -> CapabilityExtractionResult:
         capabilities.append(ArchitectureCapability.OBSERVABILITY)
     if ArchitectureCapability.AUDIT_TRAIL not in capabilities:
         capabilities.append(ArchitectureCapability.AUDIT_TRAIL)
-    capabilities = list(dict.fromkeys(capabilities))
+    capabilities = _remove_explicitly_negated_capabilities(list(dict.fromkeys(capabilities)), lower)
     excluded = _excluded_patterns(lower, capabilities)
     posture = infer_deployment_posture(lower, capabilities)
     latency = infer_latency_class(lower)
@@ -188,4 +222,42 @@ def _excluded_patterns(lower: str, capabilities: list[ArchitectureCapability]) -
         excluded.extend(["rag_assistant", "document_qa_chatbot", "generic_ai_assistant"])
     if "chatbot" not in lower and "assistant" not in lower:
         excluded.append("generic_chatbot")
+    negated = explicit_negative_constraints(lower)
+    excluded.extend(negated["families"])
+    excluded.extend(negated["patterns"])
     return list(dict.fromkeys(excluded))
+
+
+def explicit_negative_constraints(lower: str) -> dict[str, list[str]]:
+    normalized = lower.replace("-", " ")
+    families: list[str] = []
+    patterns: list[str] = []
+    capabilities: list[str] = []
+    labels: list[str] = []
+    for label, rule in NEGATED_PATTERN_CONSTRAINTS.items():
+        if not any(_is_marker_negated(normalized, marker) for marker in rule["markers"]):
+            continue
+        labels.append(label)
+        families.extend(rule["families"])
+        patterns.extend(rule["patterns"])
+        capabilities.extend(rule["capabilities"])
+    return {
+        "labels": list(dict.fromkeys(labels)),
+        "families": list(dict.fromkeys(families)),
+        "patterns": list(dict.fromkeys(patterns)),
+        "capabilities": list(dict.fromkeys(capabilities)),
+    }
+
+
+def _remove_explicitly_negated_capabilities(capabilities: list[ArchitectureCapability], lower: str) -> list[ArchitectureCapability]:
+    blocked = set(explicit_negative_constraints(lower)["capabilities"])
+    if not blocked:
+        return capabilities
+    return [capability for capability in capabilities if capability.value not in blocked]
+
+
+def _is_marker_negated(normalized_lower: str, marker: str) -> bool:
+    marker = marker.replace("-", " ")
+    marker_pattern = re.escape(marker).replace(r"\ ", r"\s+")
+    prefix = r"(?:not|no|without|exclude|excluding|avoid|avoiding|not\s+a|not\s+an|not\s+the)"
+    return re.search(rf"\b{prefix}\b(?:\W+\w+){{0,6}}\W+{marker_pattern}\b", normalized_lower) is not None

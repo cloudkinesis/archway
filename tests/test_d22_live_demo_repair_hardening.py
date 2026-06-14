@@ -50,6 +50,18 @@ when remote connectivity is intermittent.
 """
 
 
+AIRPORT_BAGGAGE_USE_CASE = """
+Build an AWS platform for an airport operations team that predicts baggage
+disruptions and recommends recovery actions across 3 terminals. The platform
+ingests 250,000 bag scan events per day, flight schedule changes, belt telemetry,
+and transfer-window signals. It must detect at-risk bags within 2 minutes, notify
+airline service teams and passengers when appropriate, retain predictions and
+audit traces for 90 days, and tolerate intermittent terminal network connectivity.
+This is not a document RAG system, not field-service dispatch, and not depot
+inventory management.
+"""
+
+
 def test_aquaculture_questions_and_profile_do_not_fall_back_to_document_rag():
     brief = SynthesisEngine().create_initial_brief(AQUACULTURE_USE_CASE)
     profile = profile_from_metadata(brief.use_case_profile, brief.raw_use_case)
@@ -170,6 +182,65 @@ def test_wildfire_pricing_binds_towers_and_refresh_cadence_not_placeholder():
     assert drivers.daily_event_volume == 12 * 144
     assert drivers.asset_count != 1000
     assert "field_service_automation" in profile.excluded_families
+
+
+def test_airport_baggage_profile_respects_explicit_negative_patterns():
+    brief = SynthesisEngine().create_initial_brief(AIRPORT_BAGGAGE_USE_CASE)
+    profile = profile_from_metadata(brief.use_case_profile, brief.raw_use_case)
+    profile_text = json.dumps(brief.model_dump(mode="json")).lower()
+
+    assert profile.domain == "aviation_operations"
+    assert "industrial_iot_streaming_ml" in profile.workload_families
+    assert "real_time_anomaly_detection" in profile.workload_families
+    assert {"rag_assistant", "document_intelligence", "field_service_automation", "supply_chain_optimization"} <= set(profile.excluded_families)
+    assert not {"rag_assistant", "document_intelligence", "field_service_automation", "supply_chain_optimization"} & set(profile.workload_families)
+    assert not {"document_retrieval", "rag_retrieval", "document_ingestion", "inventory_or_depot_integration"} & set(profile.capabilities + profile.capability_model)
+    assert "grounded retrieval and question answering" not in profile_text
+    assert "contract and document repository" not in profile_text
+    assert "inventory_or_depot_integration" not in profile.capability_model
+    assert "depot dispatch" not in profile_text
+
+
+def test_airport_baggage_pricing_binds_event_volume_and_retention():
+    profile = profile_use_case(AIRPORT_BAGGAGE_USE_CASE)
+    drivers = derive_pricing_drivers(profile)
+
+    assert profile.domain == "aviation_operations"
+    assert drivers.asset_count == 3
+    assert drivers.daily_event_volume == 250_000
+    assert drivers.monthly_event_volume == 7_500_000
+    assert drivers.hot_retention_days == 90
+    assert drivers.cold_retention_months == 3
+    assert drivers.asset_count != 1000
+
+
+@pytest.mark.asyncio
+async def test_airport_baggage_pricing_engine_records_confirmed_operational_drivers():
+    brief = SynthesisEngine().create_initial_brief(AIRPORT_BAGGAGE_USE_CASE)
+    pricing = await PricingEngine().estimate(
+        brief,
+        [
+            AWSServiceSelection(
+                service="Amazon Kinesis Data Streams",
+                purpose="bag scan event ingestion",
+                rationale="pricing regression fixture",
+            ),
+            AWSServiceSelection(
+                service="Amazon SageMaker",
+                purpose="baggage disruption risk scoring",
+                rationale="pricing regression fixture",
+            ),
+        ],
+    )
+
+    closure = pricing.metadata["pricing_driver_closure"]
+    assert pricing.metadata["status"] == "directional_valid_with_extracted_scale"
+    assert pricing.metadata["scale_applied"] is True
+    assert pricing.metadata["pricing_can_be_displayed_as_headline"] is False
+    assert "events_per_day=250000" in closure["confirmed_drivers"]
+    assert "terminal_count=3" in closure["confirmed_drivers"]
+    assert "retention_days=90" in closure["confirmed_drivers"]
+    assert "invalid_extracted_scale_not_applied" not in str(pricing.model_dump(mode="json"))
 
 
 @pytest.mark.asyncio

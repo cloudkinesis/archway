@@ -468,18 +468,23 @@ def derive_pricing_drivers(profile: UseCaseProfile, pricing_driver_overrides: di
     payload_kb = 2.0
     explicit_seconds = _structured_metric(profile, "business_targets", "telemetry_frequency_seconds")
     refresh_minutes = _structured_metric(profile, "business_targets", "refresh_cadence_minutes")
+    latency_minutes = _structured_metric(profile, "business_targets", "latency_target_minutes")
     imagery_windows = _structured_metric(profile, "business_targets", "imagery_windows_per_day")
+    explicit_events_per_day = _structured_metric(profile, "business_targets", "events_per_day")
+    retention_days = _structured_metric(profile, "business_targets", "retention_days")
     if explicit_seconds:
         telemetry_frequency_seconds = max(1, int(explicit_seconds))
     elif refresh_minutes:
         telemetry_frequency_seconds = max(1, int(refresh_minutes * 60))
+    elif latency_minutes:
+        telemetry_frequency_seconds = max(1, int(latency_minutes * 60))
     elif "real_time_ingestion" in profile.capabilities:
         telemetry_frequency_seconds = 60
-    daily_event_volume = int(imagery_windows or (asset_count * 86400 / telemetry_frequency_seconds))
+    daily_event_volume = int(explicit_events_per_day or imagery_windows or (asset_count * 86400 / telemetry_frequency_seconds))
     monthly_event_volume = daily_event_volume * 30
     stream_retention_hours = 24
-    hot_retention_days = 30
-    cold_retention_months = 18 if any(metric.label == "target_timeline_months" for metric in profile.metrics) else 12
+    hot_retention_days = int(retention_days or 30)
+    cold_retention_months = max(1, int((retention_days + 29) // 30)) if retention_days else (18 if any(metric.label == "target_timeline_months" for metric in profile.metrics) else 12)
     flink_kpu_hours = max(720, int((daily_event_volume / 1_000_000) * 24))
     inference_events_per_day = daily_event_volume if "predictive_ml" in profile.capabilities else max(1000, daily_event_volume // 10)
     sagemaker_endpoint_hours = 720 if "predictive_ml" in profile.capabilities else 0
@@ -522,11 +527,18 @@ def derive_industrial_iot_pricing_model(profile: UseCaseProfile) -> IndustrialIo
     explicit_seconds = _structured_metric(profile, "business_targets", "telemetry_frequency_seconds")
     refresh_minutes = _structured_metric(profile, "business_targets", "refresh_cadence_minutes")
     imagery_windows = _structured_metric(profile, "business_targets", "imagery_windows_per_day")
+    explicit_events_per_day = _structured_metric(profile, "business_targets", "events_per_day")
+    latency_minutes = _structured_metric(profile, "business_targets", "latency_target_minutes")
+    retention_days = _structured_metric(profile, "business_targets", "retention_days")
     if explicit_seconds:
         telemetry_frequency_seconds = max(1, int(explicit_seconds))
-        daily_raw = int(asset_count * 86400 / telemetry_frequency_seconds)
     elif refresh_minutes:
         telemetry_frequency_seconds = max(1, int(refresh_minutes * 60))
+    if explicit_events_per_day:
+        daily_raw = int(explicit_events_per_day)
+    elif explicit_seconds:
+        daily_raw = int(asset_count * 86400 / telemetry_frequency_seconds)
+    elif refresh_minutes:
         daily_raw = int(imagery_windows or (asset_count * 1440 / max(1, refresh_minutes)))
     elif raw_samples_per_second:
         telemetry_frequency_seconds = 1
@@ -534,8 +546,8 @@ def derive_industrial_iot_pricing_model(profile: UseCaseProfile) -> IndustrialIo
     else:
         daily_raw = int(asset_count * 86400 / telemetry_frequency_seconds)
     monthly_raw = daily_raw * 30
-    hot_retention_days = 30
-    cold_retention_months = int(_structured_metric(profile, "business_targets", "target_timeline_months") or 12)
+    hot_retention_days = int(retention_days or 30)
+    cold_retention_months = max(1, int((retention_days + 29) // 30)) if retention_days else int(_structured_metric(profile, "business_targets", "target_timeline_months") or 12)
     aggregation_window_seconds = int(assumptions["aggregation_window_seconds"]["expected"])
     feature_windows_per_day = max(asset_count, int(asset_count * 86400 / aggregation_window_seconds))
     candidate_rate = float(assumptions["candidate_anomaly_rate_percent"]["expected"])
@@ -547,7 +559,7 @@ def derive_industrial_iot_pricing_model(profile: UseCaseProfile) -> IndustrialIo
     workflow_count = confirmed_incidents if profile.actions else 0
     assumptions_list = [
         "Assumption profile: balanced_production for industrial IoT telemetry until exact device frequency and payload size are confirmed.",
-        f"Telemetry frequency {'derived from explicit user cadence' if (sample_rate_khz or explicit_seconds or refresh_minutes) else 'assumed'} at {telemetry_frequency_seconds} seconds; low/high profile values are {assumptions['telemetry_frequency_seconds']['low']}s and {assumptions['telemetry_frequency_seconds']['high']}s.",
+        f"Telemetry frequency {'derived from explicit user cadence or latency target' if (sample_rate_khz or explicit_seconds or refresh_minutes or latency_minutes) else 'assumed'} at {telemetry_frequency_seconds} seconds; low/high profile values are {assumptions['telemetry_frequency_seconds']['low']}s and {assumptions['telemetry_frequency_seconds']['high']}s.",
         f"Payload size assumed at {payload_kb:g} KB; low/high profile values are {assumptions['payload_kb']['low']} KB and {assumptions['payload_kb']['high']} KB.",
         f"Candidate anomaly rate assumed at {candidate_rate:g}%; confirmed incident rate assumed at {confirmed_rate:g}%.",
         "ML scoring is priced on aggregated feature windows by default, not every raw telemetry event.",
@@ -960,6 +972,10 @@ def _pricing_validation(profile: UseCaseProfile, drivers: PricingDrivers) -> dic
         "fish_cages": _structured_metric(profile, "asset_counts", "fish_cages"),
         "telemetry_frequency_seconds": _structured_metric(profile, "business_targets", "telemetry_frequency_seconds"),
         "imagery_windows_per_day": _structured_metric(profile, "business_targets", "imagery_windows_per_day"),
+        "events_per_day": _structured_metric(profile, "business_targets", "events_per_day"),
+        "terminal_count": _structured_metric(profile, "asset_counts", "terminal_count"),
+        "retention_days": _structured_metric(profile, "business_targets", "retention_days"),
+        "latency_target_minutes": _structured_metric(profile, "business_targets", "latency_target_minutes"),
     }
     provided = {key: value for key, value in explicit_scale.items() if value}
     scale_applied = True
@@ -980,6 +996,12 @@ def _pricing_validation(profile: UseCaseProfile, drivers: PricingDrivers) -> dic
         if provided.get("transactions_per_day") and drivers.inference_events_per_day < int(provided["transactions_per_day"]):
             scale_applied = False
             reasons.append("Transactions/day scale from the prompt was not applied to inference_events_per_day.")
+        if provided.get("events_per_day") and drivers.daily_event_volume < int(provided["events_per_day"]):
+            scale_applied = False
+            reasons.append("Events/day scale from the prompt was not applied to daily_event_volume.")
+        if provided.get("events_per_day") and "predictive_ml" in profile.capabilities and drivers.inference_events_per_day <= 0:
+            scale_applied = False
+            reasons.append("Events/day scale from the prompt was not connected to predictive inference/scoring drivers.")
         if provided.get("audit_retention_years") and drivers.cold_retention_months < int(provided["audit_retention_years"] * 12):
             scale_applied = False
             reasons.append("Audit retention years from the prompt were not applied to cold_retention_months.")
@@ -1001,12 +1023,18 @@ def _pricing_validation(profile: UseCaseProfile, drivers: PricingDrivers) -> dic
         if expected_assets and drivers.asset_count != expected_assets:
             scale_applied = False
             reasons.append(f"Explicit monitored camera/cage/tower count ({expected_assets}) was not applied to asset_count.")
+        if provided.get("terminal_count") and drivers.asset_count < int(provided["terminal_count"]):
+            scale_applied = False
+            reasons.append("Explicit terminal count from the prompt was not represented in asset_count.")
         if provided.get("telemetry_frequency_seconds") and drivers.telemetry_frequency_seconds != int(provided["telemetry_frequency_seconds"]):
             scale_applied = False
             reasons.append("Explicit telemetry frequency seconds from the prompt was not applied.")
         if refresh_minutes and not refresh_bound_to_telemetry and not refresh_requires_or_cadence:
             scale_applied = False
             reasons.append("Explicit imagery/refresh cadence from the prompt was not applied to telemetry_frequency_seconds.")
+        if provided.get("retention_days") and drivers.hot_retention_days < int(provided["retention_days"]):
+            scale_applied = False
+            reasons.append("Retention days from the prompt were not applied to hot_retention_days.")
     placeholder = drivers.asset_count == 1000 and bool(provided)
     if placeholder:
         scale_applied = False
@@ -1100,6 +1128,16 @@ def _apply_live_demo_pricing_hardening(pricing: PricingAnalysis, profile: UseCas
             "canonical_value": expected_seconds,
             "pricing_value": drivers.telemetry_frequency_seconds,
         })
+    explicit_events = _structured_metric(profile, "business_targets", "events_per_day")
+    if explicit_events and drivers.daily_event_volume < int(explicit_events):
+        invalid = True
+        findings.append({
+            "code": "pricing.explicit_event_volume_not_bound",
+            "severity": "critical",
+            "message": f"Explicit event volume {int(explicit_events)} events/day did not bind to pricing daily_event_volume {drivers.daily_event_volume}.",
+            "canonical_value": int(explicit_events),
+            "pricing_value": drivers.daily_event_volume,
+        })
     provenance = []
     for key in (
         "camera_towers",
@@ -1107,11 +1145,15 @@ def _apply_live_demo_pricing_hardening(pricing: PricingAnalysis, profile: UseCas
         "fish_cages",
         "staff_users",
         "resident_alert_recipients",
+        "terminal_count",
         "telemetry_frequency_seconds",
         "refresh_cadence_minutes",
         "imagery_windows_per_day",
+        "events_per_day",
+        "retention_days",
+        "latency_target_minutes",
     ):
-        section = "asset_counts" if key in {"camera_towers", "underwater_cameras", "fish_cages", "staff_users", "resident_alert_recipients"} else "business_targets"
+        section = "asset_counts" if key in {"camera_towers", "underwater_cameras", "fish_cages", "staff_users", "resident_alert_recipients", "terminal_count"} else "business_targets"
         value = _structured_metric(profile, section, key)
         if value:
             provenance.append({
@@ -1202,10 +1244,18 @@ def _known_dimension_names(profile: UseCaseProfile) -> set[str]:
         known.add("asset_count")
     if _structured_metric(profile, "business_targets", "transactions_per_day") or _metric_value(profile, "transactions_per_day"):
         known.update({"transactions_per_day", "scoring_events_per_day"})
+    if _structured_metric(profile, "business_targets", "events_per_day") or _metric_value(profile, "events_per_day"):
+        known.update({"events_per_day", "daily_event_volume", "event_ingestion_volume"})
+    if _structured_metric(profile, "asset_counts", "terminal_count") or _metric_value(profile, "terminal_count"):
+        known.add("terminal_count")
     if _structured_metric(profile, "business_targets", "latency_target_ms") or _metric_value(profile, "latency_target_ms"):
         known.update({"scoring_latency_target", "latency_target_ms"})
+    if _structured_metric(profile, "business_targets", "latency_target_minutes") or _metric_value(profile, "latency_target_minutes"):
+        known.update({"latency_target_minutes", "scoring_latency_target"})
     if _structured_metric(profile, "business_targets", "audit_retention_years") or _metric_value(profile, "audit_retention_years"):
         known.update({"audit_retention", "data_retention"})
+    if _structured_metric(profile, "business_targets", "retention_days") or _metric_value(profile, "retention_days"):
+        known.update({"retention_days", "data_retention"})
     if _structured_metric(profile, "business_targets", "false_positive_reduction_target_percent") or _metric_value(profile, "false_positive_reduction_target_percent"):
         known.add("false_positive_reduction_target")
     if profile.actions:
@@ -1458,6 +1508,7 @@ def _monitored_asset_count(profile: UseCaseProfile) -> int:
         "cell_towers",
         "manufacturing_tools",
         "operating_room_count",
+        "terminal_count",
     )
     values = [int(_structured_metric(profile, "asset_counts", name) or 0) for name in priority]
     total = sum(value for value in values if value > 0)
