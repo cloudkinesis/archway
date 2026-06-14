@@ -190,6 +190,7 @@ def test_aquaculture_architecture_covers_edge_buffering_without_document_false_p
     assert all(issue.code != "excluded_workload_family_present" for issue in issues)
     assert all("edge buffering is not explicit" not in issue.message.lower() for issue in issues)
     assert any(component.id == "edge_buffer" for component in specs[1].components)
+    assert next(component for component in specs[1].components if component.id == "edge_buffer").scope == "edge_or_regional_control"
     assert any(flow.source == "edge_buffer" or flow.target == "edge_buffer" for flow in specs[1].flows)
 
 
