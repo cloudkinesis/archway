@@ -191,12 +191,18 @@ def _refine_airport_operations_profile(profile: UseCaseProfile, lower: str) -> U
     if not _is_airport_operations(lower):
         return profile
     required = [
-        "industrial_iot_streaming_ml",
+        "operational_event_prediction_workflow",
         "real_time_anomaly_detection",
         "data_platform_analytics",
         "agentic_workflow",
     ]
-    blocked = {"rag_assistant", "document_intelligence", "field_service_automation", "supply_chain_optimization"}
+    blocked = {
+        "industrial_iot_streaming_ml",
+        "rag_assistant",
+        "document_intelligence",
+        "field_service_automation",
+        "supply_chain_optimization",
+    }
     retained = [family for family in profile.workload_families if family not in blocked and family not in required]
     profile.domain = "aviation_operations"
     profile.workload_families = list(dict.fromkeys(required + retained))[:5]
@@ -373,6 +379,7 @@ def _detect_capabilities(lower: str) -> list[str]:
 
 def _rank_workload_families(lower: str, capabilities: list[str]) -> list[str]:
     scores = {
+        "operational_event_prediction_workflow": 0,
         "industrial_iot_streaming_ml": 0,
         "real_time_anomaly_detection": 0,
         "field_service_automation": 0,
@@ -404,7 +411,7 @@ def _rank_workload_families(lower: str, capabilities: list[str]) -> list[str]:
         "time_series_analytics": ("industrial_iot_streaming_ml", "real_time_anomaly_detection", "data_platform_analytics"),
         "anomaly_detection": ("real_time_anomaly_detection", "industrial_iot_streaming_ml"),
         "predictive_ml": ("industrial_iot_streaming_ml", "real_time_anomaly_detection", "data_platform_analytics"),
-        "event_driven_workflow": ("field_service_automation",),
+        "event_driven_workflow": ("operational_event_prediction_workflow", "field_service_automation"),
         "enterprise_integration": ("field_service_automation", "web_api_application"),
         "document_retrieval": ("rag_assistant", "document_intelligence"),
         "generative_ai": ("rag_assistant", "agentic_workflow"),
@@ -498,10 +505,11 @@ def _rank_workload_families(lower: str, capabilities: list[str]) -> list[str]:
         scores["document_intelligence"] = 0
         scores["field_service_automation"] = 0
     if _is_airport_operations(lower):
-        scores["industrial_iot_streaming_ml"] += 6
+        scores["operational_event_prediction_workflow"] += 9
         scores["real_time_anomaly_detection"] += 7
         scores["data_platform_analytics"] += 4
         scores["agentic_workflow"] += 3
+        scores["industrial_iot_streaming_ml"] = 0
         scores["rag_assistant"] = 0
         scores["document_intelligence"] = 0
         scores["field_service_automation"] = 0
@@ -560,7 +568,7 @@ def _excluded_families(lower: str, selected: list[str]) -> list[str]:
     if any(term in lower for term in ("wildfire", "smoke plume", "evacuation", "camera towers")):
         excluded.extend(["field_service_automation", "supply_chain_optimization"])
     if _is_airport_operations(lower):
-        excluded.extend(["rag_assistant", "document_intelligence", "field_service_automation", "supply_chain_optimization"])
+        excluded.extend(["industrial_iot_streaming_ml", "rag_assistant", "document_intelligence", "field_service_automation", "supply_chain_optimization"])
     if _is_healthcare_operations_scheduling(lower):
         excluded.extend(["industrial_iot_streaming_ml", "field_service_automation", "computer_vision_quality_inspection"])
     if "rag_assistant" not in selected[:2] and any(term in lower for term in ("sensor", "telemetry", "real-time", "dispatch", "predictive")):

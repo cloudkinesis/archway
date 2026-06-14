@@ -45,6 +45,8 @@ def select_pricing_driver_family(profile: UseCaseProfile) -> PricingDriverFamily
         return PricingDriverFamily.OTA_FLEET_ORCHESTRATION
     if "inventory_optimization" in capabilities:
         return PricingDriverFamily.SUPPLY_CHAIN_OPTIMIZATION
+    if "operational_event_prediction_workflow" in families:
+        return PricingDriverFamily.GENERIC_DIRECTIONAL
     if {"industrial_iot_streaming_ml", "real_time_anomaly_detection"} & families:
         return PricingDriverFamily.INDUSTRIAL_IOT_STREAMING
     return PricingDriverFamily.GENERIC_DIRECTIONAL

@@ -190,10 +190,11 @@ def test_airport_baggage_profile_respects_explicit_negative_patterns():
     profile_text = json.dumps(brief.model_dump(mode="json")).lower()
 
     assert profile.domain == "aviation_operations"
-    assert "industrial_iot_streaming_ml" in profile.workload_families
+    assert "operational_event_prediction_workflow" in profile.workload_families
+    assert "industrial_iot_streaming_ml" not in profile.workload_families
     assert "real_time_anomaly_detection" in profile.workload_families
-    assert {"rag_assistant", "document_intelligence", "field_service_automation", "supply_chain_optimization"} <= set(profile.excluded_families)
-    assert not {"rag_assistant", "document_intelligence", "field_service_automation", "supply_chain_optimization"} & set(profile.workload_families)
+    assert {"industrial_iot_streaming_ml", "rag_assistant", "document_intelligence", "field_service_automation", "supply_chain_optimization"} <= set(profile.excluded_families)
+    assert not {"industrial_iot_streaming_ml", "rag_assistant", "document_intelligence", "field_service_automation", "supply_chain_optimization"} & set(profile.workload_families)
     assert not {"document_retrieval", "rag_retrieval", "document_ingestion", "inventory_or_depot_integration"} & set(profile.capabilities + profile.capability_model)
     assert "grounded retrieval and question answering" not in profile_text
     assert "contract and document repository" not in profile_text
@@ -211,6 +212,7 @@ def test_airport_baggage_pricing_binds_event_volume_and_retention():
     assert drivers.monthly_event_volume == 7_500_000
     assert drivers.hot_retention_days == 90
     assert drivers.cold_retention_months == 3
+    assert drivers.pricing_driver_family == "generic_directional"
     assert drivers.asset_count != 1000
 
 

@@ -1540,6 +1540,9 @@ def _structured_metric(profile: UseCaseProfile, section: str, key: str) -> float
 
 def _is_streaming_ml_profile(profile: UseCaseProfile) -> bool:
     capabilities = set(profile.capabilities) | set(profile.capability_model)
+    excluded = set(profile.excluded_families) | set(profile.excluded_patterns)
+    if "industrial_iot_streaming_ml" in excluded and "industrial_iot_streaming_ml" not in profile.workload_families:
+        return False
     return bool({"device_telemetry", "stream_ingestion", "stream_processing", "ml_inference", "real_time_anomaly_detection"} & capabilities) and (
         "industrial_iot_streaming_ml" in profile.workload_families or "time_series_storage" in capabilities
     )
