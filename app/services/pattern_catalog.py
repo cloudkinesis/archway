@@ -560,6 +560,15 @@ def pattern_components(profile: UseCaseProfile, production: bool) -> list[Archit
     )
     if has_device_source:
         components.append(ArchitectureComponent(id="devices", name=_asset_source_name(profile), service="external_actor", scope="external_actor", logical_group="Sources and edge", metadata={"metrics": [metric.__dict__ for metric in profile.metrics], "role": "field_asset"}))
+    if has_device_source and _needs_edge_buffering(profile):
+        components.append(ArchitectureComponent(
+            id="edge_buffer",
+            name="Edge Buffering Gateway",
+            service="iot_greengrass",
+            scope="edge_compute",
+            logical_group="Sources and edge",
+            metadata={"role": "edge_buffering", "connectivity": "intermittent_store_and_forward"},
+        ))
     seen = {component.id for component in components}
     for pattern in patterns:
         for service in pattern.services:
@@ -625,6 +634,12 @@ def pattern_flows(profile: UseCaseProfile, production: bool, components: list[Ar
             metadata = _flow_metadata(profile, source, target, label, classification)
             flows.append(ArchitectureFlow(id=f"f{index}", source=source, target=target, label=label, protocol=protocol, metadata=metadata))
             index += 1
+    if "devices" in component_ids and "edge_buffer" in component_ids:
+        flows.append(ArchitectureFlow(id=f"f{index}", source="devices", target="edge_buffer", label="Buffer telemetry and video samples during intermittent connectivity", protocol="MQTT/local network", metadata={"classification": "edge_buffering"}))
+        index += 1
+        if "iot" in component_ids:
+            flows.append(ArchitectureFlow(id=f"f{index}", source="edge_buffer", target="iot", label="Forward store-and-forward batches when connectivity is restored", protocol="MQTT/TLS", metadata={"classification": "edge_buffering"}))
+            index += 1
     if production and "waf" in component_ids and "api" in component_ids and "user" in component_ids:
         if "shield" in component_ids:
             flows.append(ArchitectureFlow(id=f"f{index}", source="user", target="shield", label="DDoS-protected ingress", protocol="HTTPS", metadata={"classification": "request"}))
@@ -651,6 +666,12 @@ def pattern_flows(profile: UseCaseProfile, production: bool, components: list[Ar
             index += 1
             break
     return _dedupe_flows(flows)
+
+
+def _needs_edge_buffering(profile: UseCaseProfile) -> bool:
+    capabilities = set(_capabilities(profile))
+    posture = set(profile.deployment_posture or [])
+    return "intermittent_connectivity" in capabilities or bool({"edge_processing", "hybrid_edge", "hybrid"} & posture)
 
 
 _EFFECTFUL_CLASSIFICATIONS = {"external_write", "trade_block", "policy_change", "network_change", "device_update", "dispatch", "pre_position"}

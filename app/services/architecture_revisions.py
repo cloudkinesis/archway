@@ -133,10 +133,6 @@ class ArchitectureRevisionService:
             excluded = set(spec.metadata.get("excluded_families") or [])
             text_blob = " ".join([
                 spec.title.lower(),
-                spec.summary.lower(),
-                spec.scaling_strategy.lower(),
-                spec.resilience_strategy.lower(),
-                spec.cost_optimization_strategy.lower(),
                 " ".join(service.service.lower() for service in spec.selected_services),
                 " ".join(service.purpose.lower() for service in spec.selected_services),
                 " ".join(service.rationale.lower() for service in spec.selected_services),

@@ -174,7 +174,22 @@ def test_architecture_planner_records_requirement_coverage_for_wildfire():
     labels = {item["label"]: item["status"] for item in coverage["requirements"]}
     assert labels["Computer vision / imagery processing"] == "covered"
     assert labels["Real-time ingestion"] == "covered"
-    assert "Intermittent connectivity / edge buffering" in labels
+    assert labels["Intermittent connectivity / edge buffering"] == "covered"
+
+
+def test_aquaculture_architecture_covers_edge_buffering_without_document_false_positive(tmp_path, monkeypatch):
+    monkeypatch.setenv("ARCHWAY_DATA_DIR", str(tmp_path / ".archway"))
+    get_settings.cache_clear()
+    brief = SynthesisEngine().create_initial_brief(AQUACULTURE_USE_CASE)
+    report = _minimal_report(brief)
+
+    specs = ArchitecturePlanner().generate(report)
+    issues = ArchitectureRevisionService().validate(specs)
+
+    assert all(issue.code != "excluded_workload_family_present" for issue in issues)
+    assert all("edge buffering is not explicit" not in issue.message.lower() for issue in issues)
+    assert any(component.id == "edge_buffer" for component in specs[1].components)
+    assert any(flow.source == "edge_buffer" or flow.target == "edge_buffer" for flow in specs[1].flows)
 
 
 def test_live_call_repairs_malformed_structured_output(monkeypatch, tmp_path):
