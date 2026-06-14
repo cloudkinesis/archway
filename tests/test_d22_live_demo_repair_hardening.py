@@ -16,6 +16,7 @@ from app.models.domain import (
 from app.services.agentic.live_bedrock_harness import LiveRunContext, live_call, reset_live_budget
 from app.services.agentic.use_case_analyst import UseCaseAnalystProposal
 from app.services.architecture import ArchitecturePlanner
+from app.services.architecture_critique import ArchitectureCritiqueFinding, _downgrade_unconfirmed_model_criticals
 from app.services.architecture_revisions import ArchitectureRevisionService
 from app.services.diagnostic_diagrams import diagnostic_diagram_gallery
 from app.services.llm.base import LLMMessage, LLMResult, LLMTaskType
@@ -190,6 +191,22 @@ def test_aquaculture_architecture_covers_edge_buffering_without_document_false_p
     assert all("edge buffering is not explicit" not in issue.message.lower() for issue in issues)
     assert any(component.id == "edge_buffer" for component in specs[1].components)
     assert any(flow.source == "edge_buffer" or flow.target == "edge_buffer" for flow in specs[1].flows)
+
+
+def test_model_only_architecture_critique_cannot_create_critical_blocker():
+    model_finding = ArchitectureCritiqueFinding(
+        severity="critical",
+        category="missing_component",
+        issue="The architecture does not include a component for edge buffering.",
+        why_it_matters="A live model claimed the component is missing.",
+        recommended_fix="Add edge buffering.",
+        auto_repairable=False,
+    )
+    downgraded = _downgrade_unconfirmed_model_criticals([model_finding], deterministic_findings=[])
+
+    assert downgraded[0].severity == "warning"
+    assert "audit-only" in downgraded[0].why_it_matters
+    assert _downgrade_unconfirmed_model_criticals([model_finding], deterministic_findings=[model_finding])[0].severity == "critical"
 
 
 def test_live_call_repairs_malformed_structured_output(monkeypatch, tmp_path):

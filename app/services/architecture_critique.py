@@ -41,12 +41,14 @@ class ArchitectureCritiqueService:
         )
         if result.validated and isinstance(result.parsed, ArchitectureCritique):
             parsed = result.parsed
-            parsed.findings = deterministic.findings + parsed.findings
+            deterministic_findings = list(deterministic.findings)
+            parsed.findings = deterministic_findings + parsed.findings
             parsed.findings = _drop_satisfied_media_findings(parsed.findings, understanding, spec)
             parsed.findings = _drop_satisfied_governance_findings(parsed.findings, spec)
             parsed.findings = _drop_satisfied_human_approval_findings(parsed.findings, spec)
             parsed.findings = _drop_satisfied_command_center_findings(parsed.findings, spec)
             parsed.findings = _drop_satisfied_healthcare_occupancy_findings(parsed.findings, spec)
+            parsed.findings = _downgrade_unconfirmed_model_criticals(parsed.findings, deterministic_findings)
             parsed.passed = not any(item.severity == "critical" for item in parsed.findings)
             if deterministic.customer_readiness_cap == "internal_only":
                 parsed.customer_readiness_cap = "internal_only"
@@ -80,6 +82,39 @@ def deterministic_architecture_critique(raw_use_case: str, understanding: DeepUs
 
 def _finding(severity: str, category: str, issue: str, why: str, fix: str, repairable: bool) -> ArchitectureCritiqueFinding:
     return ArchitectureCritiqueFinding(severity=severity, category=category, issue=issue, why_it_matters=why, recommended_fix=fix, auto_repairable=repairable)
+
+
+def _downgrade_unconfirmed_model_criticals(findings: list[ArchitectureCritiqueFinding], deterministic_findings: list[ArchitectureCritiqueFinding]) -> list[ArchitectureCritiqueFinding]:
+    """Keep model critique audit-useful without letting it seize compiler authority.
+
+    Deterministic findings are still allowed to block. Critical findings emitted
+    only by a model are downgraded to warnings unless a deterministic critique
+    produced the same critical category+issue. This prevents stale/overbroad live
+    critiques from forcing diagnostic-only output when the pattern catalog and
+    validators already carry the required component/flow coverage.
+    """
+    deterministic_critical_keys = {
+        _finding_key(item)
+        for item in deterministic_findings
+        if item.severity == "critical"
+    }
+    output: list[ArchitectureCritiqueFinding] = []
+    for item in findings:
+        if item.severity == "critical" and _finding_key(item) not in deterministic_critical_keys:
+            output.append(item.model_copy(update={
+                "severity": "warning",
+                "why_it_matters": (
+                    f"{item.why_it_matters} This live-model critique is audit-only unless deterministic "
+                    "validation confirms the same blocker."
+                ),
+            }))
+            continue
+        output.append(item)
+    return output
+
+
+def _finding_key(item: ArchitectureCritiqueFinding) -> tuple[str, str]:
+    return (item.category, item.issue.strip().lower())
 
 
 def _drop_satisfied_media_findings(findings: list[ArchitectureCritiqueFinding], understanding: DeepUseCaseUnderstanding, spec: ArchitectureSpec) -> list[ArchitectureCritiqueFinding]:
