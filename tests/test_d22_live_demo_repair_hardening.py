@@ -7,6 +7,7 @@ from app.models.domain import (
     ArchitectureComponent,
     ArchitectureFlow,
     ArchitectureSpec,
+    AWSServiceSelection,
     AWSServiceRecommendation,
     ObservabilityControl,
     PricingAnalysis,
@@ -20,7 +21,7 @@ from app.services.architecture_critique import ArchitectureCritiqueFinding, _dow
 from app.services.architecture_revisions import ArchitectureRevisionService
 from app.services.diagnostic_diagrams import diagnostic_diagram_gallery
 from app.services.llm.base import LLMMessage, LLMResult, LLMTaskType
-from app.services.pricing import PricingDrivers, _apply_live_demo_pricing_hardening, derive_pricing_drivers
+from app.services.pricing import PricingDrivers, PricingEngine, _apply_live_demo_pricing_hardening, derive_pricing_drivers
 from app.services.synthesis import SynthesisEngine
 from app.services.use_case_profile import profile_from_metadata, profile_use_case
 
@@ -90,6 +91,35 @@ def test_wildfire_pricing_binds_towers_and_refresh_cadence_not_placeholder():
     assert drivers.daily_event_volume == 12 * 144
     assert drivers.asset_count != 1000
     assert "field_service_automation" in profile.excluded_families
+
+
+@pytest.mark.asyncio
+async def test_wildfire_pricing_engine_accepts_refresh_cadence_as_edge_telemetry_scale():
+    brief = SynthesisEngine().create_initial_brief(WILDFIRE_USE_CASE)
+    pricing = await PricingEngine().estimate(
+        brief,
+        [
+            AWSServiceSelection(
+                service="AWS IoT Core",
+                purpose="tower telemetry ingest",
+                rationale="pricing regression fixture",
+            ),
+            AWSServiceSelection(
+                service="Amazon SageMaker",
+                purpose="smoke plume inference",
+                rationale="pricing regression fixture",
+            ),
+        ],
+    )
+
+    closure = pricing.metadata["pricing_driver_closure"]
+    assert pricing.metadata["status"] == "directional_valid_with_extracted_scale"
+    assert pricing.metadata["scale_applied"] is True
+    assert "invalid_extracted_scale_not_applied" not in str(pricing.model_dump(mode="json"))
+    assert "camera_towers=12" in closure["confirmed_drivers"]
+    assert "refresh_cadence_minutes=10" in closure["confirmed_drivers"]
+    assert closure["procurement_ready"] is False
+    assert pricing.metadata["pricing_can_be_displayed_as_headline"] is False
 
 
 def test_pricing_hardening_surfaces_confirmed_canonical_drivers_in_closure():

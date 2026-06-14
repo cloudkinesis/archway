@@ -986,7 +986,15 @@ def _pricing_validation(profile: UseCaseProfile, drivers: PricingDrivers) -> dic
         if provided.get("operating_room_count") and drivers.operating_room_count < int(provided["operating_room_count"]):
             scale_applied = False
             reasons.append("Operating room count from the prompt was not applied to healthcare OR pricing drivers.")
-        if provided.get("refresh_cadence_minutes") and drivers.refresh_cadence_minutes != int(provided["refresh_cadence_minutes"]):
+        refresh_minutes = provided.get("refresh_cadence_minutes")
+        refresh_bound_to_telemetry = bool(
+            refresh_minutes and drivers.telemetry_frequency_seconds == int(refresh_minutes * 60)
+        )
+        refresh_requires_or_cadence = (
+            drivers.source == "healthcare_or_extracted_operating_room_metrics"
+            or drivers.refresh_cadence_minutes > 0
+        )
+        if refresh_minutes and refresh_requires_or_cadence and drivers.refresh_cadence_minutes != int(refresh_minutes):
             scale_applied = False
             reasons.append("Prediction refresh cadence from the prompt was not applied to recommendation_runs_per_day.")
         expected_assets = int(sum(provided.get(key, 0) or 0 for key in ("camera_towers", "underwater_cameras", "fish_cages")))
@@ -996,7 +1004,7 @@ def _pricing_validation(profile: UseCaseProfile, drivers: PricingDrivers) -> dic
         if provided.get("telemetry_frequency_seconds") and drivers.telemetry_frequency_seconds != int(provided["telemetry_frequency_seconds"]):
             scale_applied = False
             reasons.append("Explicit telemetry frequency seconds from the prompt was not applied.")
-        if provided.get("refresh_cadence_minutes") and drivers.telemetry_frequency_seconds != int(provided["refresh_cadence_minutes"] * 60):
+        if refresh_minutes and not refresh_bound_to_telemetry and not refresh_requires_or_cadence:
             scale_applied = False
             reasons.append("Explicit imagery/refresh cadence from the prompt was not applied to telemetry_frequency_seconds.")
     placeholder = drivers.asset_count == 1000 and bool(provided)
@@ -1114,6 +1122,23 @@ def _apply_live_demo_pricing_hardening(pricing: PricingAnalysis, profile: UseCas
                 "confidence": "high",
             })
     closure = dict(pricing.metadata.get("pricing_driver_closure") or {})
+    if not closure and provenance:
+        closure = {
+            "workload_family": drivers.pricing_driver_family,
+            "status": "missing_non_critical",
+            "pricing_maturity": "pricing_directional_with_assumptions",
+            "confirmed_drivers": [],
+            "assumed_drivers": [],
+            "missing_drivers": [],
+            "headline_pricing_allowed": False,
+            "directional_scenario_allowed": pricing.metadata.get("status") != "invalid_extracted_scale_not_applied",
+            "procurement_ready": False,
+            "scenario_profile_used": None,
+            "recommended_next_action": "ready_for_directional_pricing",
+            "next_validation_steps": [
+                "Confirm exact AWS SKU filters, rate tier bindings, and measured production traffic before procurement."
+            ],
+        }
     if closure and provenance:
         confirmed = list(closure.get("confirmed_drivers") or [])
         confirmed.extend(f"{item['driver_key']}={_display_driver_value(item['value'])}" for item in provenance)
