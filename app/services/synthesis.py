@@ -1,5 +1,6 @@
 import re
 
+from app.core.config import get_settings
 from app.models.domain import (
     AICapability,
     Assumption,
@@ -23,6 +24,7 @@ from app.services.capability_router import CapabilityRouter
 from app.services.discovery_planner import DiscoveryPlannerService
 from app.services.display_labels import ACRONYM_CASING, TITLE_TRAILING_STOPWORDS, display_label
 from app.services.pattern_catalog import poc_scope, pricing_dimensions, production_scope
+from app.services.open_world_understanding import OpenWorldUnderstandingService
 from app.services.use_case_profile import profile_from_metadata, profile_to_metadata, profile_use_case, refine_profile_with_context
 
 
@@ -39,6 +41,10 @@ def _attach_capability_decision(profile, raw_use_case: str) -> None:
         profile.capability_decision = {}
 
 
+def _is_open_world_profile(profile) -> bool:
+    return getattr(profile, "profile_source", "") == "open_world_understanding"
+
+
 class SynthesisEngine:
     def opening_message(self, brief: UseCaseBrief) -> str:
         return opening_interview_message(brief)
@@ -50,12 +56,17 @@ class SynthesisEngine:
         return _interview_message(question, answered_count)
 
     def create_initial_brief(self, raw_use_case: str) -> UseCaseBrief:
-        profile = profile_use_case(raw_use_case)
-        profile.discovery_plan = DiscoveryPlannerService().plan_sync(
-            raw_use_case,
-            profile,
-            previous_answers=[],
-        ).model_dump(mode="json")
+        settings = get_settings()
+        open_world = OpenWorldUnderstandingService().build(raw_use_case, settings=settings)
+        profile = open_world.profile or profile_use_case(raw_use_case)
+        if not open_world.profile and settings.enable_open_world_understanding:
+            profile.open_world_understanding = open_world.trace.model_dump(mode="json")
+        if not _is_open_world_profile(profile):
+            profile.discovery_plan = DiscoveryPlannerService().plan_sync(
+                raw_use_case,
+                profile,
+                previous_answers=[],
+            ).model_dump(mode="json")
         _attach_capability_decision(profile, raw_use_case)
         industry = profile.domain or _detect_industry(raw_use_case)
         sensitive = _looks_sensitive(raw_use_case, industry)
@@ -80,7 +91,7 @@ class SynthesisEngine:
                 confidence="medium",
             ),
         ]
-        open_questions = _questions_for_profile(profile)
+        open_questions = open_world.open_questions or _questions_for_profile(profile)
         return UseCaseBrief(
             title=title,
             raw_use_case=raw_use_case,
@@ -107,13 +118,14 @@ class SynthesisEngine:
         existing_interview = dict(((brief.use_case_profile or {}).get("interview") or {}))
         profile = profile_from_metadata(brief.use_case_profile, brief.raw_use_case)
         previous_answers = [item.text for item in brief.assumptions if item.user_confirmed]
-        plan = await DiscoveryPlannerService().plan(
-            brief.raw_use_case,
-            profile,
-            previous_answers=previous_answers,
-            session_id=session_id,
-        )
-        profile.discovery_plan = plan.model_dump(mode="json")
+        if not _is_open_world_profile(profile):
+            plan = await DiscoveryPlannerService().plan(
+                brief.raw_use_case,
+                profile,
+                previous_answers=previous_answers,
+                session_id=session_id,
+            )
+            profile.discovery_plan = plan.model_dump(mode="json")
         _attach_capability_decision(profile, brief.raw_use_case)
         metadata = profile_to_metadata(profile)
         if existing_interview:
@@ -164,11 +176,12 @@ class SynthesisEngine:
             profile_from_metadata(profile_metadata, updated.raw_use_case),
             "\n".join([updated.raw_use_case, updated.refined_problem_statement, *[item.text for item in updated.assumptions]]),
         )
-        rerouted.discovery_plan = DiscoveryPlannerService().plan_sync(
-            updated.raw_use_case,
-            rerouted,
-            previous_answers=[item.text for item in updated.assumptions if item.user_confirmed],
-        ).model_dump(mode="json")
+        if not _is_open_world_profile(rerouted):
+            rerouted.discovery_plan = DiscoveryPlannerService().plan_sync(
+                updated.raw_use_case,
+                rerouted,
+                previous_answers=[item.text for item in updated.assumptions if item.user_confirmed],
+            ).model_dump(mode="json")
         _attach_capability_decision(rerouted, updated.raw_use_case)
         profile_metadata = {**profile_to_metadata(rerouted), "interview": interview}
         updated.use_case_profile = profile_metadata

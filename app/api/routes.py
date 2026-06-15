@@ -79,6 +79,7 @@ async def create_session(request: CreateSessionRequest):
     brief = await synthesis.enhance_brief(brief)
     session = store.create(request.initial_use_case, brief)
     artifacts.write_json(session.id, "brief", "current", brief.model_dump(mode="json"))
+    _write_open_world_understanding_trace(session.id, brief)
     AuditLogger(session.id).event("synthesis", "session_created", inputs_hash=hash_payload(request.initial_use_case), output_hash=hash_payload(session.model_dump()))
     return {"session": session, "readiness": synthesis.readiness(brief), "message": synthesis.opening_message(brief)}
 
@@ -164,6 +165,7 @@ async def synthesis_message(session_id: str, request: SynthesisMessageRequest):
     session.status = SessionStatus.shaping
     store.save(session)
     artifacts.write_json(session.id, "brief", "current", response.brief.model_dump(mode="json"))
+    _write_open_world_understanding_trace(session.id, response.brief)
     AuditLogger(session.id).event("synthesis", "message_processed", inputs_hash=hash_payload(request.message), output_hash=hash_payload(response.brief.model_dump()))
     return response
 
@@ -193,6 +195,7 @@ async def synthesis_proceed(session_id: str, request: ProceedRequest):
         session.status = SessionStatus.researching
         store.save(session)
         artifacts.write_json(session.id, "brief", "current", session.current_summary.model_dump(mode="json"))
+        _write_open_world_understanding_trace(session.id, session.current_summary)
         return {"proceeded": True, "message": "I can proceed now. I’ll make conservative assumptions and call them out clearly.", "readiness": readiness}
     return {
         "proceeded": False,
@@ -597,6 +600,13 @@ def _require_session(session_id: str):
     if session is None:
         raise HTTPException(status_code=404, detail="Session was not found.")
     return session
+
+
+def _write_open_world_understanding_trace(session_id: str, brief) -> None:
+    profile = dict(getattr(brief, "use_case_profile", None) or {})
+    trace = profile.get("open_world_understanding")
+    if isinstance(trace, dict) and trace:
+        artifacts.write_json(session_id, "raw", "open_world_understanding", trace)
 
 
 def _read_json(session_id: str, artifact_id: str):

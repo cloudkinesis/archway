@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass, field
 
+from app.core.config import get_settings
 from app.services.capability_extractor import explicit_negative_constraints, extract_capabilities
 from app.services.metric_extractor import extract_metrics
 
@@ -34,6 +35,8 @@ class UseCaseProfile:
     confidence: str = "medium"
     discovery_plan: dict = field(default_factory=dict)
     capability_decision: dict = field(default_factory=dict)
+    profile_source: str = "deterministic"
+    open_world_understanding: dict = field(default_factory=dict)
 
     @property
     def primary_family(self) -> str:
@@ -97,6 +100,8 @@ def profile_to_metadata(profile: UseCaseProfile) -> dict:
         "confidence": profile.confidence,
         "discovery_plan": profile.discovery_plan,
         "capability_decision": profile.capability_decision,
+        "profile_source": profile.profile_source,
+        "open_world_understanding": profile.open_world_understanding,
     }
 
 
@@ -124,12 +129,18 @@ def profile_from_metadata(metadata: dict | None, raw_use_case: str) -> UseCasePr
         confidence=values.get("confidence") or "medium",
         discovery_plan=dict(values.get("discovery_plan") or {}),
         capability_decision=dict(values.get("capability_decision") or {}),
+        profile_source=values.get("profile_source") or "deterministic",
+        open_world_understanding=dict(values.get("open_world_understanding") or {}),
     )
     return refine_profile_with_context(profile, raw_use_case)
 
 
 def refine_profile_with_context(profile: UseCaseProfile, context_text: str) -> UseCaseProfile:
     lower = context_text.lower()
+    if profile.profile_source == "open_world_understanding":
+        return _apply_explicit_negative_constraints(profile, lower)
+    if get_settings().disable_domain_refiners:
+        return _apply_explicit_negative_constraints(profile, lower)
     profile = _refine_aquaculture_profile(profile, lower)
     profile = _refine_wildfire_profile(profile, lower)
     profile = _refine_airport_operations_profile(profile, lower)

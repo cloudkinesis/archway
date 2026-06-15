@@ -30,6 +30,7 @@ class LLMTaskType(str, Enum):
     live_diagram_planning = "live_diagram_planning"
     live_narrative_synthesis = "live_narrative_synthesis"
     live_reviewer_critique = "live_reviewer_critique"
+    open_world_understanding = "open_world_understanding"
 
 
 class LLMTask(BaseModel):

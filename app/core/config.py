@@ -191,6 +191,15 @@ class Settings(BaseModel):
     enable_agentic_architecture: bool = Field(
         default_factory=lambda: os.getenv("ARCHWAY_ENABLE_AGENTIC_ARCHITECTURE", "false") == "true"
     )
+    # D23 open-world understanding. Default OFF: deterministic synthesis/profile
+    # behavior remains the offline floor. When enabled in live_demo mode, Bedrock
+    # proposes canonical use-case understanding before deterministic validation.
+    enable_open_world_understanding: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_OPEN_WORLD_UNDERSTANDING", "false") == "true"
+    )
+    disable_domain_refiners: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_DISABLE_DOMAIN_REFINERS", "false") == "true"
+    )
 
     @property
     def sessions_dir(self) -> Path:
