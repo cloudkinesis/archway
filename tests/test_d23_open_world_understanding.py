@@ -4,7 +4,8 @@ from app.core.config import get_settings
 from app.models.domain import OpenQuestion
 from app.services.agentic.live_audit import BudgetState, LiveCallAudit, LiveCallResult
 from app.services.llm.base import LLMTaskType
-from app.services.open_world_eval import d23_eval_scenarios, run_fixture_eval
+from app.services.open_world_eval import _contains_unnegated_term, d23_eval_scenarios, run_fixture_eval
+from app.services.open_world_eval import fixture_understanding_for_scenario, run_live_eval
 from app.services.open_world_understanding import (
     CanonicalCandidate,
     CanonicalQuestion,
@@ -12,6 +13,7 @@ from app.services.open_world_understanding import (
     build_result_from_understanding,
     classify_aws_service,
     extract_source_facts,
+    extract_source_terms,
     validate_exclusions,
     validate_fact_preservation,
 )
@@ -89,6 +91,20 @@ def test_extract_source_facts_preserves_numbers_and_exclusions():
     assert any(fact.kind == "explicit_exclusion" and "depot inventory" in fact.source_text.lower() for fact in facts)
 
 
+def test_extract_source_terms_captures_domain_specific_phrases_without_domain_rules():
+    terms = extract_source_terms(
+        "Predict engine failures for 70 cargo vessels from vibration, fuel quality, maintenance logs, "
+        "and sea state. Connectivity is intermittent and alerts go to fleet engineers."
+    )
+
+    assert "predict engine failures" in terms
+    assert "70 cargo vessels" in terms
+    assert "vibration" in terms
+    assert "fuel quality" in terms
+    assert "maintenance logs" in terms
+    assert "fleet engineers" in terms
+
+
 def test_validator_rejects_dropped_metric_and_reintroduced_exclusion():
     facts = extract_source_facts(AIRPORT_USE_CASE)
     understanding = _airport_understanding()
@@ -102,10 +118,65 @@ def test_validator_rejects_dropped_metric_and_reintroduced_exclusion():
     assert any(issue.code == "open_world_understanding.exclusion_violated" for issue in exclusion_issues)
 
 
+def test_build_result_repairs_missing_source_facts_before_accepting():
+    understanding = _airport_understanding()
+    understanding.scale_metrics = [fact for fact in understanding.scale_metrics if "80 baggage belts" not in fact.source_text]
+
+    result = build_result_from_understanding(AIRPORT_USE_CASE, understanding)
+
+    assert result.trace.accepted
+    assert any(issue.code == "open_world_understanding.fact_repaired" for issue in result.trace.validation_issues)
+    assert any(fact.source_text == "80 baggage belts" for fact in result.trace.understanding.scale_metrics)
+
+
+def test_build_result_repairs_missing_source_terms_without_domain_rules():
+    raw = (
+        "Predict engine failures for 70 cargo vessels from vibration, fuel quality, maintenance logs, "
+        "and sea state. Connectivity is intermittent and alerts go to fleet engineers."
+    )
+    understanding = CanonicalWorkloadUnderstanding(
+        domain_candidates=[],
+        workload_intent="Predict operational failure risk.",
+        risks_unknowns=[],
+        candidate_aws_services=[],
+        missing_questions=[],
+    )
+
+    result = build_result_from_understanding(raw, understanding)
+    repaired_labels = " ".join(
+        item.label
+        for item in (
+            result.trace.understanding.actors
+            + result.trace.understanding.source_systems
+            + result.trace.understanding.events_signals
+            + result.trace.understanding.actions_workflows
+        )
+    )
+
+    assert result.trace.accepted
+    assert "fleet engineers" in repaired_labels
+    assert "vibration" in repaired_labels
+    assert any(issue.code == "open_world_understanding.source_term_repaired" for issue in result.trace.validation_issues)
+
+
 def test_service_validation_is_three_state():
     assert classify_aws_service("Amazon S3").state == "known-real"
+    assert classify_aws_service("aws_iot_core").state == "known-real"
+    assert classify_aws_service("aws_step_functions").state == "known-real"
+    assert classify_aws_service("timestream").state == "known-real"
+    assert classify_aws_service("rekognition").state == "known-real"
+    assert classify_aws_service("s3").state == "known-real"
+    assert classify_aws_service("aws_s3").state == "known-real"
+    assert classify_aws_service("future_data_exchange").state == "unknown-unverified"
     assert classify_aws_service("AWS Quantum Unicorn Ledger").state == "unknown-unverified"
     assert classify_aws_service("BaggageAI Magic Router").state == "likely-hallucinated"
+
+
+def test_forbidden_term_scorer_uses_word_boundaries_and_negation():
+    assert not _contains_unnegated_term("Use object storage for the audit archive.", "rag")
+    assert not _contains_unnegated_term("This is not a RAG chatbot.", "rag")
+    assert not _contains_unnegated_term("constraint:not_rag_chatbot", "rag")
+    assert _contains_unnegated_term("The proposal reintroduced RAG retrieval.", "rag")
 
 
 def test_adapter_generates_open_world_profile_and_questions():
@@ -186,6 +257,30 @@ def test_d23_eval_battery_is_diverse_and_passes_offline():
     assert result["scenario_count"] == len(scenarios)
     assert result["failed"] == 0
     assert len({item.domain for item in scenarios}) >= 10
+
+
+def test_d23_live_eval_path_scores_model_results_without_fixtures(monkeypatch):
+    scenarios = d23_eval_scenarios()
+    by_text = {scenario.use_case: scenario for scenario in scenarios}
+
+    class FakeOpenWorldUnderstandingService:
+        def build(self, raw_use_case: str, *, session_id: str | None = None):
+            scenario = by_text[raw_use_case]
+            return build_result_from_understanding(
+                raw_use_case,
+                fixture_understanding_for_scenario(scenario),
+                provider="bedrock",
+                model_id="amazon.nova-pro-v1:0",
+            )
+
+    monkeypatch.setattr("app.services.open_world_eval.OpenWorldUnderstandingService", FakeOpenWorldUnderstandingService)
+
+    result = run_live_eval(session_prefix="test_d23_live")
+
+    assert result["mode"] == "live_bedrock_refiners_disabled"
+    assert result["scenario_count"] == len(scenarios)
+    assert result["failed"] == 0
+    assert {item["provider"] for item in result["results"]} == {"bedrock"}
 
 
 def test_open_world_questions_are_preserved_through_synthesis_planner():

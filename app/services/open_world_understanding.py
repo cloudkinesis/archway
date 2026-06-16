@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.config import Settings, get_settings
 from app.models.domain import OpenQuestion, SynthesisQuestion, Assumption
@@ -25,27 +25,69 @@ ValidationSeverity = Literal["error", "warning", "info"]
 
 
 class CanonicalSourceFact(BaseModel):
-    fact_id: str
-    kind: FactKind
+    fact_id: str = ""
+    kind: str = "metric"
     source_text: str
     normalized_value: float | str | None = None
     unit: str | None = None
     label: str
 
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _normalize_kind(cls, value: Any) -> str:
+        lowered = str(value or "metric").lower().replace("-", "_").replace(" ", "_")
+        return "explicit_exclusion" if "exclusion" in lowered else "metric"
+
 
 class CanonicalCandidate(BaseModel):
     label: str
     source_text: str | None = None
-    confidence: Literal["low", "medium", "high"] = "medium"
+    confidence: str = "medium"
     reason: str | None = None
-    provenance: Literal["user_input", "model_proposed", "derived"] = "model_proposed"
+    provenance: str = "model_proposed"
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _normalize_confidence(cls, value: Any) -> str:
+        lowered = str(value or "medium").lower()
+        if "high" in lowered:
+            return "high"
+        if "low" in lowered:
+            return "low"
+        return "medium"
+
+    @field_validator("provenance", mode="before")
+    @classmethod
+    def _normalize_provenance(cls, value: Any) -> str:
+        lowered = str(value or "model_proposed").lower().replace("-", "_").replace(" ", "_")
+        if lowered in {"user", "user_input", "source", "source_text", "raw_input"}:
+            return "user_input"
+        if lowered in {"derived", "deterministic", "inferred"}:
+            return "derived"
+        return "model_proposed"
 
 
 class CanonicalQuestion(BaseModel):
     question: str
     why_it_matters: str
-    impact: Literal["pricing", "security", "architecture", "performance", "compliance", "scope"] = "architecture"
+    impact: str = "architecture"
     expected_answer_style: str = "A concrete value, range, or 'unknown, let Archway assume'."
+
+    @field_validator("impact", mode="before")
+    @classmethod
+    def _normalize_impact(cls, value: Any) -> str:
+        lowered = str(value or "architecture").lower().replace("-", "_").replace(" ", "_")
+        if lowered in {"pricing", "cost", "volume", "usage"}:
+            return "pricing"
+        if lowered in {"security", "governance", "privacy", "risk"}:
+            return "security"
+        if lowered in {"performance", "latency", "throughput", "slo", "sla"}:
+            return "performance"
+        if lowered in {"compliance", "regulatory", "residency"}:
+            return "compliance"
+        if lowered in {"scope", "business", "requirements"}:
+            return "scope"
+        return "architecture"
 
 
 class CanonicalWorkloadUnderstanding(BaseModel):
@@ -66,7 +108,12 @@ class CanonicalWorkloadUnderstanding(BaseModel):
     candidate_aws_capabilities: list[CanonicalCandidate] = Field(default_factory=list)
     candidate_aws_services: list[CanonicalCandidate] = Field(default_factory=list)
     missing_questions: list[CanonicalQuestion] = Field(default_factory=list)
-    confidence: Literal["low", "medium", "high"] = "medium"
+    confidence: str = "medium"
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _normalize_confidence(cls, value: Any) -> str:
+        return CanonicalCandidate._normalize_confidence(value)
 
 
 class ServiceValidation(BaseModel):
@@ -183,7 +230,9 @@ def build_result_from_understanding(
         "source_facts": [fact.model_dump(mode="json") for fact in source_facts],
         "schema_version": SCHEMA_VERSION,
     })
-    issues = validate_fact_preservation(source_facts, understanding)
+    understanding, fact_repair_issues = repair_missing_source_facts(source_facts, understanding)
+    understanding, term_repair_issues = repair_missing_source_terms(raw_use_case, source_facts, understanding)
+    issues = fact_repair_issues + term_repair_issues + validate_fact_preservation(source_facts, understanding)
     issues.extend(validate_exclusions(source_facts, understanding))
     service_validations = [classify_aws_service(item.label) for item in understanding.candidate_aws_services]
     issues.extend(
@@ -287,6 +336,56 @@ def validate_fact_preservation(
     return issues
 
 
+def repair_missing_source_facts(
+    source_facts: list[CanonicalSourceFact],
+    understanding: CanonicalWorkloadUnderstanding,
+) -> tuple[CanonicalWorkloadUnderstanding, list[UnderstandingValidationIssue]]:
+    repaired = understanding.model_copy(deep=True)
+    proposed = list(repaired.scale_metrics) + list(repaired.latency_slos) + list(repaired.retention) + list(repaired.exclusions)
+    issues: list[UnderstandingValidationIssue] = []
+    for fact in source_facts:
+        if _fact_preserved(fact, proposed):
+            continue
+        bucket = _repair_bucket_for_fact(fact)
+        getattr(repaired, bucket).append(fact)
+        proposed.append(fact)
+        issues.append(UnderstandingValidationIssue(
+            severity="info",
+            code="open_world_understanding.fact_repaired",
+            message=f"Deterministically reinserted user-stated fact: {fact.source_text}",
+            target=fact.fact_id,
+        ))
+    return repaired, issues
+
+
+def repair_missing_source_terms(
+    raw_use_case: str,
+    source_facts: list[CanonicalSourceFact],
+    understanding: CanonicalWorkloadUnderstanding,
+) -> tuple[CanonicalWorkloadUnderstanding, list[UnderstandingValidationIssue]]:
+    repaired = understanding.model_copy(deep=True)
+    text = _understanding_text_for_repair(repaired)
+    exclusions = [str(fact.normalized_value or fact.label).replace("_", " ") for fact in source_facts if fact.kind == "explicit_exclusion"]
+    issues: list[UnderstandingValidationIssue] = []
+    for term in extract_source_terms(raw_use_case):
+        normalized = term.lower()
+        if len(normalized) < 4 or normalized in text:
+            continue
+        if any(exclusion and _term_overlaps_exclusion(normalized, exclusion) for exclusion in exclusions):
+            continue
+        candidate = CanonicalCandidate(label=term, source_text=term, confidence="medium", provenance="derived")
+        bucket = _term_repair_bucket(normalized)
+        getattr(repaired, bucket).append(candidate)
+        text += " " + normalized
+        issues.append(UnderstandingValidationIssue(
+            severity="info",
+            code="open_world_understanding.source_term_repaired",
+            message=f"Deterministically reinserted source term: {term}",
+            target=bucket,
+        ))
+    return repaired, issues
+
+
 def validate_exclusions(
     source_facts: list[CanonicalSourceFact],
     understanding: CanonicalWorkloadUnderstanding,
@@ -333,7 +432,13 @@ def classify_aws_service(service_name: str) -> ServiceValidation:
             reason="Matched local AWS pricing/service alias vocabulary.",
         )
     normalized = _normalize_service_name(service_name)
-    if re.search(r"\b(aws|amazon)\b", normalized) and not _obviously_fake_service(normalized):
+    if _obviously_fake_service(normalized):
+        return ServiceValidation(
+            service_name=service_name,
+            state="likely-hallucinated",
+            reason="Contains fake, fictional, or productized terms that do not look like an AWS service name.",
+        )
+    if re.search(r"\b(aws|amazon)\b", normalized):
         return ServiceValidation(
             service_name=service_name,
             state="unknown-unverified",
@@ -344,6 +449,12 @@ def classify_aws_service(service_name: str) -> ServiceValidation:
             service_name=service_name,
             state="known-real",
             reason="Contained a local AWS service alias.",
+        )
+    if _looks_like_bare_service_candidate(normalized):
+        return ServiceValidation(
+            service_name=service_name,
+            state="unknown-unverified",
+            reason="Bare model-proposed service label is not in the local vocabulary; accepted as unverified, not priced.",
         )
     return ServiceValidation(
         service_name=service_name,
@@ -458,6 +569,7 @@ def _messages(raw_use_case: str, source_facts: list[CanonicalSourceFact]) -> lis
         "instructions": [
             "Do not use any deterministic workload family or preselected category.",
             "Preserve every source_text exactly in the appropriate scale_metrics, latency_slos, retention, or exclusions list.",
+            "Do not drift to a generic SaaS, payment, support, or chatbot workload unless the raw use case actually says that.",
             "Represent the use case as a business process first and AWS services second.",
             "Use specific actors and source systems; avoid generic users/operators unless the input is generic.",
             "Ask missing questions that would materially affect architecture, pricing, security, performance, or compliance.",
@@ -471,6 +583,31 @@ def _messages(raw_use_case: str, source_facts: list[CanonicalSourceFact]) -> lis
         )),
         LLMMessage(role="user", content=json.dumps(payload, indent=2, sort_keys=True)[:24000]),
     ]
+
+
+def extract_source_terms(raw_use_case: str) -> list[str]:
+    stopwords = {
+        "a", "an", "and", "are", "as", "at", "be", "before", "but", "by", "for", "from", "go",
+        "in", "is", "it", "must", "not", "of", "or", "should", "the", "then", "to", "using",
+        "use", "with", "within",
+    }
+    chunks = re.split(r"[,;.]|\b(?:and|then|while|with|using|from|to|for|across|by)\b", raw_use_case, flags=re.I)
+    terms: list[str] = []
+    for chunk in chunks:
+        words = [
+            word.strip("-_/").lower()
+            for word in re.findall(r"[A-Za-z][A-Za-z0-9/_-]*|\d[\d,]*(?:\.\d+)?", chunk)
+        ]
+        while words and words[0] in stopwords:
+            words.pop(0)
+        while words and words[-1] in stopwords:
+            words.pop()
+        if not words:
+            continue
+        phrase = " ".join(words[:5])
+        if len(phrase) >= 3 and not phrase.isdigit():
+            terms.append(phrase)
+    return list(dict.fromkeys(terms))[:16]
 
 
 def _disabled_result(input_hash: str, source_facts: list[CanonicalSourceFact], reason: str) -> OpenWorldUnderstandingResult:
@@ -587,6 +724,49 @@ def _fact_preserved(fact: CanonicalSourceFact, proposed: list[CanonicalSourceFac
     return False
 
 
+def _repair_bucket_for_fact(fact: CanonicalSourceFact) -> str:
+    if fact.kind == "explicit_exclusion":
+        return "exclusions"
+    label = fact.label.lower()
+    unit = (fact.unit or "").lower()
+    if "latency" in label or unit in {"millisecond", "milliseconds", "second", "seconds", "minute", "minutes"}:
+        return "latency_slos"
+    if "retention" in label or unit in {"day", "days", "month", "months", "year", "years"}:
+        return "retention"
+    return "scale_metrics"
+
+
+def _term_repair_bucket(term: str) -> str:
+    if any(token in term for token in ("engineer", "manager", "operator", "coordinator", "adjuster", "curator", "passenger", "patient", "worker", "team", "verifier", "landowner")):
+        return "actors"
+    if any(token in term for token in ("alert", "notify", "recommend", "route", "prepare", "generate", "open ", "match ", "trace ", "triage ", "optimize ", "predict ", "detect ", "forecast ")):
+        return "actions_workflows"
+    if any(token in term for token in ("feed", "event", "signal", "sensor", "imagery", "image", "photo", "note", "log", "report", "form", "extract", "history", "indices")):
+        return "source_systems"
+    return "events_signals"
+
+
+def _understanding_text_for_repair(understanding: CanonicalWorkloadUnderstanding) -> str:
+    return " ".join([
+        understanding.workload_intent,
+        " ".join(item.label for item in understanding.domain_candidates),
+        " ".join(item.label for item in understanding.actors),
+        " ".join(item.label for item in understanding.source_systems),
+        " ".join(item.label for item in understanding.events_signals),
+        " ".join(item.label for item in understanding.data_classes),
+        " ".join(item.label for item in understanding.actions_workflows),
+        " ".join(item.label for item in understanding.constraints),
+    ]).lower().replace("_", " ")
+
+
+def _term_overlaps_exclusion(term: str, exclusion: str) -> bool:
+    term_words = {word for word in re.findall(r"[a-z0-9]+", term) if len(word) >= 3}
+    exclusion_words = {word for word in re.findall(r"[a-z0-9]+", exclusion) if len(word) >= 3}
+    if not term_words or not exclusion_words:
+        return False
+    return len(term_words & exclusion_words) >= min(len(term_words), len(exclusion_words), 2)
+
+
 def _forbidden_terms(normalized_exclusion: str) -> list[str]:
     terms = [normalized_exclusion.replace("_", " ")]
     constraints = explicit_negative_constraints("not " + normalized_exclusion.replace("_", " "))
@@ -596,12 +776,17 @@ def _forbidden_terms(normalized_exclusion: str) -> list[str]:
 
 
 def _normalize_service_name(service_name: str) -> str:
-    return " ".join(service_name.lower().replace("/", " ").replace("-", " ").split())
+    return " ".join(service_name.lower().replace("/", " ").replace("-", " ").replace("_", " ").split())
 
 
 def _obviously_fake_service(normalized: str) -> bool:
     fake_terms = ("magic", "baggageai", "fraudbrain", "madeup", "fictional", "fake")
     return any(term in normalized for term in fake_terms)
+
+
+def _looks_like_bare_service_candidate(normalized: str) -> bool:
+    tokens = normalized.split()
+    return bool(1 <= len(tokens) <= 4 and all(re.fullmatch(r"[a-z][a-z0-9]*", token) for token in tokens))
 
 
 def _capabilities_from_understanding(understanding: CanonicalWorkloadUnderstanding) -> list[str]:

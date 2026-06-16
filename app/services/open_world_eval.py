@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from app.services.open_world_understanding import (
@@ -7,6 +8,8 @@ from app.services.open_world_understanding import (
     CanonicalQuestion,
     CanonicalSourceFact,
     CanonicalWorkloadUnderstanding,
+    OpenWorldUnderstandingResult,
+    OpenWorldUnderstandingService,
     build_result_from_understanding,
     extract_source_facts,
 )
@@ -206,33 +209,13 @@ def fixture_understanding_for_scenario(scenario: D23EvalScenario) -> CanonicalWo
     )
 
 
-def run_fixture_eval() -> dict:
+def run_fixture_eval(scenarios: list[D23EvalScenario] | None = None) -> dict:
+    scenarios = scenarios or d23_eval_scenarios()
     results = []
-    for scenario in d23_eval_scenarios():
+    for scenario in scenarios:
         understanding = fixture_understanding_for_scenario(scenario)
         result = build_result_from_understanding(scenario.use_case, understanding)
-        text = " ".join([
-            understanding.workload_intent,
-            " ".join(item.label for item in understanding.domain_candidates),
-            " ".join(item.label for item in understanding.actors),
-            " ".join(item.label for item in understanding.source_systems),
-            " ".join(item.label for item in understanding.events_signals),
-            " ".join(item.label for item in understanding.actions_workflows),
-            " ".join(question.question for question in understanding.missing_questions),
-        ]).lower()
-        preserved_terms = [term for term in scenario.expected_terms if term.lower() in text]
-        forbidden_leaks = [term for term in scenario.forbidden_terms if term.lower() in text]
-        passed = bool(result.profile) and result.trace.accepted and len(preserved_terms) >= max(2, len(scenario.expected_terms) - 1) and not forbidden_leaks
-        results.append({
-            "scenario_id": scenario.scenario_id,
-            "title": scenario.title,
-            "accepted": result.trace.accepted,
-            "profile_source": result.profile.profile_source if result.profile else None,
-            "questions": [question.text for question in result.open_questions[:4]],
-            "preserved_terms": preserved_terms,
-            "forbidden_leaks": forbidden_leaks,
-            "passed": passed,
-        })
+        results.append(_score_result(scenario, result))
     passed_count = sum(1 for item in results if item["passed"])
     return {
         "battery": "d23_open_world_understanding_fixture_eval",
@@ -242,3 +225,82 @@ def run_fixture_eval() -> dict:
         "failed": len(results) - passed_count,
         "results": results,
     }
+
+
+def run_live_eval(*, session_prefix: str = "d23_live_eval", scenarios: list[D23EvalScenario] | None = None) -> dict:
+    scenarios = scenarios or d23_eval_scenarios()
+    results = []
+    service = OpenWorldUnderstandingService()
+    for scenario in scenarios:
+        result = service.build(
+            scenario.use_case,
+            session_id=f"{session_prefix}_{scenario.scenario_id}",
+        )
+        results.append(_score_result(scenario, result))
+    passed_count = sum(1 for item in results if item["passed"])
+    return {
+        "battery": "d23_open_world_understanding_live_eval",
+        "mode": "live_bedrock_refiners_disabled",
+        "scenario_count": len(results),
+        "passed": passed_count,
+        "failed": len(results) - passed_count,
+        "results": results,
+    }
+
+
+def _score_result(scenario: D23EvalScenario, result: OpenWorldUnderstandingResult) -> dict:
+    understanding = result.trace.understanding
+    text = _understanding_text(understanding)
+    preserved_terms = [term for term in scenario.expected_terms if term.lower() in text]
+    forbidden_leaks = [term for term in scenario.forbidden_terms if _contains_unnegated_term(text, term)]
+    required = max(2, len(scenario.expected_terms) - 1)
+    passed = bool(result.profile) and result.trace.accepted and len(preserved_terms) >= required and not forbidden_leaks
+    live_call = result.trace.live_call
+    return {
+        "scenario_id": scenario.scenario_id,
+        "title": scenario.title,
+        "accepted": result.trace.accepted,
+        "profile_source": result.profile.profile_source if result.profile else None,
+        "provider": result.trace.provider,
+        "model_id": result.trace.model_id,
+        "live_status": live_call.status if live_call else None,
+        "error_type": live_call.error_type if live_call else None,
+        "error_message": live_call.error_message if live_call else None,
+        "validation_issues": [issue.model_dump(mode="json") for issue in result.trace.validation_issues],
+        "service_validations": [item.model_dump(mode="json") for item in result.trace.service_validations],
+        "questions": [question.text for question in result.open_questions[:4]],
+        "preserved_terms": preserved_terms,
+        "preserved_term_count": len(preserved_terms),
+        "required_preserved_term_count": required,
+        "forbidden_leaks": forbidden_leaks,
+        "passed": passed,
+    }
+
+
+def _understanding_text(understanding: CanonicalWorkloadUnderstanding | None) -> str:
+    if understanding is None:
+        return ""
+    return " ".join([
+        understanding.workload_intent,
+        " ".join(item.label for item in understanding.domain_candidates),
+        " ".join(item.label for item in understanding.actors),
+        " ".join(item.label for item in understanding.source_systems),
+        " ".join(item.label for item in understanding.events_signals),
+        " ".join(item.label for item in understanding.data_classes),
+        " ".join(item.label for item in understanding.actions_workflows),
+        " ".join(item.label for item in understanding.constraints),
+        " ".join(item.label for item in understanding.candidate_aws_capabilities),
+        " ".join(item.label for item in understanding.candidate_aws_services),
+        " ".join(question.question for question in understanding.missing_questions),
+    ]).lower()
+
+
+def _contains_unnegated_term(text: str, term: str) -> bool:
+    text = re.sub(r"[_-]+", " ", text.lower())
+    needle = term.lower()
+    term_pattern = re.compile(r"(?<![a-z0-9])" + re.escape(needle).replace(r"\ ", r"\s+") + r"(?![a-z0-9])")
+    for match in term_pattern.finditer(text):
+        prefix = text[max(0, match.start() - 32):match.start()]
+        if not any(marker in prefix for marker in ("not ", "no ", "without ", "exclude ", "excluding ", "non-")):
+            return True
+    return False
