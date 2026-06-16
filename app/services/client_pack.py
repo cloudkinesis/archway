@@ -20,11 +20,13 @@ from __future__ import annotations
 
 import re
 
-from app.services.customer_readiness import compute_readiness_tier
+from app.services.agentic.candidate_client_flow import ClientFacingPlan, build_client_facing_plan
+from app.services.customer_readiness import ESTIMATE_CLASS_DISPLAY, TIER_DISPLAY, compute_readiness_tier
 from app.services.deep_dossier import _cost_range
 from app.services.display_labels import display_label, gate_display
 
 _DRIVER_PATTERN = re.compile(r"^(assumed_)?([A-Za-z][A-Za-z0-9_]*)\s*=\s*(.+)$")
+_MACHINE_TOKEN_PATTERN = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b")
 
 
 def front_door_readme(session_name: str) -> str:
@@ -63,6 +65,7 @@ def client_pack_files(
     diagrams: list | None,
     deep_dossier,
     decision_records: list | None,
+    candidate_traces: dict | None = None,
 ) -> dict[str, str]:
     """Render client_pack/ markdown. Keys are paths relative to client_pack/."""
     brief = brief or {}
@@ -71,18 +74,29 @@ def client_pack_files(
     architectures = architectures or []
     diagrams = diagrams or []
     decision_records = decision_records or []
+    candidate_traces = candidate_traces or {}
+    profile_metadata = brief.get("use_case_profile") or ((report.get("metadata") or {}).get("use_case_profile") or {})
+    client_plan = build_client_facing_plan(
+        profile_metadata=profile_metadata,
+        architecture_candidate_trace=candidate_traces.get("architecture"),
+        pricing_dimension_trace=candidate_traces.get("pricing"),
+        diagram_plan_trace=candidate_traces.get("diagram"),
+        narrative_trace=candidate_traces.get("narrative"),
+        reviewer_trace=candidate_traces.get("reviewer"),
+    )
     # One tier computation feeds every client surface — readiness wording can
     # never diverge between the memo and the pricing summary.
     tier = compute_readiness_tier(report=report, pricing=pricing, architectures=architectures)
+    tier = _apply_candidate_cap(tier, client_plan)
     return {
-        "START_HERE.md": _start_here(session_name),
-        "01-executive-memo.md": _executive_memo(report, deep_dossier, tier),
+        "START_HERE.md": _start_here(session_name, client_plan),
+        "01-executive-memo.md": _executive_memo(report, deep_dossier, tier, client_plan),
         "02-solution-brief.md": _solution_brief(brief, deep_dossier),
-        "03-architecture-summary.md": _architecture_summary(architectures, decision_records),
-        "04-pricing-summary.md": _pricing_summary(pricing, deep_dossier, tier),
-        "05-risks-and-gates.md": _risks_and_gates(deep_dossier, tier),
+        "03-architecture-summary.md": _architecture_summary(architectures, decision_records, client_plan),
+        "04-pricing-summary.md": _pricing_summary(pricing, deep_dossier, tier, client_plan),
+        "05-risks-and-gates.md": _risks_and_gates(deep_dossier, tier, client_plan),
         "06-evidence-summary.md": _evidence_summary(report, deep_dossier),
-        "07-diagrams-index.md": _diagrams_index(diagrams),
+        "07-diagrams-index.md": _diagrams_index(diagrams, client_plan),
     }
 
 
@@ -97,8 +111,8 @@ def audit_pack_files(*, diagrams: list | None) -> dict[str, str]:
 # --------------------------------------------------------------------------- #
 # Client pack sections
 # --------------------------------------------------------------------------- #
-def _start_here(session_name: str) -> str:
-    return "\n".join([
+def _start_here(session_name: str, client_plan: ClientFacingPlan | None = None) -> str:
+    lines = [
         f"# {session_name}",
         "",
         "This client pack is the concise, business-language view of the full "
@@ -117,10 +131,21 @@ def _start_here(session_name: str) -> str:
         "pricing traces, and the verification manifest — start at "
         "`../audit_pack/README.md`.",
         "",
-    ])
+    ]
+    if _candidate_mode(client_plan):
+        lines.extend([
+            "## Candidate content",
+            "",
+            "This package includes directional candidate sections for a broad "
+            "workload fallback. Treat them as demo-ready conversation material, "
+            "not as approved architecture, procurement pricing, or rendered "
+            "diagram truth.",
+            "",
+        ])
+    return "\n".join(lines)
 
 
-def _executive_memo(report: dict, dossier, tier: dict) -> str:
+def _executive_memo(report: dict, dossier, tier: dict, client_plan: ClientFacingPlan | None = None) -> str:
     top_risk = dossier.risks[0].risk if dossier.risks else "Pricing and operational validation remain open."
     direction = report.get("recommended_production_direction") or (
         "an AWS-native architecture with governed operations, evidence discipline, and explicit pricing validation"
@@ -162,6 +187,17 @@ def _executive_memo(report: dict, dossier, tier: dict) -> str:
         _sentence(str(top_risk)),
         "",
     ]
+    if _candidate_mode(client_plan):
+        lines.extend([
+            "## Candidate disclosure",
+            "",
+            "Some sections include directional candidate content generated for a "
+            "broad fallback workload. The deterministic dossier remains the "
+            "audited baseline; human architecture review, confirmed quantities, "
+            "and authoritative pricing evidence are still required before "
+            "production or procurement decisions.",
+            "",
+        ])
     return "\n".join(lines)
 
 
@@ -202,8 +238,49 @@ def _solution_brief(brief: dict, dossier) -> str:
     ])
 
 
-def _architecture_summary(architectures: list, decision_records: list) -> str:
+def _architecture_summary(
+    architectures: list,
+    decision_records: list,
+    client_plan: ClientFacingPlan | None = None,
+) -> str:
     lines = ["# Architecture Summary", ""]
+    if _candidate_mode(client_plan):
+        architecture = client_plan.architecture_candidate
+        lines.extend([
+            "## Candidate architecture",
+            "",
+            "This section is directional and needs human architecture review. It "
+            "does not replace the deterministic architecture record below.",
+            "",
+            "### Candidate components",
+            "",
+            *_bullets(_candidate_component_rows(architecture)),
+            "",
+            "### Candidate flows",
+            "",
+            *_bullets(_candidate_flow_rows(architecture)),
+            "",
+            "### Candidate controls",
+            "",
+            *_bullets(_candidate_control_rows(architecture)),
+            "",
+            "### Assumptions and open questions",
+            "",
+            *_bullets(
+                [_client_sentence(item) for item in architecture.get("assumptions") or []]
+                + [_client_sentence(item) for item in architecture.get("open_questions") or []]
+            ),
+            "",
+            "### Risks to review",
+            "",
+            *_bullets(_candidate_risk_rows(architecture)),
+            "",
+            "## Deterministic baseline",
+            "",
+            "The compiled baseline below remains the audited architecture record "
+            "for this package.",
+            "",
+        ])
     specs = [spec for spec in architectures if isinstance(spec, dict)]
     if not specs:
         lines.extend(["No architecture was available at export time.", ""])
@@ -260,7 +337,12 @@ _ESTIMATE_CLASS_GUIDANCE = {
 }
 
 
-def _pricing_summary(pricing: dict, dossier, tier: dict) -> str:
+def _pricing_summary(
+    pricing: dict,
+    dossier,
+    tier: dict,
+    client_plan: ClientFacingPlan | None = None,
+) -> str:
     metadata = pricing.get("metadata") or {}
     closure = metadata.get("pricing_driver_closure") or {}
     procurement_ready = bool(closure.get("procurement_ready", False))
@@ -272,7 +354,7 @@ def _pricing_summary(pricing: dict, dossier, tier: dict) -> str:
         if isinstance(item, dict) and item.get("display_name")
     ]
     advance = [_sentence(reason) for reason in tier.get("reasons", [])]
-    return "\n".join([
+    lines = [
         "# Pricing Summary",
         "",
         f"**Region:** {pricing.get('region') or 'Not selected'}",
@@ -285,6 +367,33 @@ def _pricing_summary(pricing: dict, dossier, tier: dict) -> str:
         "",
         _sentence("Pricing scenario needs repair: driver set does not match the confirmed workload. No polished monthly range is displayed for this invalid scenario." if invalid else dossier.estimated_monthly_cost_range),
         "",
+    ]
+    if _candidate_mode(client_plan) and client_plan.pricing_candidate:
+        pricing_candidate = client_plan.pricing_candidate
+        lines.extend([
+            "## Candidate pricing dimensions",
+            "",
+            "The dimensions below identify what must be priced or confirmed next. "
+            "They do not add customer-facing totals.",
+            "",
+            "### Candidate service dimensions",
+            "",
+            *_bullets(_candidate_pricing_dimension_rows(pricing_candidate)),
+            "",
+            "### Drivers to confirm",
+            "",
+            *_bullets(_candidate_pricing_driver_rows(pricing_candidate)),
+            "",
+            "### Scenario assumptions",
+            "",
+            *_bullets(_candidate_pricing_assumption_rows(pricing_candidate)),
+            "",
+            "### Not estimated yet",
+            "",
+            *_bullets(_candidate_not_estimated_rows(pricing_candidate)),
+            "",
+        ])
+    lines.extend([
         "## What drives this cost",
         "",
         *_bullets(drivers),
@@ -303,9 +412,10 @@ def _pricing_summary(pricing: dict, dossier, tier: dict) -> str:
         "calculation trace and evidence are preserved in the audit record.",
         "",
     ])
+    return "\n".join(lines)
 
 
-def _risks_and_gates(dossier, tier: dict) -> str:
+def _risks_and_gates(dossier, tier: dict, client_plan: ClientFacingPlan | None = None) -> str:
     risks = [
         f"**{display_label(str(risk.severity), capitalize=True)}** — {_sentence(str(risk.risk))} "
         f"Mitigation: {_sentence(str(risk.mitigation))}"
@@ -313,7 +423,7 @@ def _risks_and_gates(dossier, tier: dict) -> str:
     ]
     gates = [gate_display(item) for item in dossier.top_validation_gates]
     cap = [_sentence(reason) for reason in tier.get("reasons") or []]
-    return "\n".join([
+    lines = [
         "# Risks and Validation Gates",
         "",
         f"**Readiness tier:** {tier['display']}",
@@ -330,7 +440,15 @@ def _risks_and_gates(dossier, tier: dict) -> str:
         "",
         *_bullets(gates or ["Refresh evidence and pricing before procurement."]),
         "",
-    ])
+    ]
+    if _candidate_mode(client_plan) and client_plan.reviewer_candidate:
+        lines.extend([
+            "## Candidate review observations",
+            "",
+            *_bullets(_candidate_reviewer_rows(client_plan.reviewer_candidate)),
+            "",
+        ])
+    return "\n".join(lines)
 
 
 def _evidence_summary(report: dict, dossier) -> str:
@@ -358,7 +476,7 @@ def _evidence_summary(report: dict, dossier) -> str:
     ])
 
 
-def _diagrams_index(diagrams: list) -> str:
+def _diagrams_index(diagrams: list, client_plan: ClientFacingPlan | None = None) -> str:
     lines = [
         "# Diagrams Index",
         "",
@@ -379,6 +497,16 @@ def _diagrams_index(diagrams: list) -> str:
             location = f" (`{svg}`)" if svg and ".." not in str(svg) and not str(svg).startswith("/") else ""
             rows.append(f"{mode} — {view}{location}")
     lines.extend(_bullets(rows))
+    if _candidate_mode(client_plan) and client_plan.diagram_candidate:
+        lines.extend([
+            "",
+            "## Proposed views not yet natively rendered",
+            "",
+            "These views are candidate planning ideas only. The rendered diagram "
+            "files listed above remain the only native diagrams in this package.",
+            "",
+            *_bullets(_candidate_diagram_rows(client_plan.diagram_candidate)),
+        ])
     lines.append("")
     return "\n".join(lines)
 
@@ -454,6 +582,202 @@ def _view_fallback_notes(diagrams: list) -> str:
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
+def _candidate_mode(client_plan: ClientFacingPlan | None) -> bool:
+    return bool(client_plan and client_plan.is_candidate)
+
+
+def _apply_candidate_cap(tier: dict, client_plan: ClientFacingPlan | None) -> dict:
+    if not _candidate_mode(client_plan) or tier.get("tier") in {"internal_only", "demo_ready"}:
+        return tier
+    reasons = list(tier.get("reasons") or [])
+    reasons.append(
+        "Candidate architecture and pricing content is directional and requires human review; capped at Demo ready."
+    )
+    return {
+        **tier,
+        "tier": "demo_ready",
+        "display": TIER_DISPLAY["demo_ready"],
+        "estimate_class": "planning_estimate",
+        "estimate_display": ESTIMATE_CLASS_DISPLAY["planning_estimate"],
+        "reasons": reasons,
+    }
+
+
+def _candidate_component_rows(candidate: dict) -> list[str]:
+    rows: list[str] = []
+    for item in candidate.get("candidate_components") or []:
+        if not isinstance(item, dict):
+            continue
+        label = _client_label(item.get("label") or item.get("component_id") or "Candidate component")
+        service = _client_text(item.get("service_hint") or "Service to confirm")
+        role = _client_sentence(item.get("role") or "Role requires human review")
+        confidence = _client_label(item.get("confidence_label") or "medium", capitalize=False)
+        status = _client_label(item.get("accepted_status") or "needs_review", capitalize=False)
+        rows.append(f"**{label}** — {service}. {role} Confidence: {confidence}. Status: {status}.")
+    return rows
+
+
+def _candidate_flow_rows(candidate: dict) -> list[str]:
+    rows: list[str] = []
+    for item in candidate.get("candidate_flows") or []:
+        if not isinstance(item, dict):
+            continue
+        source = _client_label(item.get("source") or "Source")
+        target = _client_label(item.get("target") or "Target")
+        flow_type = _client_label(item.get("flow_type") or "flow", capitalize=False)
+        data_class = _client_text(item.get("data_class") or "data class to confirm")
+        status = _client_label(item.get("accepted_status") or "needs_review", capitalize=False)
+        controls = ", ".join(_client_label(value, capitalize=False) for value in item.get("security_controls") or [])
+        controls_text = f" Controls: {controls}." if controls else " Controls require confirmation."
+        rows.append(f"{source} to {target}: {flow_type}. Data: {data_class}. Status: {status}.{controls_text}")
+    return rows
+
+
+def _candidate_control_rows(candidate: dict) -> list[str]:
+    controls = []
+    seen: set[str] = set()
+    for key in ("security_controls", "reliability_controls", "observability_controls"):
+        for item in candidate.get(key) or []:
+            if not isinstance(item, dict):
+                continue
+            control_id = str(item.get("control_id") or id(item))
+            if control_id in seen:
+                continue
+            seen.add(control_id)
+            control_type = _client_label(item.get("control_type") or "control")
+            rationale = _client_sentence(item.get("rationale") or "Control requires human review")
+            status = _client_label(item.get("accepted_status") or "needs_review", capitalize=False)
+            controls.append(f"**{control_type}** — {rationale} Status: {status}.")
+    return controls
+
+
+def _candidate_risk_rows(candidate: dict) -> list[str]:
+    risks = [_client_sentence(item) for item in candidate.get("risks") or []]
+    critique = candidate.get("critique") or {}
+    for item in critique.get("findings") or []:
+        if not isinstance(item, dict):
+            continue
+        severity = _client_label(item.get("severity") or "warning")
+        message = _client_sentence(item.get("message") or "Review candidate finding")
+        risks.append(f"{severity}: {message}")
+    return risks
+
+
+def _candidate_pricing_dimension_rows(candidate: dict) -> list[str]:
+    rows: list[str] = []
+    for item in candidate.get("usage_dimensions") or []:
+        if not isinstance(item, dict):
+            continue
+        service = _client_text(item.get("service_name") or "Service to confirm")
+        usage = _client_label(item.get("usage_name") or item.get("dimension_id") or "usage dimension")
+        unit = _client_text(item.get("unit") or "unit to confirm")
+        binding = _client_label(item.get("binding_label") or "not_estimated", capitalize=False)
+        drivers = ", ".join(_client_label(driver, capitalize=False) for driver in item.get("required_customer_drivers") or [])
+        driver_text = f" Drivers to confirm: {drivers}." if drivers else " Drivers to confirm."
+        reason = _client_sentence(item.get("ambiguity_reason") or "Pricing basis requires evidence and customer quantities")
+        rows.append(f"**{service} / {usage}** — Unit: {unit}. Binding: {binding}.{driver_text} {reason}")
+    if rows:
+        return rows
+    return [
+        _client_sentence(item.get("reason") or item.get("service_name") or "Candidate service requires pricing discovery")
+        for item in candidate.get("service_candidates") or []
+        if isinstance(item, dict)
+    ]
+
+
+def _candidate_pricing_driver_rows(candidate: dict) -> list[str]:
+    rows: list[str] = []
+    for item in candidate.get("required_drivers") or []:
+        if not isinstance(item, dict):
+            continue
+        label = _client_label(item.get("display_label") or item.get("driver_key") or "Driver")
+        status = _client_label(item.get("status") or "proposed", capitalize=False)
+        unit = _client_text(item.get("unit") or "unit to confirm")
+        reason = _client_sentence(item.get("reason") or "Required to price the candidate dimension")
+        rows.append(f"**{label}** — Status: {status}. Unit: {unit}. {reason}")
+    return rows
+
+
+def _candidate_pricing_assumption_rows(candidate: dict) -> list[str]:
+    rows = [_client_sentence(item) for item in candidate.get("assumptions") or []]
+    for item in candidate.get("scenario_profiles") or []:
+        if not isinstance(item, dict):
+            continue
+        label = _client_label(item.get("label") or item.get("profile_id") or "Scenario")
+        assumptions = "; ".join(_client_text(value) for value in item.get("assumptions") or [])
+        rows.append(f"**{label}** — {_sentence(assumptions or 'Assumptions require confirmation')}")
+    return rows
+
+
+def _candidate_not_estimated_rows(candidate: dict) -> list[str]:
+    rows = [_client_sentence(item) for item in candidate.get("not_estimated_reasons") or []]
+    rows.extend(_client_sentence(item) for item in candidate.get("ambiguities") or [])
+    rows.extend(_client_sentence(item) for item in candidate.get("conflicts") or [])
+    return rows
+
+
+def _candidate_reviewer_rows(candidate: dict) -> list[str]:
+    rows: list[str] = []
+    for item in candidate.get("accepted_findings") or []:
+        if not isinstance(item, dict):
+            continue
+        severity = _client_label(item.get("severity") or "advisory")
+        category = _client_label(item.get("category") or "review finding", capitalize=False)
+        message = _client_sentence(item.get("message") or "Review finding requires attention")
+        repair = _client_sentence(item.get("suggested_repair") or "")
+        suffix = f" Suggested next step: {repair}" if repair else ""
+        rows.append(f"**{severity}** — {category}: {message}{suffix}")
+    return rows
+
+
+def _candidate_diagram_rows(candidate: dict) -> list[str]:
+    rows: list[str] = []
+    for item in candidate.get("candidate_views") or []:
+        if not isinstance(item, dict):
+            continue
+        label = _client_label(item.get("display_label") or item.get("view_id") or item.get("view_type") or "Candidate view")
+        purpose = _client_sentence(item.get("purpose") or "Purpose requires review")
+        status = _client_label(item.get("accepted_status") or "proposed", capitalize=False)
+        rows.append(f"**{label}** — {purpose} Status: {status}.")
+    for item in (candidate.get("missing_view_requests") or []) + (candidate.get("unsupported_view_requests") or []):
+        if not isinstance(item, dict):
+            continue
+        label = _client_label(item.get("requested_view_type") or "Requested view")
+        reason = _client_sentence(item.get("disclosure_text") or item.get("reason") or "View is not rendered by the current compiler")
+        rows.append(f"**{label}** — {reason}")
+    return rows
+
+
+def _client_label(value: object, *, capitalize: bool = True) -> str:
+    raw = str(value or "").strip()
+    text = _client_text(value)
+    if raw and not _MACHINE_TOKEN_PATTERN.fullmatch(raw) and (" " in raw or raw != raw.lower()):
+        if capitalize and text and text[0].islower():
+            return text[0].upper() + text[1:]
+        if not capitalize and text and text[0].isupper() and not text.split(" ", 1)[0].isupper():
+            return text[0].lower() + text[1:]
+        return text
+    return display_label(text, capitalize=capitalize)
+
+
+def _client_sentence(value: object) -> str:
+    return _sentence(_client_text(value))
+
+
+def _client_text(value: object) -> str:
+    text = str(value or "").strip()
+    replacements = {
+        "model_proposed": "candidate",
+        "not_estimated": "not estimated",
+        "client_pack": "client pack",
+        "audit_pack": "audit pack",
+        "raw/": "audit record ",
+    }
+    for raw, replacement in replacements.items():
+        text = text.replace(raw, replacement)
+    return _MACHINE_TOKEN_PATTERN.sub(lambda match: display_label(match.group(0), capitalize=False), text)
+
+
 def _bullets(items: list[str]) -> list[str]:
     cleaned = [item for item in items if item and str(item).strip()]
     return [f"- {item}" for item in cleaned] or ["- None recorded."]
