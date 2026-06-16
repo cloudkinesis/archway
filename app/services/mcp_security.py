@@ -192,6 +192,7 @@ def mcp_endpoint_security_entry(url: str | None, settings, *, has_token: bool) -
 
 def mcp_security_status(settings) -> dict:
     """Structured, token-safe MCP trust status for diagnostics/export. No network calls."""
+    labs_configured = bool(getattr(settings, "enable_aws_pricing_mcp", False) and getattr(settings, "aws_pricing_mcp_command", None))
     return {
         "aws_docs_mcp": mcp_endpoint_security_entry(
             getattr(settings, "aws_docs_mcp_url", None), settings,
@@ -205,4 +206,13 @@ def mcp_security_status(settings) -> dict:
             getattr(settings, "aws_pricing_reference_mcp_url", None), settings,
             has_token=bool(getattr(settings, "aws_pricing_reference_mcp_auth_token", None)),
         ),
+        "aws_labs_pricing_mcp": {
+            "enabled": labs_configured,
+            "classification": "local_stdio" if labs_configured else "not_configured",
+            "reason": "stdio_command_configured" if labs_configured else "missing_stdio_command",
+            "host": None,
+            "endpoint": None,
+            "credentials_sent": False,
+            "transport": "stdio",
+        },
     }

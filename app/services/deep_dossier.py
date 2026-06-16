@@ -865,8 +865,10 @@ def _cost_range(pricing: dict) -> str:
         return "Not estimated"
     metadata = pricing.get("metadata") or {}
     closure = metadata.get("pricing_driver_closure") or {}
+    if metadata.get("pricing_scenario_validity") == "invalid_driver_mismatch" or metadata.get("status") == "invalid_driver_mismatch":
+        return f"Pricing scenario needs repair: {metadata.get('reason') or 'driver set does not match the confirmed workload.'}"
     if metadata.get("pricing_maturity") == "pricing_customer_demo_ready" or closure.get("directional_scenario_allowed"):
-        return f"Directional scenario estimate, not procurement-ready: {_usd_range(pricing)}. Replace scenario assumptions with traffic forecasts, CDN logs, or event schedule data before budgeting."
+        return f"Directional scenario estimate, not procurement-ready: {_usd_range(pricing)}. Replace scenario assumptions with measured workload telemetry, event history, and customer traffic forecasts before budgeting."
     if metadata.get("pricing_can_be_displayed_as_headline") is False:
         return "Directional placeholder only - not headline-safe. Cost range is intentionally withheld from the executive headline; see Pricing Trace for rough-order calculation details."
     if metadata.get("status") == "invalid_extracted_scale_not_applied":

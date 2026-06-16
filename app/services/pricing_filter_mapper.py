@@ -21,6 +21,7 @@ _SERVICE_CODE_ALIASES: tuple[tuple[str, str, dict[str, str]], ...] = (
     ("sagemaker", "AmazonSageMaker", {}),
     ("simple storage service", "AmazonS3", {}),
     ("amazon s3", "AmazonS3", {}),
+    ("s3", "AmazonS3", {}),
     ("cloudwatch", "AmazonCloudWatch", {}),
     ("step functions", "AWSStates", {}),
     ("eventbridge", "AWSEvents", {}),
@@ -29,10 +30,12 @@ _SERVICE_CODE_ALIASES: tuple[tuple[str, str, dict[str, str]], ...] = (
     ("dynamodb", "AmazonDynamoDB", {}),
     ("iot core", "AWSIoT", {}),
     ("iot sitewise", "AWSIoTSiteWise", {}),
+    ("timestream", "AmazonTimestream", {}),
     ("cloudtrail", "AWSCloudTrail", {}),
     ("kms", "awskms", {}),
     ("api gateway", "AmazonApiGateway", {}),
     ("bedrock", "AmazonBedrock", {}),
+    ("rekognition", "AmazonRekognition", {}),
     ("opensearch", "AmazonES", {}),
     ("glue", "AWSGlue", {}),
     ("athena", "AmazonAthena", {}),
@@ -74,4 +77,4 @@ def pricing_filter_plan_for_service(service_name: str, *, region_code: str = "us
 
 
 def _normalize(value: str) -> str:
-    return " ".join(value.lower().replace("/", " ").replace("-", " ").split())
+    return " ".join(value.lower().replace("/", " ").replace("-", " ").replace("_", " ").split())

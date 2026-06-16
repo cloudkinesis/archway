@@ -20,6 +20,7 @@ from app.services.aws_price_list import AWSPriceListBulkClient
 from app.services.pricing_sanity_reviewer import PricingSanityReviewer
 from app.services.pricing_filter_mapper import pricing_filter_plan_for_service
 from app.services.customer_readiness import assess_customer_readiness
+from app.services.canonical_facts import build_canonical_fact_snapshot
 from app.services.service_decisions import build_service_decision_records
 from app.services.tavily import TavilySearchClient, TavilySearchResponse, tavily_response_to_evidence, tavily_session_usage
 from app.services.understanding.deep_use_case_understanding import DeepUseCaseUnderstandingService
@@ -41,6 +42,7 @@ class ResearchOrchestrator:
         progress(8, "Understanding use case and tool-governance constraints.")
         self.registry.assert_allowed("local_policy", SessionPhase.research, brief.model_dump(), session_id)
         profile = _profile_for_research(brief)
+        canonical_snapshot = build_canonical_fact_snapshot(brief)
         progress(15, "Running domain classification and workload-family checks.")
         brief = brief.model_copy(deep=True)
         brief.use_case_profile = profile_to_metadata(profile)
@@ -308,6 +310,8 @@ class ResearchOrchestrator:
             uncertainties=uncertainties,
             citation_coverage=citation_coverage,
             metadata={
+                "canonical_fact_snapshot": canonical_snapshot,
+                "canonical_fact_snapshot_hash": canonical_snapshot["hash"],
                 "use_case_profile": profile_to_metadata(profile),
                 "capabilities": profile.capability_model,
                 "deployment_posture": profile.deployment_posture,
@@ -403,7 +407,7 @@ def _feasibility(profile) -> str:
     if "industrial_iot_streaming_ml" in profile.workload_families:
         return (
             "Feasible as an AWS industrial IoT and streaming ML architecture: device ingestion, streaming feature extraction, "
-            "risk scoring, event routing, time-series storage, and governed dispatch can be composed from managed services."
+            "risk scoring, event routing, time-series storage, and governed operations workflow can be composed from managed services."
         )
     if "rag_assistant" in profile.workload_families:
         return "Feasible as a grounded assistant if retrieval quality, citations, prompt-injection controls, identity, and audit are enforced."

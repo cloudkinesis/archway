@@ -429,7 +429,7 @@ def _filter_answered(questions: list[DiscoveryQuestion], answered_text: str) -> 
 def _primary_entities(lower: str, profile: UseCaseProfile) -> list[str]:
     entities = list(profile.entities)
     extra = []
-    if any(term in lower for term in ("contract", "clause", "obligation")):
+    if _document_pattern_allowed(profile) and any(term in lower for term in ("contract", "clause", "obligation")):
         extra.extend(["contracts", "clauses", "obligations"])
     if "hbase" in lower or "hdfs" in lower:
         extra.extend(["hbase tables", "hdfs datasets"])
@@ -445,9 +445,10 @@ def _primary_actions(lower: str, profile: UseCaseProfile) -> list[str]:
 
 def _data_sources(lower: str, profile: UseCaseProfile) -> list[str]:
     sources = []
-    if any(term in lower for term in ("contract", "document", "agreement")):
+    document_allowed = _document_pattern_allowed(profile)
+    if document_allowed and any(term in lower for term in ("contract", "document", "agreement")):
         sources.append("contract and document repository")
-    if "rag" in lower:
+    if document_allowed and "rag" in lower:
         sources.append("vector index / retrieval corpus")
     if "hbase" in lower or "hdfs" in lower:
         sources.append("HBase and HDFS data stores")
@@ -467,16 +468,16 @@ def _integrations(lower: str, profile: UseCaseProfile) -> list[str]:
 
 def _governance(lower: str, profile: UseCaseProfile) -> list[str]:
     issues = []
-    if any(term in lower for term in ("approval", "write", "update", "dispatch", "block", "clause extraction", "obligation")) or profile.actions:
+    if any(term in lower for term in ("approval", "write", "update", "block")) or profile.actions:
         issues.append("human approval and audit trail for external writes or workflow changes")
-    if "rag" in lower or "document" in lower:
+    if _document_pattern_allowed(profile) and ("rag" in lower or "document" in lower):
         issues.append("grounded answers, citation discipline, and low-confidence escalation")
     return issues[:8]
 
 
 def _not_relevant(lower: str, profile: UseCaseProfile) -> list[str]:
     blocked = list(profile.excluded_families or [])
-    if any(term in lower for term in ("contract", "clause", "obligation", "rag")):
+    if _document_pattern_allowed(profile) and any(term in lower for term in ("contract", "clause", "obligation", "rag")):
         blocked.extend(["industrial_iot_streaming_ml", "field_service_automation"])
     if any(term in lower for term in ("sensor", "telemetry", "smart meter", "transformer")):
         blocked.extend(["rag_assistant"])
@@ -485,7 +486,7 @@ def _not_relevant(lower: str, profile: UseCaseProfile) -> list[str]:
 
 def _assumptions_to_avoid(lower: str, profile: UseCaseProfile) -> list[str]:
     items = []
-    if any(term in lower for term in ("contract", "clause", "obligation", "rag")):
+    if _document_pattern_allowed(profile) and any(term in lower for term in ("contract", "clause", "obligation", "rag")):
         items.append("Do not assume telemetry frequency or payload size for document/RAG workloads.")
         items.append("Do not assume downstream document updates can bypass approval.")
     if "hbase" in lower or "hdfs" in lower:
@@ -493,3 +494,12 @@ def _assumptions_to_avoid(lower: str, profile: UseCaseProfile) -> list[str]:
     if "sensor" in lower or "telemetry" in lower:
         items.append("Do not assume document or RAG retrieval patterns for telemetry workloads.")
     return items[:8]
+
+
+def _document_pattern_allowed(profile: UseCaseProfile) -> bool:
+    excluded = set(profile.excluded_families or []) | set(profile.excluded_patterns or [])
+    capabilities = set(profile.capabilities or []) | set(profile.capability_model or [])
+    families = set(profile.workload_families or [])
+    if {"rag_assistant", "document_intelligence", "document_qa_chatbot", "contract_review", "ocr_document_pipeline"} & excluded:
+        return False
+    return bool({"document_intelligence", "rag_assistant"} & families or {"document_retrieval", "rag_retrieval", "document_ingestion"} & capabilities)

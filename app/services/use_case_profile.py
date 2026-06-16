@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass, field
 
-from app.services.capability_extractor import extract_capabilities
+from app.services.capability_extractor import explicit_negative_constraints, extract_capabilities
 from app.services.metric_extractor import extract_metrics
 
 
@@ -34,6 +34,8 @@ class UseCaseProfile:
     confidence: str = "medium"
     discovery_plan: dict = field(default_factory=dict)
     capability_decision: dict = field(default_factory=dict)
+    profile_source: str = "deterministic"
+    open_world_understanding: dict = field(default_factory=dict)
 
     @property
     def primary_family(self) -> str:
@@ -45,12 +47,17 @@ def profile_use_case(text: str) -> UseCaseProfile:
     structured_metrics = extract_metrics(text)
     metrics = _extract_metrics(structured_metrics)
     capability_result = extract_capabilities(text)
+    negated = explicit_negative_constraints(lower)
     domain = _detect_domain(lower)
     capabilities = _detect_capabilities(lower)
     capabilities = list(dict.fromkeys(capabilities + [item.value for item in capability_result.capabilities]))
+    capabilities = [item for item in capabilities if item not in set(negated["capabilities"])]
     workload_families = _rank_workload_families(lower, capabilities)
+    workload_families = [family for family in workload_families if family not in set(negated["families"])] or ["web_api_application"]
     excluded = _excluded_families(lower, workload_families)
-    excluded = list(dict.fromkeys(excluded + capability_result.excluded_patterns))
+    excluded = list(dict.fromkeys(excluded + capability_result.excluded_patterns + negated["families"]))
+    capability_model = [item.value for item in capability_result.capabilities if item.value not in set(negated["capabilities"])]
+    excluded_patterns = list(dict.fromkeys(capability_result.excluded_patterns + negated["patterns"]))
     profile = UseCaseProfile(
         domain=domain,
         workload_families=workload_families,
@@ -60,8 +67,8 @@ def profile_use_case(text: str) -> UseCaseProfile:
         signals=_detect_signals(lower),
         actions=_detect_actions(lower),
         metrics=metrics,
-        capability_model=[item.value for item in capability_result.capabilities],
-        excluded_patterns=capability_result.excluded_patterns,
+        capability_model=capability_model,
+        excluded_patterns=excluded_patterns,
         deployment_posture=[item.value for item in capability_result.deployment_posture],
         latency_class=capability_result.latency_class.value if capability_result.latency_class else None,
         structured_metrics=structured_metrics.model_dump(),
@@ -92,6 +99,8 @@ def profile_to_metadata(profile: UseCaseProfile) -> dict:
         "confidence": profile.confidence,
         "discovery_plan": profile.discovery_plan,
         "capability_decision": profile.capability_decision,
+        "profile_source": profile.profile_source,
+        "open_world_understanding": profile.open_world_understanding,
     }
 
 
@@ -119,68 +128,29 @@ def profile_from_metadata(metadata: dict | None, raw_use_case: str) -> UseCasePr
         confidence=values.get("confidence") or "medium",
         discovery_plan=dict(values.get("discovery_plan") or {}),
         capability_decision=dict(values.get("capability_decision") or {}),
+        profile_source=values.get("profile_source") or "deterministic",
+        open_world_understanding=dict(values.get("open_world_understanding") or {}),
     )
     return refine_profile_with_context(profile, raw_use_case)
 
 
 def refine_profile_with_context(profile: UseCaseProfile, context_text: str) -> UseCaseProfile:
     lower = context_text.lower()
-    if not _is_healthcare_operations_scheduling(lower):
-        return profile
-    healthcare_families = [
-        "healthcare_operations_scheduling",
-        "surgical_scheduling_prediction",
-        "clinical_workflow_decision_support",
-        "computer_vision_metadata_processing",
-        "approval_gated_workflow_automation",
-    ]
-    blocked = {
-        "industrial_iot_streaming_ml",
-        "field_service_automation",
-        "computer_vision_quality_inspection",
-    }
-    retained = [family for family in profile.workload_families if family not in blocked and family not in healthcare_families]
-    profile.domain = "healthcare"
-    profile.workload_families = list(dict.fromkeys(healthcare_families + retained))[:5]
-    profile.excluded_families = list(dict.fromkeys(profile.excluded_families + sorted(blocked)))
-    profile.excluded_patterns = list(dict.fromkeys(profile.excluded_patterns + sorted(blocked)))
-    profile.capabilities = list(dict.fromkeys(profile.capabilities + [
-        "ehr_integration",
-        "or_schedule_event_stream",
-        "clinical_workflow_decision_support",
-        "surgical_delay_prediction",
-        "approval_gated_workflow",
-        "video_metadata_processing",
-        "phi_safe_operational_store",
-        "hipaa_controls",
-        "private_connectivity",
-    ]))
-    profile.entities = list(dict.fromkeys(profile.entities + [
-        "operating_rooms",
-        "ehr_system",
-        "or_command_center",
-        "staffing_system",
-        "sterile_processing_system",
-    ]))
-    profile.signals = list(dict.fromkeys(profile.signals + [
-        "or_schedule_events",
-        "patient_check_in",
-        "anesthesia_readiness",
-        "staff_availability",
-        "instrument_tray_status",
-        "room_turnover_status",
-        "occupancy_metadata",
-    ]))
-    profile.actions = list(dict.fromkeys(profile.actions + ["approval_gated_schedule_change"]))
-    profile.deployment_posture = list(dict.fromkeys(profile.deployment_posture + ["hybrid", "edge_and_cloud"]))
-    if not profile.latency_class and any(term in lower for term in ("2 minutes", "two-minute", "near-real-time", "real-time")):
-        profile.latency_class = "near_real_time"
-    profile.confidence = "high"
-    return profile
+    capability_result = extract_capabilities(context_text)
+    context_capabilities = _detect_capabilities(lower) + [item.value for item in capability_result.capabilities]
+    profile.capabilities = list(dict.fromkeys(profile.capabilities + context_capabilities))
+    profile.capability_model = list(dict.fromkeys(profile.capability_model + [item.value for item in capability_result.capabilities]))
+    profile.deployment_posture = list(dict.fromkeys(profile.deployment_posture + [item.value for item in capability_result.deployment_posture]))
+    if not profile.latency_class and capability_result.latency_class:
+        profile.latency_class = capability_result.latency_class.value
+    return _apply_explicit_negative_constraints(profile, lower)
 
 
 def _detect_domain(lower: str) -> str | None:
     domain_markers = [
+        ("aquaculture", ("aquaculture", "fish farm", "fish farms", "sea cage", "sea cages", "dissolved oxygen")),
+        ("wildfire_public_safety", ("wildfire", "smoke plume", "evacuation", "lookout tower", "camera towers")),
+        ("aviation_operations", ("airport", "airline", "baggage", "bag scan", "bag scans", "flight schedule", "baggage belt", "airport terminal")),
         ("semiconductor_manufacturing", ("semiconductor", "fab", "fabs", "wafer", "metrology", "tool", "tools")),
         ("investment_banking", ("derivatives", "portfolio greeks", "capital markets", "margin rules", "monte carlo var")),
         ("telecommunications", ("telecom", "network outage", "cell tower", "subscriber", "5g", "cdr", "trai")),
@@ -211,18 +181,20 @@ def _detect_domain(lower: str) -> str | None:
 
 def _detect_capabilities(lower: str) -> list[str]:
     capability_markers = [
-        ("real_time_ingestion", ("real-time", "realtime", "stream", "sensor", "telemetry", "iot", "smart meter")),
+        ("real_time_ingestion", ("real-time", "realtime", "stream", "sensor", "telemetry", "iot", "smart meter", "camera feeds", "camera streams", "imagery refresh")),
         ("time_series_analytics", ("time-series", "voltage", "temperature", "load imbalance", "trend", "historical pattern")),
         ("anomaly_detection", ("anomaly", "failure detection", "pre-fault", "oscillation", "fraud", "thermal runaway", "imbalance")),
         ("predictive_ml", ("predictive", "prediction", "forecast", "model training", "inference", "failure pattern")),
-        ("event_driven_workflow", ("dispatch", "workflow", "ticket", "notify", "alert", "pre-position", "approval")),
+        ("event_driven_workflow", ("dispatch", "workflow", "ticket", "notify", "alert", "pre-position", "approval", "public alert", "evacuation")),
         ("enterprise_integration", ("existing", "erp", "crm", "workforce", "inventory", "depot", "system integration")),
         ("document_retrieval", ("document", "knowledge base", "policy manual", "manual", "rag", "retrieve", "citation", "contract", "contracts", "clause", "obligation")),
         ("generative_ai", ("assistant", "chatbot", "summarize", "generate", "llm", "foundation model", "agent")),
-        ("computer_vision", ("image", "video", "camera", "vision", "defect", "ocr")),
-        ("video_metadata_processing", ("occupancy signal", "occupancy signals", "video-derived", "ceiling camera", "camera metadata")),
+        ("computer_vision", ("image", "imagery", "video", "camera", "vision", "defect", "ocr", "smoke plume", "fish behavior")),
+        ("video_metadata_processing", ("occupancy signal", "occupancy signals", "occupancy metadata", "ephemeral occupancy metadata", "video-derived", "ceiling camera", "camera metadata")),
         ("clinical_workflow_decision_support", ("or utilization", "surgical delay", "surgery delay", "operating room", "charge nurse", "clinical workflow")),
         ("ehr_integration", ("epic", "ehr", "patient check-in", "patient/surgery schedule")),
+        ("approval_gated_workflow", ("approval required", "requires approval", "human approval", "approval-gated", "approval gated", "approved before", "approval from")),
+        ("intermittent_connectivity", ("intermittent connectivity", "remote connectivity", "unreliable connectivity", "offline site", "offline sites", "store-and-forward", "edge buffering")),
         ("batch_analytics", ("data lake", "warehouse", "etl", "reporting", "dashboard", "analytics")),
         ("api_application", ("api", "mobile app", "web app", "portal")),
     ]
@@ -235,6 +207,7 @@ def _detect_capabilities(lower: str) -> list[str]:
 
 def _rank_workload_families(lower: str, capabilities: list[str]) -> list[str]:
     scores = {
+        "operational_event_prediction_workflow": 0,
         "industrial_iot_streaming_ml": 0,
         "real_time_anomaly_detection": 0,
         "field_service_automation": 0,
@@ -266,7 +239,7 @@ def _rank_workload_families(lower: str, capabilities: list[str]) -> list[str]:
         "time_series_analytics": ("industrial_iot_streaming_ml", "real_time_anomaly_detection", "data_platform_analytics"),
         "anomaly_detection": ("real_time_anomaly_detection", "industrial_iot_streaming_ml"),
         "predictive_ml": ("industrial_iot_streaming_ml", "real_time_anomaly_detection", "data_platform_analytics"),
-        "event_driven_workflow": ("field_service_automation",),
+        "event_driven_workflow": ("operational_event_prediction_workflow", "field_service_automation"),
         "enterprise_integration": ("field_service_automation", "web_api_application"),
         "document_retrieval": ("rag_assistant", "document_intelligence"),
         "generative_ai": ("rag_assistant", "agentic_workflow"),
@@ -309,7 +282,7 @@ def _rank_workload_families(lower: str, capabilities: list[str]) -> list[str]:
         "account takeover",
         "claim fraud",
     )
-    industrial_terms = ("sensor", "telemetry", "smart meter", "transformer", "industrial", "equipment", "fab", "semiconductor")
+    industrial_terms = ("sensor", "telemetry", "smart meter", "transformer", "industrial", "equipment", "fab", "semiconductor", "camera feeds", "camera streams", "imagery refresh")
     explicit_financial_fraud = any(term in lower for term in financial_fraud_terms)
     if explicit_financial_fraud:
         scores["financial_fraud_detection"] += 10
@@ -343,6 +316,31 @@ def _rank_workload_families(lower: str, capabilities: list[str]) -> list[str]:
         scores["real_time_anomaly_detection"] = 0
         if not any(term in lower for term in ("dispatch", "field crew", "workforce", "depot", "inventory")):
             scores["field_service_automation"] = 0
+    if any(term in lower for term in ("aquaculture", "fish farm", "sea cage", "dissolved oxygen", "underwater camera", "feeding behavior")):
+        scores["industrial_iot_streaming_ml"] += 8
+        scores["real_time_anomaly_detection"] += 7
+        scores["computer_vision_quality_inspection"] += 6
+        scores["data_platform_analytics"] += 2
+        scores["rag_assistant"] = 0
+        scores["document_intelligence"] = 0
+        scores["field_service_automation"] = 0
+    if any(term in lower for term in ("wildfire", "smoke plume", "lookout tower", "camera towers", "satellite imagery", "evacuation zone")):
+        scores["industrial_iot_streaming_ml"] += 7
+        scores["real_time_anomaly_detection"] += 8
+        scores["computer_vision_quality_inspection"] += 6
+        scores["data_platform_analytics"] += 3
+        scores["rag_assistant"] = 0
+        scores["document_intelligence"] = 0
+        scores["field_service_automation"] = 0
+    if _is_airport_operations(lower):
+        scores["operational_event_prediction_workflow"] += 9
+        scores["real_time_anomaly_detection"] += 7
+        scores["data_platform_analytics"] += 4
+        scores["agentic_workflow"] += 3
+        scores["industrial_iot_streaming_ml"] = 0
+        scores["rag_assistant"] = 0
+        scores["document_intelligence"] = 0
+        scores["field_service_automation"] = 0
     if "telecom" in lower and any(term in lower for term in ("hbase", "hdfs", "spark", "oss/bss", "oss bss")):
         scores["telecom_network_analytics"] += 8
         scores["data_platform_analytics"] += 5
@@ -393,6 +391,12 @@ def _rank_workload_families(lower: str, capabilities: list[str]) -> list[str]:
 
 def _excluded_families(lower: str, selected: list[str]) -> list[str]:
     excluded = []
+    if any(term in lower for term in ("aquaculture", "fish farm", "sea cage", "underwater camera", "wildfire", "smoke plume", "camera towers", "satellite imagery")):
+        excluded.extend(["rag_assistant", "document_intelligence"])
+    if any(term in lower for term in ("wildfire", "smoke plume", "evacuation", "camera towers")):
+        excluded.extend(["field_service_automation", "supply_chain_optimization"])
+    if _is_airport_operations(lower):
+        excluded.extend(["industrial_iot_streaming_ml", "rag_assistant", "document_intelligence", "field_service_automation", "supply_chain_optimization"])
     if _is_healthcare_operations_scheduling(lower):
         excluded.extend(["industrial_iot_streaming_ml", "field_service_automation", "computer_vision_quality_inspection"])
     if "rag_assistant" not in selected[:2] and any(term in lower for term in ("sensor", "telemetry", "real-time", "dispatch", "predictive")):
@@ -409,8 +413,36 @@ def _is_healthcare_operations_scheduling(lower: str) -> bool:
     return healthcare and surgical_ops and workflow
 
 
+def _is_airport_operations(lower: str) -> bool:
+    aviation = any(_contains_marker(lower, marker) for marker in ("airport", "airline", "aviation", "terminal", "flight schedule"))
+    baggage_ops = any(_contains_marker(lower, marker) for marker in ("baggage", "bag scan", "bag scans", "belt telemetry", "transfer window", "misconnect"))
+    return aviation and baggage_ops
+
+
+def _apply_explicit_negative_constraints(profile: UseCaseProfile, lower: str) -> UseCaseProfile:
+    negated = explicit_negative_constraints(lower)
+    if not any(negated.values()):
+        return profile
+    labels = set(negated["labels"])
+    blocked_families = set(negated["families"])
+    blocked_capabilities = set(negated["capabilities"])
+    profile.workload_families = [family for family in profile.workload_families if family not in blocked_families] or ["web_api_application"]
+    profile.excluded_families = list(dict.fromkeys(profile.excluded_families + negated["families"]))
+    profile.excluded_patterns = list(dict.fromkeys(profile.excluded_patterns + negated["patterns"]))
+    profile.capabilities = [capability for capability in profile.capabilities if capability not in blocked_capabilities]
+    profile.capability_model = [capability for capability in profile.capability_model if capability not in blocked_capabilities]
+    if "document_rag" in labels:
+        profile.entities = [item for item in profile.entities if item not in {"document", "contract", "contracts"}]
+    if "field_service" in labels:
+        profile.entities = [item for item in profile.entities if item not in {"field_crew"}]
+        profile.actions = [item for item in profile.actions if item not in {"dispatch", "dispatches_field_crews", "dispatch_field_crews"}]
+    if "depot_inventory" in labels:
+        profile.entities = [item for item in profile.entities if item not in {"depot", "inventory"}]
+    return profile
+
+
 def _detect_entities(lower: str) -> list[str]:
-    markers = ("smart meter", "transformer", "feeder", "sensor", "customer", "patient", "transaction", "order", "document", "image", "vehicle", "machine", "asset", "field crew", "depot")
+    markers = ("smart meter", "transformer", "feeder", "sensor", "customer", "patient", "transaction", "order", "document", "image", "vehicle", "machine", "asset", "field crew", "depot", "airport", "terminal", "baggage", "flight schedule")
     return [marker.replace(" ", "_") for marker in markers if marker in lower]
 
 
@@ -443,6 +475,9 @@ _BUSINESS_TARGET_KINDS = {
     "glass_to_glass_latency_seconds": "latency",
     "refresh_cadence_minutes": "frequency",
     "scheduled_surgeries_per_day": "event_volume",
+    "events_per_day": "event_volume",
+    "latency_target_minutes": "latency",
+    "retention_days": "retention",
     "country_count": "coverage",
     "outage_reduction_target_percent": "target_percent",
     "current_mttr_hours": "current_duration",

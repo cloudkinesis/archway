@@ -330,8 +330,15 @@ export interface JobRun {
 
 export interface ExportBundle {
   name: string;
+  session_id?: string;
+  export_id?: string | null;
   artifact_id: string;
   manifest_artifact_id: string;
+  package_dir?: string | null;
+  package_path?: string | null;
+  zip_path?: string | null;
+  download_url?: string | null;
+  export_url?: string | null;
   included_artifacts: string[];
   warnings: string[];
 }

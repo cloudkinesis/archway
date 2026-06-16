@@ -211,7 +211,7 @@ class GoldenConvergenceOrchestrator:
                 notes.extend(repair_notes)
                 self.revisions._append(session_id, repaired_specs, "Golden convergence auto-repair")
         pricing = context.get("pricing") or ((context.get("report") or {}).get("pricing_analysis"))
-        if pricing and any(item.category == "pricing" for item in findings):
+        if pricing and any(item.category == "pricing" and item.severity in {"critical", "blocker"} for item in findings):
             metadata = dict(pricing.get("metadata") or {})
             metadata["pricing_can_be_displayed_as_headline"] = False
             metadata["headline_display"] = "Directional placeholder only - not headline-safe."
@@ -277,11 +277,11 @@ def _pricing_findings(pricing: dict | None) -> list[QualityFinding]:
     if status == "directional_only_missing_core_compute_drivers":
         findings.append(finding(code="pricing.directional_only_missing_core_compute_drivers", severity="critical", category="pricing", title="Core pricing drivers missing", description=metadata.get("reason") or "Core compute/SKU drivers are missing for this workload.", evidence=[status], auto_repairable=True, repair_strategy="Mark pricing as directional only and hide headline estimate.", customer_readiness_impact="cap_to_directional"))
     if metadata.get("pricing_can_be_displayed_as_headline") is False and maturity == "pricing_placeholder_only":
-        findings.append(finding(code="pricing.headline_blocked", severity="warning", category="pricing", title="Headline pricing blocked", description="Pricing must be shown as directional placeholder only.", evidence=["pricing.metadata.pricing_can_be_displayed_as_headline=false"], auto_repairable=True, repair_strategy="Ensure reports do not show the estimate as a normal headline.", customer_readiness_impact="cap_to_directional"))
+        findings.append(finding(code="pricing.headline_blocked", severity="warning", category="pricing", title="Headline pricing blocked", description="Pricing must be shown as directional placeholder only.", evidence=["pricing.metadata.pricing_can_be_displayed_as_headline=false"], auto_repairable=False, repair_strategy="Ensure reports do not show the estimate as a normal headline.", customer_readiness_impact="cap_to_directional"))
     elif metadata.get("pricing_can_be_displayed_as_headline") is False and maturity == "pricing_customer_demo_ready":
         findings.append(finding(code="pricing.scenario_demo_ready", severity="info", category="pricing", title="Scenario pricing ready for demo", description="Pricing is scenario-based, not procurement-ready, and can be shown as a directional demo estimate with visible caveats.", evidence=["pricing.metadata.pricing_maturity=pricing_customer_demo_ready"], auto_repairable=False, customer_readiness_impact="none"))
     elif metadata.get("pricing_can_be_displayed_as_headline") is False:
-        findings.append(finding(code="pricing.headline_blocked", severity="warning", category="pricing", title="Headline pricing blocked", description="Pricing must be shown as directional placeholder only.", evidence=["pricing.metadata.pricing_can_be_displayed_as_headline=false"], auto_repairable=True, repair_strategy="Ensure reports do not show the estimate as a normal headline.", customer_readiness_impact="cap_to_directional"))
+        findings.append(finding(code="pricing.headline_blocked", severity="warning", category="pricing", title="Headline pricing blocked", description="Pricing must be shown as directional placeholder only.", evidence=["pricing.metadata.pricing_can_be_displayed_as_headline=false"], auto_repairable=False, repair_strategy="Ensure reports do not show the estimate as a normal headline.", customer_readiness_impact="cap_to_directional"))
     return findings
 
 

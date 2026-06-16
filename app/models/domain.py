@@ -87,6 +87,12 @@ class ExportBundle(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
     artifact_id: str
     manifest_artifact_id: str
+    export_id: str | None = None
+    package_dir: str | None = None
+    package_path: str | None = None
+    zip_path: str | None = None
+    download_url: str | None = None
+    export_url: str | None = None
     included_artifacts: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 

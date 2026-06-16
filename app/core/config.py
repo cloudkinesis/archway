@@ -129,6 +129,9 @@ class Settings(BaseModel):
     bedrock_enable_structured_output: bool = Field(default_factory=lambda: os.getenv("ARCHWAY_BEDROCK_ENABLE_STRUCTURED_OUTPUT", "true") == "true")
     agentic_mode: str = Field(default_factory=lambda: os.getenv("ARCHWAY_AGENTIC_MODE", "audit"))
     agentic_max_bedrock_calls: int = Field(default_factory=lambda: max(0, int(os.getenv("ARCHWAY_AGENTIC_MAX_BEDROCK_CALLS", "12"))))
+    agentic_schema_repair_retries: int = Field(
+        default_factory=lambda: max(0, int(os.getenv("ARCHWAY_AGENTIC_SCHEMA_REPAIR_RETRIES", "1")))
+    )
     max_request_bytes: int = 64_000
     # In-memory job lifecycle TTL/eviction (best-effort cleanup of terminal jobs).
     job_completed_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv("ARCHWAY_JOB_COMPLETED_TTL_SECONDS", "3600")))
@@ -187,6 +190,15 @@ class Settings(BaseModel):
     )
     enable_agentic_architecture: bool = Field(
         default_factory=lambda: os.getenv("ARCHWAY_ENABLE_AGENTIC_ARCHITECTURE", "false") == "true"
+    )
+    # D23 open-world understanding. Default OFF: deterministic synthesis/profile
+    # behavior remains the offline floor. When enabled in live_demo mode, Bedrock
+    # proposes canonical use-case understanding before deterministic validation.
+    enable_open_world_understanding: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_OPEN_WORLD_UNDERSTANDING", "false") == "true"
+    )
+    disable_domain_refiners: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_DISABLE_DOMAIN_REFINERS", "false") == "true"
     )
 
     @property

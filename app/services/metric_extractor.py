@@ -38,6 +38,12 @@ def extract_metrics(text: str) -> ExtractedMetrics:
     _put_match(result.asset_counts, "cell_towers", "count", text, r"(?P<value>\d[\d,]*)\s+cell towers?")
     _put_match(result.asset_counts, "hospital_count", "count", text, r"(?P<value>\d[\d,]*)\s+hospitals?")
     _put_match(result.asset_counts, "operating_room_count", "count", text, r"(?P<value>\d[\d,]*)\s+operating rooms?")
+    _put_match(result.asset_counts, "camera_towers", "count", text, r"(?P<value>\d[\d,]*)\s+(?:remote\s+|lookout\s+)?camera towers?")
+    _put_match(result.asset_counts, "underwater_cameras", "count", text, r"(?P<value>\d[\d,]*)\s+underwater cameras?")
+    _put_match(result.asset_counts, "fish_cages", "count", text, r"(?P<value>\d[\d,]*)\s+(?:sea\s+)?cages?")
+    _put_match(result.asset_counts, "staff_users", "count", text, r"(?P<value>\d[\d,]*)\s+(?:farm\s+staff|staff|responder)\s+users?")
+    _put_match(result.asset_counts, "resident_alert_recipients", "count", text, r"(?P<value>\d[\d,]*)\s+residents?\s+for\s+alerts?")
+    _put_match(result.asset_counts, "terminal_count", "count", text, r"(?P<value>\d[\d,]*)\s+(?:airport\s+)?terminals?")
     _put_match(result.asset_counts, "historical_contract_count", "count", text, r"(?P<value>\d[\d,]*)\s+historical contracts?")
     if "historical_contract_count" not in result.asset_counts:
         _put_match(result.asset_counts, "document_count", "count", text, r"(?P<value>\d[\d,]*)\s+(?:documents?|contracts?|agreements?)")
@@ -47,7 +53,14 @@ def extract_metrics(text: str) -> ExtractedMetrics:
     _put_match(result.business_targets, "prediction_horizon_minutes", "minutes", text, r"(?P<value>\d+(?:\.\d+)?)\s*[- ]?minute\s+prediction horizon")
     _put_match(result.business_targets, "retention_years", "years", text, r"(?P<value>\d+(?:\.\d+)?)\s*[- ]?year\s+(?:cdr\s+)?retention")
     _put_match(result.business_targets, "transactions_per_day", "transactions_per_day", text, r"(?P<value>\d+(?:\.\d+)?)\s*(?P<scale>million|billion)?\s+(?:card\s+|payment\s+)?transactions?\s+(?:per\s+day|/day|daily)")
+    _put_match(result.business_targets, "events_per_day", "events_per_day", text, r"(?P<value>\d[\d,]*(?:\.\d+)?)\s*(?P<scale>million|billion)?\s+(?:[A-Za-z][\w-]*\s+){0,5}events?\s+(?:per\s+day|/day|daily)")
     _put_match(result.business_targets, "latency_target_ms", "milliseconds", text, r"(?:under|within|below|less than)\s+(?P<value>\d+(?:\.\d+)?)\s*(?:ms|milliseconds?)")
+    _put_match(result.business_targets, "latency_target_minutes", "minutes", text, r"(?:detect|score|classify|predict|alert|notify|respond|decide)[^.]{0,80}(?:under|within|below|less than)\s+(?P<value>\d+(?:\.\d+)?)\s*minutes?")
+    if "latency_target_minutes" not in result.business_targets:
+        _put_match(result.business_targets, "latency_target_minutes", "minutes", text, r"(?:latency|response time|hot[- ]path)[^\d]{0,40}(?:under|within|below|less than)\s+(?P<value>\d+(?:\.\d+)?)\s*minutes?")
+    _put_match(result.business_targets, "retention_days", "days", text, r"(?:retain|retains|retained|retaining)[^.]{0,80}\s+for\s+(?P<value>\d+(?:\.\d+)?)\s+days?")
+    if "retention_days" not in result.business_targets:
+        _put_match(result.business_targets, "retention_days", "days", text, r"(?P<value>\d+(?:\.\d+)?)\s*[- ]?day\s+retention")
     _put_match(result.business_targets, "audit_retention_years", "years", text, r"(?P<value>\d+(?:\.\d+)?)\s*[- ]?year\s+audit\s+(?:evidence\s+)?retention")
     if "audit_retention_years" not in result.business_targets:
         _put_match(result.business_targets, "audit_retention_years", "years", text, r"retain\s+audit\s+(?:evidence\s+)?for\s+(?P<value>\d+(?:\.\d+)?)\s+years?")
@@ -75,6 +88,12 @@ def extract_metrics(text: str) -> ExtractedMetrics:
         _put_match(result.business_targets, "refresh_cadence_minutes", "minutes", text, r"predictions?[^\d]{0,30}every\s+(?P<value>\d+(?:\.\d+)?)\s+minutes?")
     if "refresh_cadence_minutes" not in result.business_targets:
         _put_match(result.business_targets, "refresh_cadence_minutes", "minutes", text, r"(?P<value>\d+(?:\.\d+)?)\s*[- ]?minute\s+(?:prediction\s+)?refresh")
+    if "refresh_cadence_minutes" not in result.business_targets:
+        _put_match(result.business_targets, "refresh_cadence_minutes", "minutes", text, r"imagery\s+refresh\s+every\s+(?P<value>\d+(?:\.\d+)?)\s+minutes?")
+    if "refresh_cadence_minutes" not in result.business_targets:
+        _put_match(result.business_targets, "refresh_cadence_minutes", "minutes", text, r"readings?\s+every\s+(?P<value>\d+(?:\.\d+)?)\s+minutes?")
+    _put_match(result.business_targets, "telemetry_frequency_seconds", "seconds", text, r"(?:sensor\s+)?readings?\s+every\s+(?P<value>\d+(?:\.\d+)?)\s+seconds?")
+    _put_match(result.business_targets, "imagery_windows_per_day", "windows_per_day", text, r"(?P<value>\d[\d,]*)\s+(?:satellite/)?imagery\s+refresh\s+windows?\s+per\s+day")
     _put_match(result.business_targets, "scheduled_surgeries_per_day", "surgeries_per_day", text, r"(?P<value>\d[\d,]*)\s+(?:scheduled\s+)?surgeries\s+(?:per\s+day|/day|daily)")
     _put_match(result.business_targets, "country_count", "countries", text, r"(?P<value>\d[\d,]*)\s+countries")
     _put_match(result.asset_counts, "smart_meters", "count", text, r"(?P<value>\d[\d,]*)\s+smart meters?")
@@ -110,6 +129,16 @@ def extract_metrics(text: str) -> ExtractedMetrics:
             value *= 1_000_000
         result.business_targets["transactions_per_day"] = MetricValue(value, transactions.unit, transactions.raw)
         result.business_targets["average_tps"] = MetricValue(round(value / 86400, 2), "transactions_per_second", "transactions_per_day / 86400", derived=True)
+    if "events_per_day" in result.business_targets:
+        events = result.business_targets["events_per_day"]
+        lower_raw = events.raw.lower()
+        value = events.value
+        if "billion" in lower_raw:
+            value *= 1_000_000_000
+        elif "million" in lower_raw:
+            value *= 1_000_000
+        result.business_targets["events_per_day"] = MetricValue(value, events.unit, events.raw)
+        result.business_targets["average_eps"] = MetricValue(round(value / 86400, 2), "events_per_second", "events_per_day / 86400", derived=True)
     total_assets = sum(int(item.value) for key, item in result.asset_counts.items() if key != "fabs")
     if total_assets:
         result.asset_counts["total_monitored_assets"] = MetricValue(float(total_assets), "count", "sum of monitored asset counts", derived=True)
@@ -135,6 +164,7 @@ def extract_metrics(text: str) -> ExtractedMetrics:
         "call_detail_records": ("cdr", "cdrs"),
         "market_data_or_positions": ("derivatives positions", "portfolio greeks", "monte carlo var"),
         "payment_authorization_events": ("card transaction", "card transactions", "payment transaction", "payment transactions", "authorization"),
+        "operational_event_stream": ("events per day", "scan events", "bag scan", "baggage", "telemetry"),
     }
     result.telemetry_signals = _markers(lower, signal_markers)
     detection_markers = {
@@ -146,6 +176,7 @@ def extract_metrics(text: str) -> ExtractedMetrics:
         "network_congestion_prediction": ("congestion", "prediction horizon"),
         "portfolio_risk_var": ("var", "portfolio greeks"),
         "payment_fraud_scoring": ("fraud", "risk score", "score events", "fraudulent transactions"),
+        "operational_disruption_prediction": ("disruption", "prediction", "recovery action", "misconnect", "missed connection"),
     }
     result.detection_targets = _markers(lower, detection_markers)
     action_markers = {
@@ -153,6 +184,7 @@ def extract_metrics(text: str) -> ExtractedMetrics:
         "preposition_replacement_equipment": ("pre-positions replacement equipment", "pre-position replacement equipment", "preposition replacement equipment"),
         "queue_suspicious_payments_for_analyst_review": ("queue suspicious payments", "analyst review", "review queue"),
         "block_high_confidence_fraud_after_policy_approval": ("block high-confidence", "block high confidence", "fraud after policy approval", "policy approval"),
+        "recommend_operational_recovery_action": ("recommend", "recovery action", "pre-position", "reroute", "notify"),
     }
     result.operational_actions = _markers(lower, action_markers)
     payment_context = any(term in lower for term in ("card transaction", "payment fraud", "payment transaction", "authorization"))

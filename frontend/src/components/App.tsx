@@ -587,8 +587,14 @@ function ArchitectureView({
             />
           ))}
           <div className="flex flex-wrap items-center gap-3">
-            <Button icon={ChevronRight} disabled={hasCriticalIssues} onClick={() => setView("diagrams")}>Proceed to Diagrams</Button>
-            {hasCriticalIssues ? <span className="text-sm text-awsDanger">Resolve critical validation issues before diagram generation.</span> : null}
+            <Button icon={ChevronRight} onClick={() => setView("diagrams")}>
+              {hasCriticalIssues ? "Proceed to Diagnostic Diagrams" : "Proceed to Diagrams"}
+            </Button>
+            {hasCriticalIssues ? (
+              <span className="text-sm text-awsTextSecondary">
+                Critical findings will generate candidate diagnostic diagrams with the blockers attached; export can still complete.
+              </span>
+            ) : null}
           </div>
           {save.error ? <Banner tone="danger" text={(save.error as Error).message} /> : null}
           {regenerate.error ? <Banner tone="danger" text={(regenerate.error as Error).message} /> : null}
@@ -617,6 +623,7 @@ function DiagramView({ session, galleries, setGalleries }: Parameters<typeof Wor
         <div className="space-y-4">
           {job.job ? <JobProgress job={job.job} onCancel={() => job.cancel.mutate()} /> : null}
           <Button icon={generate.isPending || job.isActive ? Loader2 : Image} disabled={generate.isPending || job.isActive} onClick={() => generate.mutate()}>{generate.isPending || job.isActive ? "Generating through existing compiler" : "Generate diagrams"}</Button>
+          <Banner tone="info" text="If architecture validation still has blockers, Archway generates candidate diagnostic diagrams instead of stopping the session." />
           {job.job?.status === "failed" ? <Banner tone="danger" text={job.job.error ?? "Diagram generation failed. Diagnostics were recorded."} /> : null}
         </div>
       ) : (

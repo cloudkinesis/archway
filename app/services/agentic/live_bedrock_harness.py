@@ -41,6 +41,7 @@ _LIVE_SENSITIVE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 class LiveRunContext:
     session_id: str | None = None
     raw_use_case: str | None = None
+    canonical_fact_snapshot_hash: str | None = None
     audits: list[LiveCallAudit] = field(default_factory=list)
 
     @property
@@ -93,6 +94,7 @@ def live_call(
             task_type=task_type,
             lane=lane,
             session_id=session_id,
+            canonical_fact_snapshot_hash_used=run_context.canonical_fact_snapshot_hash,
             prompt_hash=prompt_hash,
             status="not_attempted",
             skip_reason=f"agentic_mode:{settings.agentic_mode}",
@@ -105,6 +107,7 @@ def live_call(
             task_type=task_type,
             lane=lane,
             session_id=session_id,
+            canonical_fact_snapshot_hash_used=run_context.canonical_fact_snapshot_hash,
             prompt_hash=prompt_hash,
             status="setup_required",
             error_type="bedrock_not_configured",
@@ -120,6 +123,7 @@ def live_call(
             task_type=task_type,
             lane=lane,
             session_id=session_id,
+            canonical_fact_snapshot_hash_used=run_context.canonical_fact_snapshot_hash,
             prompt_hash=prompt_hash,
             status="skipped",
             skip_reason=sensitive,
@@ -132,6 +136,7 @@ def live_call(
             task_type=task_type,
             lane=lane,
             session_id=session_id,
+            canonical_fact_snapshot_hash_used=run_context.canonical_fact_snapshot_hash,
             prompt_hash=prompt_hash,
             status="not_attempted",
             skip_reason="budget_exhausted",
@@ -154,6 +159,7 @@ def live_call(
             task_type=task_type,
             lane=lane,
             session_id=session_id,
+            canonical_fact_snapshot_hash_used=run_context.canonical_fact_snapshot_hash,
             prompt_hash=prompt_hash,
             status="failed",
             error_type=type(exc).__name__,
@@ -183,6 +189,35 @@ def _result_from_llm(
     model_id = result.model_id or settings.bedrock_model_id
     parsed = result.parsed
     validated = bool(result.validated and isinstance(parsed, response_schema))
+    original_response_hash = response_hash
+    repaired_response_hash = None
+    repair_attempted = False
+    repair_count = 0
+    parse_error = None if validated else _schema_error_message(result, response_schema)
+    if provider == "bedrock" and not validated and settings.agentic_schema_repair_retries > 0:
+        repair_attempted = True
+        repair = _attempt_schema_repair(
+            result,
+            response_schema,
+            settings,
+            run_context,
+            task_type,
+            lane,
+            session_id,
+            parse_error=parse_error,
+        )
+        if repair is not None:
+            repair_count = 1
+            warnings.append(f"schema_repair_attempted:{parse_error or 'structured_output_invalid'}")
+            warnings.extend(repair.warnings)
+            repaired_response_hash = "sha256:" + hash_payload(repair.text or repair.parsed or "")
+            response_hash = repaired_response_hash
+            result = repair
+            parsed = repair.parsed
+            validated = bool(repair.validated and isinstance(parsed, response_schema))
+            token_unavailable = repair.token_usage is None
+            provider = repair.provider
+            model_id = repair.model_id or settings.bedrock_model_id
     status = "accepted" if provider == "bedrock" and validated else "rejected"
     error_type = None if status == "accepted" else "structured_output_invalid"
     error_message = None if status == "accepted" else "Live Bedrock response did not validate against the lane schema."
@@ -192,12 +227,18 @@ def _result_from_llm(
         task_type=task_type,
         lane=lane,
         session_id=session_id,
+        canonical_fact_snapshot_hash_used=run_context.canonical_fact_snapshot_hash,
         duration_ms=result.duration_ms,
         token_usage=result.token_usage,
         retry_count=result.retry_count,
         validated=validated,
         prompt_hash=prompt_hash,
         response_hash=response_hash,
+        original_response_hash=original_response_hash if repair_attempted else None,
+        repaired_response_hash=repaired_response_hash,
+        parse_error=parse_error,
+        repair_attempted=repair_attempted,
+        repair_count=repair_count,
         status=status,
         error_type=error_type,
         error_message=error_message,
@@ -206,6 +247,58 @@ def _result_from_llm(
         warnings=warnings,
     )
     return _finish(run_context, audit, parsed=parsed if status == "accepted" else None, text=result.text)
+
+
+def _schema_error_message(result: LLMResult, response_schema: type[BaseModel]) -> str:
+    schema_name = getattr(response_schema, "__name__", "response_schema")
+    if result.parsed is None:
+        return f"{schema_name}: response was not parsed or did not match structured output."
+    return f"{schema_name}: parsed object type {type(result.parsed).__name__} did not validate."
+
+
+def _attempt_schema_repair(
+    result: LLMResult,
+    response_schema: type[BaseModel],
+    settings: Settings,
+    run_context: LiveRunContext,
+    task_type: LLMTaskType,
+    lane: str,
+    session_id: str | None,
+    *,
+    parse_error: str | None,
+) -> LLMResult | None:
+    if not _reserve_budget(settings, run_context):
+        return None
+    schema = response_schema.model_json_schema()
+    messages = [
+        LLMMessage(
+            role="system",
+            content=(
+                "Repair the previous response into valid JSON for the requested schema. "
+                "Return JSON only. Do not include markdown, commentary, or fields outside the schema."
+            ),
+        ),
+        LLMMessage(
+            role="user",
+            content=(
+                f"Schema name: {getattr(response_schema, '__name__', 'response_schema')}\n"
+                f"Schema JSON: {schema}\n"
+                f"Validation error: {parse_error or 'structured_output_invalid'}\n"
+                f"Original response:\n{(result.text or '')[:18000]}"
+            ),
+        ),
+    ]
+    try:
+        return _run_coro_blocking(lambda: ModelRouter().complete(
+            LLMTask(task_type=task_type, session_id=session_id, name=f"{lane}_schema_repair"),
+            messages,
+            response_schema=response_schema,
+            temperature=0,
+            max_tokens=settings.bedrock_max_tokens,
+            timeout_seconds=settings.bedrock_timeout_seconds,
+        ))
+    except Exception:
+        return None
 
 
 def _reserve_budget(settings: Settings, run_context: LiveRunContext) -> bool:

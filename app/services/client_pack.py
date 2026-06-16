@@ -264,6 +264,7 @@ def _pricing_summary(pricing: dict, dossier, tier: dict) -> str:
     metadata = pricing.get("metadata") or {}
     closure = metadata.get("pricing_driver_closure") or {}
     procurement_ready = bool(closure.get("procurement_ready", False))
+    invalid = metadata.get("pricing_scenario_validity") == "invalid_driver_mismatch" or metadata.get("status") == "invalid_driver_mismatch"
     drivers = [_driver_display(item) for item in pricing.get("main_cost_drivers", [])]
     missing = [
         display_label(str(item.get("display_name") or ""))
@@ -282,7 +283,7 @@ def _pricing_summary(pricing: dict, dossier, tier: dict) -> str:
         "",
         "## Current estimate",
         "",
-        _sentence(dossier.estimated_monthly_cost_range),
+        _sentence("Pricing scenario needs repair: driver set does not match the confirmed workload. No polished monthly range is displayed for this invalid scenario." if invalid else dossier.estimated_monthly_cost_range),
         "",
         "## What drives this cost",
         "",

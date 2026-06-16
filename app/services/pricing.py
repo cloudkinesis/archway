@@ -133,6 +133,7 @@ class PricingEngine:
             metadata=validation,
         )
         compiled = SourceTruthPricingCompiler().compile(profile=profile, drivers=drivers, pricing=analysis)
+        _apply_live_demo_pricing_hardening(compiled, profile, drivers)
         # Pilot (flag-gated, default off): attach a supplemental SKU-backed trace for
         # legal/document RAG only. Additive metadata; never changes totals or global
         # headline/procurement readiness; never raises into the pricing path.
@@ -325,16 +326,15 @@ def derive_pricing_drivers(profile: UseCaseProfile, pricing_driver_overrides: di
             scenario_profile_id=str(overrides.get("scenario_profile_id")) if overrides.get("scenario_profile_id") else None,
             pricing_driver_overrides=overrides,
         )
-    model = derive_industrial_iot_pricing_model(profile)
-    if _is_streaming_ml_profile(profile):
-        return _flatten_industrial_model(model)
-    cdrs_per_day = _structured_metric(profile, "business_targets", "cdrs_per_day")
-    if cdrs_per_day:
-        asset_count = int(_structured_metric(profile, "asset_counts", "cell_towers") or _asset_count(profile) or 1)
-        daily_event_volume = int(cdrs_per_day)
+    if selected_family == PricingDriverFamily.TELECOM_CDR_ANALYTICS:
+        cdrs_per_day = _structured_metric(profile, "business_targets", "cdrs_per_day")
+        asset_count = int(_structured_metric(profile, "asset_counts", "cell_towers") or _asset_count(profile) or 100)
+        daily_event_volume = int(cdrs_per_day or overrides.get("cdrs_per_day") or max(asset_count * 100_000, 10_000_000))
         monthly_event_volume = daily_event_volume * 30
         retention_years = int(_structured_metric(profile, "business_targets", "retention_years") or 2)
         prediction_minutes = int(_structured_metric(profile, "business_targets", "prediction_horizon_minutes") or 15)
+        storage_gb = float(overrides.get("storage_gb") or max(500.0, monthly_event_volume * 0.25 / 1024 / 1024))
+        query_tb_scanned = float(overrides.get("query_tb_scanned") or max(5.0, storage_gb / 200))
         return PricingDrivers(
             asset_count=asset_count,
             telemetry_frequency_seconds=max(60, prediction_minutes * 60),
@@ -355,9 +355,15 @@ def derive_pricing_drivers(profile: UseCaseProfile, pricing_driver_overrides: di
             integration_api_calls_per_day=max(1, daily_event_volume // 10_000_000) if profile.actions else 0,
             notification_events_per_day=max(1, daily_event_volume // 1_000_000),
             scoring_strategy="score_aggregated_windows",
-            source="telecom_cdr_extracted_metrics",
+            source="telecom_cdr_extracted_metrics" if cdrs_per_day else "telecom_analytics_directional_defaults",
             pricing_driver_family=PricingDriverFamily.TELECOM_CDR_ANALYTICS.value,
+            result_storage_gb_per_month=storage_gb,
+            reporting_query_tb_scanned_monthly=query_tb_scanned,
+            pricing_driver_overrides=overrides,
         )
+    model = derive_industrial_iot_pricing_model(profile)
+    if _is_streaming_ml_profile(profile):
+        return _flatten_industrial_model(model)
     positions = _structured_metric(profile, "asset_counts", "open_derivatives_positions")
     greeks_seconds = _structured_metric(profile, "business_targets", "greeks_frequency_seconds")
     if positions and greeks_seconds:
@@ -465,13 +471,25 @@ def derive_pricing_drivers(profile: UseCaseProfile, pricing_driver_overrides: di
         asset_count = int(_metric_max(profile, ("request", "event", "message", "transaction")) or 1000)
     telemetry_frequency_seconds = 300
     payload_kb = 2.0
-    if "real_time_ingestion" in profile.capabilities:
+    explicit_seconds = _structured_metric(profile, "business_targets", "telemetry_frequency_seconds")
+    refresh_minutes = _structured_metric(profile, "business_targets", "refresh_cadence_minutes")
+    latency_minutes = _structured_metric(profile, "business_targets", "latency_target_minutes")
+    imagery_windows = _structured_metric(profile, "business_targets", "imagery_windows_per_day")
+    explicit_events_per_day = _structured_metric(profile, "business_targets", "events_per_day")
+    retention_days = _structured_metric(profile, "business_targets", "retention_days")
+    if explicit_seconds:
+        telemetry_frequency_seconds = max(1, int(explicit_seconds))
+    elif refresh_minutes:
+        telemetry_frequency_seconds = max(1, int(refresh_minutes * 60))
+    elif latency_minutes:
+        telemetry_frequency_seconds = max(1, int(latency_minutes * 60))
+    elif "real_time_ingestion" in profile.capabilities:
         telemetry_frequency_seconds = 60
-    daily_event_volume = int(asset_count * 86400 / telemetry_frequency_seconds)
+    daily_event_volume = int(explicit_events_per_day or imagery_windows or (asset_count * 86400 / telemetry_frequency_seconds))
     monthly_event_volume = daily_event_volume * 30
     stream_retention_hours = 24
-    hot_retention_days = 30
-    cold_retention_months = 18 if any(metric.label == "target_timeline_months" for metric in profile.metrics) else 12
+    hot_retention_days = int(retention_days or 30)
+    cold_retention_months = max(1, int((retention_days + 29) // 30)) if retention_days else (18 if any(metric.label == "target_timeline_months" for metric in profile.metrics) else 12)
     flink_kpu_hours = max(720, int((daily_event_volume / 1_000_000) * 24))
     inference_events_per_day = daily_event_volume if "predictive_ml" in profile.capabilities else max(1000, daily_event_volume // 10)
     sagemaker_endpoint_hours = 720 if "predictive_ml" in profile.capabilities else 0
@@ -506,19 +524,35 @@ def derive_industrial_iot_pricing_model(profile: UseCaseProfile) -> IndustrialIo
     assumptions = INDUSTRIAL_IOT_DEFAULT_ASSUMPTIONS
     smart_meters = _metric_value(profile, "smart_meters")
     transformers = _metric_value(profile, "distribution_transformers") or _metric_value(profile, "transformers")
-    asset_count = int(_structured_metric(profile, "asset_counts", "total_monitored_assets") or _asset_count(profile) or 1000)
+    asset_count = int(_monitored_asset_count(profile) or 1000)
     telemetry_frequency_seconds = int(assumptions["telemetry_frequency_seconds"]["expected"])
     payload_kb = float(assumptions["payload_kb"]["expected"])
     raw_samples_per_second = _structured_metric(profile, "business_targets", "raw_sensor_samples_per_second")
     sample_rate_khz = _structured_metric(profile, "business_targets", "streaming_sample_rate_khz")
-    if raw_samples_per_second:
+    explicit_seconds = _structured_metric(profile, "business_targets", "telemetry_frequency_seconds")
+    refresh_minutes = _structured_metric(profile, "business_targets", "refresh_cadence_minutes")
+    imagery_windows = _structured_metric(profile, "business_targets", "imagery_windows_per_day")
+    explicit_events_per_day = _structured_metric(profile, "business_targets", "events_per_day")
+    latency_minutes = _structured_metric(profile, "business_targets", "latency_target_minutes")
+    retention_days = _structured_metric(profile, "business_targets", "retention_days")
+    if explicit_seconds:
+        telemetry_frequency_seconds = max(1, int(explicit_seconds))
+    elif refresh_minutes:
+        telemetry_frequency_seconds = max(1, int(refresh_minutes * 60))
+    if explicit_events_per_day:
+        daily_raw = int(explicit_events_per_day)
+    elif explicit_seconds:
+        daily_raw = int(asset_count * 86400 / telemetry_frequency_seconds)
+    elif refresh_minutes:
+        daily_raw = int(imagery_windows or (asset_count * 1440 / max(1, refresh_minutes)))
+    elif raw_samples_per_second:
         telemetry_frequency_seconds = 1
         daily_raw = int(raw_samples_per_second * 86400)
     else:
         daily_raw = int(asset_count * 86400 / telemetry_frequency_seconds)
     monthly_raw = daily_raw * 30
-    hot_retention_days = 30
-    cold_retention_months = int(_structured_metric(profile, "business_targets", "target_timeline_months") or 12)
+    hot_retention_days = int(retention_days or 30)
+    cold_retention_months = max(1, int((retention_days + 29) // 30)) if retention_days else int(_structured_metric(profile, "business_targets", "target_timeline_months") or 12)
     aggregation_window_seconds = int(assumptions["aggregation_window_seconds"]["expected"])
     feature_windows_per_day = max(asset_count, int(asset_count * 86400 / aggregation_window_seconds))
     candidate_rate = float(assumptions["candidate_anomaly_rate_percent"]["expected"])
@@ -530,7 +564,7 @@ def derive_industrial_iot_pricing_model(profile: UseCaseProfile) -> IndustrialIo
     workflow_count = confirmed_incidents if profile.actions else 0
     assumptions_list = [
         "Assumption profile: balanced_production for industrial IoT telemetry until exact device frequency and payload size are confirmed.",
-        f"Telemetry frequency {'derived from explicit kHz/channel scale' if sample_rate_khz else 'assumed'} at {telemetry_frequency_seconds} seconds; low/high profile values are {assumptions['telemetry_frequency_seconds']['low']}s and {assumptions['telemetry_frequency_seconds']['high']}s.",
+        f"Telemetry frequency {'derived from explicit user cadence or latency target' if (sample_rate_khz or explicit_seconds or refresh_minutes or latency_minutes) else 'assumed'} at {telemetry_frequency_seconds} seconds; low/high profile values are {assumptions['telemetry_frequency_seconds']['low']}s and {assumptions['telemetry_frequency_seconds']['high']}s.",
         f"Payload size assumed at {payload_kb:g} KB; low/high profile values are {assumptions['payload_kb']['low']} KB and {assumptions['payload_kb']['high']} KB.",
         f"Candidate anomaly rate assumed at {candidate_rate:g}%; confirmed incident rate assumed at {confirmed_rate:g}%.",
         "ML scoring is priced on aggregated feature windows by default, not every raw telemetry event.",
@@ -938,6 +972,15 @@ def _pricing_validation(profile: UseCaseProfile, drivers: PricingDrivers) -> dic
         "hospital_count": _structured_metric(profile, "asset_counts", "hospital_count"),
         "operating_room_count": _structured_metric(profile, "asset_counts", "operating_room_count"),
         "refresh_cadence_minutes": _structured_metric(profile, "business_targets", "refresh_cadence_minutes"),
+        "camera_towers": _structured_metric(profile, "asset_counts", "camera_towers"),
+        "underwater_cameras": _structured_metric(profile, "asset_counts", "underwater_cameras"),
+        "fish_cages": _structured_metric(profile, "asset_counts", "fish_cages"),
+        "telemetry_frequency_seconds": _structured_metric(profile, "business_targets", "telemetry_frequency_seconds"),
+        "imagery_windows_per_day": _structured_metric(profile, "business_targets", "imagery_windows_per_day"),
+        "events_per_day": _structured_metric(profile, "business_targets", "events_per_day"),
+        "terminal_count": _structured_metric(profile, "asset_counts", "terminal_count"),
+        "retention_days": _structured_metric(profile, "business_targets", "retention_days"),
+        "latency_target_minutes": _structured_metric(profile, "business_targets", "latency_target_minutes"),
     }
     provided = {key: value for key, value in explicit_scale.items() if value}
     scale_applied = True
@@ -958,15 +1001,45 @@ def _pricing_validation(profile: UseCaseProfile, drivers: PricingDrivers) -> dic
         if provided.get("transactions_per_day") and drivers.inference_events_per_day < int(provided["transactions_per_day"]):
             scale_applied = False
             reasons.append("Transactions/day scale from the prompt was not applied to inference_events_per_day.")
+        if provided.get("events_per_day") and drivers.daily_event_volume < int(provided["events_per_day"]):
+            scale_applied = False
+            reasons.append("Events/day scale from the prompt was not applied to daily_event_volume.")
+        if provided.get("events_per_day") and "predictive_ml" in profile.capabilities and drivers.inference_events_per_day <= 0:
+            scale_applied = False
+            reasons.append("Events/day scale from the prompt was not connected to predictive inference/scoring drivers.")
         if provided.get("audit_retention_years") and drivers.cold_retention_months < int(provided["audit_retention_years"] * 12):
             scale_applied = False
             reasons.append("Audit retention years from the prompt were not applied to cold_retention_months.")
         if provided.get("operating_room_count") and drivers.operating_room_count < int(provided["operating_room_count"]):
             scale_applied = False
             reasons.append("Operating room count from the prompt was not applied to healthcare OR pricing drivers.")
-        if provided.get("refresh_cadence_minutes") and drivers.refresh_cadence_minutes != int(provided["refresh_cadence_minutes"]):
+        refresh_minutes = provided.get("refresh_cadence_minutes")
+        refresh_bound_to_telemetry = bool(
+            refresh_minutes and drivers.telemetry_frequency_seconds == int(refresh_minutes * 60)
+        )
+        refresh_requires_or_cadence = (
+            drivers.source == "healthcare_or_extracted_operating_room_metrics"
+            or drivers.refresh_cadence_minutes > 0
+        )
+        if refresh_minutes and refresh_requires_or_cadence and drivers.refresh_cadence_minutes != int(refresh_minutes):
             scale_applied = False
             reasons.append("Prediction refresh cadence from the prompt was not applied to recommendation_runs_per_day.")
+        expected_assets = int(sum(provided.get(key, 0) or 0 for key in ("camera_towers", "underwater_cameras", "fish_cages")))
+        if expected_assets and drivers.asset_count != expected_assets:
+            scale_applied = False
+            reasons.append(f"Explicit monitored camera/cage/tower count ({expected_assets}) was not applied to asset_count.")
+        if provided.get("terminal_count") and drivers.asset_count < int(provided["terminal_count"]):
+            scale_applied = False
+            reasons.append("Explicit terminal count from the prompt was not represented in asset_count.")
+        if provided.get("telemetry_frequency_seconds") and drivers.telemetry_frequency_seconds != int(provided["telemetry_frequency_seconds"]):
+            scale_applied = False
+            reasons.append("Explicit telemetry frequency seconds from the prompt was not applied.")
+        if refresh_minutes and not refresh_bound_to_telemetry and not refresh_requires_or_cadence:
+            scale_applied = False
+            reasons.append("Explicit imagery/refresh cadence from the prompt was not applied to telemetry_frequency_seconds.")
+        if provided.get("retention_days") and drivers.hot_retention_days < int(provided["retention_days"]):
+            scale_applied = False
+            reasons.append("Retention days from the prompt were not applied to hot_retention_days.")
     placeholder = drivers.asset_count == 1000 and bool(provided)
     if placeholder:
         scale_applied = False
@@ -1011,16 +1084,183 @@ def _pricing_validation(profile: UseCaseProfile, drivers: PricingDrivers) -> dic
     }
 
 
+def _apply_live_demo_pricing_hardening(pricing: PricingAnalysis, profile: UseCaseProfile, drivers: PricingDrivers) -> None:
+    excluded = set(profile.excluded_families) | set(profile.excluded_patterns)
+    driver_text = " ".join(pricing.main_cost_drivers + pricing.unknown_variables + [drivers.source, drivers.pricing_driver_family]).lower()
+    findings: list[dict[str, Any]] = []
+    invalid = False
+    if {"rag_assistant", "document_intelligence"} & excluded and any(
+        token in driver_text
+        for token in ("document", "contract", "rag quer", "embedding", "ocr", "pages")
+    ):
+        invalid = True
+        findings.append({
+            "code": "pricing.excluded_document_driver_leakage",
+            "severity": "critical",
+            "message": "Document/RAG pricing drivers appeared even though canonical facts excluded document/RAG workload families.",
+            "rejected_driver_source": drivers.source,
+        })
+    if {"field_service_automation", "supply_chain_optimization"} & excluded and any(
+        token in driver_text
+        for token in ("depot", "workforce", "field service", "inventory")
+    ):
+        invalid = True
+        findings.append({
+            "code": "pricing.excluded_field_service_driver_leakage",
+            "severity": "critical",
+            "message": "Field-service/depot pricing drivers appeared even though canonical facts excluded that workload family.",
+            "rejected_driver_source": drivers.source,
+        })
+    explicit_assets = int(sum(_structured_metric(profile, "asset_counts", key) for key in ("camera_towers", "underwater_cameras", "fish_cages")))
+    if explicit_assets and drivers.asset_count != explicit_assets:
+        invalid = True
+        findings.append({
+            "code": "pricing.explicit_asset_count_not_bound",
+            "severity": "critical",
+            "message": f"Explicit monitored asset count {explicit_assets} did not bind to pricing asset_count {drivers.asset_count}.",
+            "canonical_value": explicit_assets,
+            "pricing_value": drivers.asset_count,
+        })
+    explicit_seconds = _structured_metric(profile, "business_targets", "telemetry_frequency_seconds")
+    refresh_minutes = _structured_metric(profile, "business_targets", "refresh_cadence_minutes")
+    expected_seconds = int(explicit_seconds or (refresh_minutes * 60 if refresh_minutes else 0))
+    if expected_seconds and drivers.telemetry_frequency_seconds != expected_seconds:
+        invalid = True
+        findings.append({
+            "code": "pricing.explicit_cadence_not_bound",
+            "severity": "critical",
+            "message": f"Explicit cadence {expected_seconds}s did not bind to pricing telemetry_frequency_seconds {drivers.telemetry_frequency_seconds}.",
+            "canonical_value": expected_seconds,
+            "pricing_value": drivers.telemetry_frequency_seconds,
+        })
+    explicit_events = _structured_metric(profile, "business_targets", "events_per_day")
+    if explicit_events and drivers.daily_event_volume < int(explicit_events):
+        invalid = True
+        findings.append({
+            "code": "pricing.explicit_event_volume_not_bound",
+            "severity": "critical",
+            "message": f"Explicit event volume {int(explicit_events)} events/day did not bind to pricing daily_event_volume {drivers.daily_event_volume}.",
+            "canonical_value": int(explicit_events),
+            "pricing_value": drivers.daily_event_volume,
+        })
+    provenance = []
+    for key in (
+        "camera_towers",
+        "underwater_cameras",
+        "fish_cages",
+        "staff_users",
+        "resident_alert_recipients",
+        "terminal_count",
+        "telemetry_frequency_seconds",
+        "refresh_cadence_minutes",
+        "imagery_windows_per_day",
+        "events_per_day",
+        "retention_days",
+        "latency_target_minutes",
+    ):
+        section = "asset_counts" if key in {"camera_towers", "underwater_cameras", "fish_cages", "staff_users", "resident_alert_recipients", "terminal_count"} else "business_targets"
+        value = _structured_metric(profile, section, key)
+        if value:
+            provenance.append({
+                "driver_key": key,
+                "value": value,
+                "source": "user_confirmed",
+                "canonical_fact_ref": key,
+                "confidence": "high",
+            })
+    closure = dict(pricing.metadata.get("pricing_driver_closure") or {})
+    if not closure and provenance:
+        closure = {
+            "workload_family": drivers.pricing_driver_family,
+            "status": "missing_non_critical",
+            "pricing_maturity": "pricing_directional_with_assumptions",
+            "confirmed_drivers": [],
+            "assumed_drivers": [],
+            "missing_drivers": [],
+            "headline_pricing_allowed": False,
+            "directional_scenario_allowed": pricing.metadata.get("status") != "invalid_extracted_scale_not_applied",
+            "procurement_ready": False,
+            "scenario_profile_used": None,
+            "recommended_next_action": "ready_for_directional_pricing",
+            "next_validation_steps": [
+                "Confirm exact AWS SKU filters, rate tier bindings, and measured production traffic before procurement."
+            ],
+        }
+    sanity_findings = list(pricing.metadata.get("pricing_sanity_findings") or [])
+    if provenance and pricing.metadata.get("scale_applied") is True and pricing.metadata.get("status") == "directional_valid_with_extracted_scale":
+        for finding in sanity_findings:
+            if finding.get("code") == "pricing.nonzero_total_without_pricing_ledger":
+                finding["severity"] = "warning"
+                finding["description"] = (
+                    "A non-zero directional estimate exists without a source-truth pricing ledger. "
+                    "Confirmed workload drivers are recorded, but headline and procurement pricing remain disabled."
+                )
+                finding["customer_readiness_impact"] = "cap_to_directional"
+                finding["repair_strategy"] = "Keep estimate directional, non-headline, and procurement-blocked until a workload-specific pricing ledger is produced."
+    if closure and provenance:
+        confirmed = list(closure.get("confirmed_drivers") or [])
+        confirmed.extend(f"{item['driver_key']}={_display_driver_value(item['value'])}" for item in provenance)
+        closure["confirmed_drivers"] = list(dict.fromkeys(confirmed))
+        if not closure.get("missing_drivers"):
+            closure["next_validation_steps"] = [
+                "Confirm exact AWS SKU filters, rate tier bindings, and measured production traffic before procurement."
+            ]
+    pricing.metadata = {
+        **pricing.metadata,
+        "pricing_driver_provenance": provenance,
+        "pricing_hardening_findings": findings,
+        "pricing_sanity_findings": sanity_findings,
+        "pricing_can_be_displayed_as_headline": bool(closure.get("headline_pricing_allowed")) if closure else pricing.metadata.get("pricing_can_be_displayed_as_headline", False),
+        **({"pricing_driver_closure": closure} if closure else {}),
+    }
+    if invalid:
+        closure = dict(pricing.metadata.get("pricing_driver_closure") or {})
+        if closure:
+            closure.update({
+                "status": "invalid_driver_mismatch",
+                "pricing_maturity": "not_ready",
+                "headline_pricing_allowed": False,
+                "directional_scenario_allowed": False,
+                "procurement_ready": False,
+                "recommended_next_action": "Repair pricing drivers so they match the confirmed workload before showing a scenario estimate.",
+            })
+        pricing.metadata = {
+            **pricing.metadata,
+            "pricing_scenario_validity": "invalid_driver_mismatch",
+            "pricing_can_be_displayed_as_headline": False,
+            "directional_scenario_allowed": False,
+            "headline_display": "Pricing scenario needs repair: driver set does not match the confirmed workload.",
+            "status": "invalid_driver_mismatch",
+            "scale_applied": False,
+            "reason": "Pricing driver mismatch: " + "; ".join(item["message"] for item in findings),
+            **({"pricing_driver_closure": closure} if closure else {}),
+        }
+        pricing.unknown_variables = list(dict.fromkeys([
+            *pricing.unknown_variables,
+            "Pricing scenario needs repair: driver set does not match the confirmed workload.",
+        ]))
+    else:
+        pricing.metadata.setdefault("pricing_scenario_validity", "directional")
+
+
 def _known_dimension_names(profile: UseCaseProfile) -> set[str]:
     known = {"device_count", "region", "flink_kpu_hours", "inference_frequency", "workflow_execution_count", "state_transitions", "integration_api_calls"}
     if any(metric.kind == "asset_count" for metric in profile.metrics):
         known.add("asset_count")
     if _structured_metric(profile, "business_targets", "transactions_per_day") or _metric_value(profile, "transactions_per_day"):
         known.update({"transactions_per_day", "scoring_events_per_day"})
+    if _structured_metric(profile, "business_targets", "events_per_day") or _metric_value(profile, "events_per_day"):
+        known.update({"events_per_day", "daily_event_volume", "event_ingestion_volume"})
+    if _structured_metric(profile, "asset_counts", "terminal_count") or _metric_value(profile, "terminal_count"):
+        known.add("terminal_count")
     if _structured_metric(profile, "business_targets", "latency_target_ms") or _metric_value(profile, "latency_target_ms"):
         known.update({"scoring_latency_target", "latency_target_ms"})
+    if _structured_metric(profile, "business_targets", "latency_target_minutes") or _metric_value(profile, "latency_target_minutes"):
+        known.update({"latency_target_minutes", "scoring_latency_target"})
     if _structured_metric(profile, "business_targets", "audit_retention_years") or _metric_value(profile, "audit_retention_years"):
         known.update({"audit_retention", "data_retention"})
+    if _structured_metric(profile, "business_targets", "retention_days") or _metric_value(profile, "retention_days"):
+        known.update({"retention_days", "data_retention"})
     if _structured_metric(profile, "business_targets", "false_positive_reduction_target_percent") or _metric_value(profile, "false_positive_reduction_target_percent"):
         known.add("false_positive_reduction_target")
     if profile.actions:
@@ -1062,6 +1302,12 @@ def _known_dimension_names(profile: UseCaseProfile) -> set[str]:
             "override_rate",
         })
     return known
+
+
+def _display_driver_value(value: Any) -> str:
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
 
 
 def _profile_pricing_overrides(profile: UseCaseProfile) -> dict[str, Any]:
@@ -1256,6 +1502,27 @@ def _asset_count(profile: UseCaseProfile) -> int:
     return total
 
 
+def _monitored_asset_count(profile: UseCaseProfile) -> int:
+    priority = (
+        "camera_towers",
+        "underwater_cameras",
+        "fish_cages",
+        "smart_meters",
+        "distribution_transformers",
+        "transformers",
+        "cell_towers",
+        "manufacturing_tools",
+        "operating_room_count",
+        "terminal_count",
+    )
+    values = [int(_structured_metric(profile, "asset_counts", name) or 0) for name in priority]
+    total = sum(value for value in values if value > 0)
+    if total:
+        return total
+    excluded = {"staff_users", "resident_alert_recipients", "active_users", "user_count", "document_count", "historical_contract_count"}
+    return sum(int(metric.value) for metric in profile.metrics if metric.kind == "asset_count" and metric.label not in excluded)
+
+
 def _metric_max(profile: UseCaseProfile, tokens: tuple[str, ...]) -> float:
     values = [metric.value for metric in profile.metrics if any(token in metric.label.lower() for token in tokens)]
     return max(values) if values else 0.0
@@ -1278,6 +1545,9 @@ def _structured_metric(profile: UseCaseProfile, section: str, key: str) -> float
 
 def _is_streaming_ml_profile(profile: UseCaseProfile) -> bool:
     capabilities = set(profile.capabilities) | set(profile.capability_model)
+    excluded = set(profile.excluded_families) | set(profile.excluded_patterns)
+    if "industrial_iot_streaming_ml" in excluded and "industrial_iot_streaming_ml" not in profile.workload_families:
+        return False
     return bool({"device_telemetry", "stream_ingestion", "stream_processing", "ml_inference", "real_time_anomaly_detection"} & capabilities) and (
         "industrial_iot_streaming_ml" in profile.workload_families or "time_series_storage" in capabilities
     )

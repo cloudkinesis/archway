@@ -18,6 +18,7 @@ from app.services.build_status import BuildStatusService
 from app.services.convergence.architecture_repairer import ArchitectureRepairer
 from app.services.deep_dossier import DeepDossierService
 from app.services.diagram_compiler_adapter import DiagramCompilerAdapter
+from app.services.diagnostic_diagrams import diagnostic_diagram_gallery
 from app.services.health import HealthService
 from app.services.jobs import job_manager
 from app.services.mcp_security import mcp_security_status
@@ -78,6 +79,7 @@ async def create_session(request: CreateSessionRequest):
     brief = await synthesis.enhance_brief(brief)
     session = store.create(request.initial_use_case, brief)
     artifacts.write_json(session.id, "brief", "current", brief.model_dump(mode="json"))
+    _write_open_world_understanding_trace(session.id, brief)
     AuditLogger(session.id).event("synthesis", "session_created", inputs_hash=hash_payload(request.initial_use_case), output_hash=hash_payload(session.model_dump()))
     return {"session": session, "readiness": synthesis.readiness(brief), "message": synthesis.opening_message(brief)}
 
@@ -163,6 +165,7 @@ async def synthesis_message(session_id: str, request: SynthesisMessageRequest):
     session.status = SessionStatus.shaping
     store.save(session)
     artifacts.write_json(session.id, "brief", "current", response.brief.model_dump(mode="json"))
+    _write_open_world_understanding_trace(session.id, response.brief)
     AuditLogger(session.id).event("synthesis", "message_processed", inputs_hash=hash_payload(request.message), output_hash=hash_payload(response.brief.model_dump()))
     return response
 
@@ -192,6 +195,7 @@ async def synthesis_proceed(session_id: str, request: ProceedRequest):
         session.status = SessionStatus.researching
         store.save(session)
         artifacts.write_json(session.id, "brief", "current", session.current_summary.model_dump(mode="json"))
+        _write_open_world_understanding_trace(session.id, session.current_summary)
         return {"proceeded": True, "message": "I can proceed now. I’ll make conservative assumptions and call them out clearly.", "readiness": readiness}
     return {
         "proceeded": False,
@@ -464,13 +468,25 @@ async def generate_diagrams(session_id: str):
     if repaired is not None:
         active_specs = repaired.specs
     issues = architecture_revisions.validate(active_specs)
-    if any(issue.severity == "critical" for issue in issues):
-        raise HTTPException(status_code=409, detail={"message": "Resolve critical architecture validation issues before generating diagrams.", "issues": [issue.model_dump(mode="json") for issue in issues]})
     specs = active_specs
 
     def work(job_id: str) -> str:
         adapter = DiagramCompilerAdapter()
         results: list[DiagramGalleryResult] = []
+        if any(issue.severity == "critical" for issue in issues):
+            job_manager.update(job_id, progress=30, message="Validation blockers found; generating diagnostic candidate diagrams.")
+            results = diagnostic_diagram_gallery(
+                session_id=session_id,
+                specs=specs,
+                issues=issues,
+                reason="Critical architecture validation issues downgraded diagram generation to diagnostic candidate artifacts.",
+            )
+            gallery_path = artifacts.write_json(session_id, "diagrams", "gallery", [result.model_dump(mode="json") for result in results])
+            current = _require_session(session_id)
+            current.active_phase = SessionPhase.diagrams
+            current.status = SessionStatus.complete
+            store.save(current)
+            return gallery_path
         total = max(1, len(specs))
         for index, spec in enumerate(specs, start=1):
             if job_manager.should_cancel(job_id):
@@ -586,6 +602,13 @@ def _require_session(session_id: str):
     return session
 
 
+def _write_open_world_understanding_trace(session_id: str, brief) -> None:
+    profile = dict(getattr(brief, "use_case_profile", None) or {})
+    trace = profile.get("open_world_understanding")
+    if isinstance(trace, dict) and trace:
+        artifacts.write_json(session_id, "raw", "open_world_understanding", trace)
+
+
 def _read_json(session_id: str, artifact_id: str):
     try:
         path = artifacts.resolve(session_id, artifact_id)
@@ -611,11 +634,22 @@ def _latest_export_bundle(session_id: str):
     if not manifests:
         return None
     manifest = __import__("json").loads(manifests[0].read_text(encoding="utf-8"))
+    package_dir = manifests[0].parent
     zip_path = root / f"{manifest['name']}.zip"
+    artifact_id = artifacts.to_artifact_id(session_id, zip_path)
+    manifest_artifact_id = artifacts.to_artifact_id(session_id, manifests[0])
+    download_url = f"/api/sessions/{session_id}/artifacts/{artifact_id}"
     return {
         "name": manifest["name"],
-        "artifact_id": artifacts.to_artifact_id(session_id, zip_path),
-        "manifest_artifact_id": artifacts.to_artifact_id(session_id, manifests[0]),
+        "session_id": session_id,
+        "export_id": manifest["name"],
+        "artifact_id": artifact_id,
+        "manifest_artifact_id": manifest_artifact_id,
+        "package_dir": str(package_dir),
+        "package_path": str(package_dir),
+        "zip_path": str(zip_path),
+        "download_url": download_url,
+        "export_url": download_url,
         "included_artifacts": manifest.get("included_artifacts", []),
         "warnings": manifest.get("warnings", []),
     }

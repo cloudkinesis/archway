@@ -55,6 +55,7 @@ class ArchitecturePlanner:
                 "deployment_target_note": "Archway recommendations and generated diagrams target AWS-native platform services. External enterprise systems may appear only as integration actors or existing customer systems.",
                 "network_view_reason": _network_view_reason(profile, production),
                 "network_private_connectivity_view_status": _network_view_status(semantic, compiler),
+                "requirement_coverage": _requirement_coverage(profile, components, flows, production=production),
                 "architecture_generation": "pattern_catalog",
             },
         )
@@ -137,4 +138,66 @@ def _network_view_status(semantic: list[str], compiler: list[str]) -> dict[str, 
         "requested": False,
         "rendered_as": "",
         "reason": "No private connectivity or external integration signal required a dedicated network view.",
+    }
+
+
+def _requirement_coverage(profile, components, flows, production: bool) -> dict[str, list[dict[str, str]]]:
+    """Audit how hard profile requirements map into the generated pattern.
+
+    This is intentionally deterministic and advisory. It gives validators and
+    export readers a concrete place to see whether important extracted facts were
+    carried into the architecture, without letting model-proposed claims alter
+    compiler truth.
+    """
+    capabilities = set(profile.capabilities or [])
+    posture = set(profile.deployment_posture or [])
+    component_text = " ".join([*(getattr(component, "name", "") for component in components), *(getattr(component, "purpose", "") for component in components)]).lower()
+    flow_text = " ".join([*(getattr(flow, "label", "") or "" for flow in flows), *(" ".join(str(value) for value in getattr(flow, "metadata", {}).values()) for flow in flows)]).lower()
+    body = f"{component_text} {flow_text}"
+    requirements: list[dict[str, str]] = []
+
+    def add(requirement_id: str, label: str, status: str, message: str) -> None:
+        requirements.append({
+            "id": requirement_id,
+            "label": label,
+            "status": status,
+            "message": message,
+        })
+
+    if "computer_vision" in capabilities:
+        covered = any(term in body for term in ("video", "image", "vision", "sagemaker", "rekognition", "inference"))
+        add(
+            "computer_vision_hot_path",
+            "Computer vision / imagery processing",
+            "covered" if covered else "unmet",
+            "Architecture carries an imagery/video inference path." if covered else "Computer-vision requirement was extracted but no imagery/video inference path is explicit.",
+        )
+    if "real_time_ingestion" in capabilities:
+        covered = any(term in body for term in ("stream", "kinesis", "iot", "telemetry", "event"))
+        add(
+            "real_time_ingestion",
+            "Real-time ingestion",
+            "covered" if covered else "unmet",
+            "Architecture carries a streaming/event ingestion path." if covered else "Real-time ingestion was extracted but no streaming/event path is explicit.",
+        )
+    if "intermittent_connectivity" in capabilities or {"edge_processing", "hybrid_edge"} & posture:
+        covered = any(term in body for term in ("edge", "buffer", "offline", "store-and-forward", "iot greengrass"))
+        add(
+            "intermittent_connectivity",
+            "Intermittent connectivity / edge buffering",
+            "covered" if covered else "unmet",
+            "Architecture carries an edge/buffering path for intermittent sites." if covered else "Intermittent connectivity was extracted but edge buffering is not explicit.",
+        )
+    if profile.actions:
+        covered = any(term in body for term in ("approval", "human", "step functions", "workflow", "notification", "sns"))
+        add(
+            "governed_action_path",
+            "Governed action path",
+            "covered" if covered else "unmet",
+            "Architecture carries approval/workflow controls for actions." if covered else "Actions were extracted but approval/workflow controls are not explicit.",
+        )
+    return {
+        "schema": "architecture_requirement_coverage_v1",
+        "mode": "production" if production else "poc",
+        "requirements": requirements,
     }

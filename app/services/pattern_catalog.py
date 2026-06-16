@@ -145,7 +145,7 @@ PATTERNS: dict[str, WorkloadPattern] = {
         ),
         pricing_dimensions=("device_count", "messages_per_device_per_day", "message_size_kb", "stream_retention_hours", "flink_kpu_hours", "inference_frequency", "hot_storage_days", "cold_storage_years"),
         poc_scope="Validate telemetry ingestion, streaming feature extraction, anomaly scoring, and alert quality on a representative asset subset.",
-        production_scope="Operate resilient multi-AZ telemetry ingestion, streaming analytics, model lifecycle, dispatch integration, and governed operational actions.",
+        production_scope="Operate resilient multi-AZ telemetry ingestion, streaming analytics, model lifecycle, operations workflow integration, and governed operational actions.",
         expected_views=("production_logical_service_flow", "async_flow_view", "ai_security_governance_view", "data_access_view", "network_private_connectivity"),
     ),
     "real_time_anomaly_detection": WorkloadPattern(
@@ -165,6 +165,37 @@ PATTERNS: dict[str, WorkloadPattern] = {
         poc_scope="Measure false positives, false negatives, and alert latency before enabling automatic downstream actions.",
         production_scope="Route scored anomaly events through durable eventing, dedupe, notification, audit, and incident state controls.",
         expected_views=("production_logical_service_flow", "async_flow_view", "data_access_view"),
+    ),
+    "operational_event_prediction_workflow": WorkloadPattern(
+        id="operational_event_prediction_workflow",
+        label="Operational event prediction workflow",
+        services=(
+            ServicePattern("External operational source systems", "Existing operational systems that publish business events and status changes", ("ERP", "line-of-business event feeds", "partner APIs"), "operational_sources", "Operational Source Systems", "external_actor", "external_actor", "Sources and edge"),
+            ServicePattern("Amazon Kinesis Data Streams", "Durable high-volume operational event stream", ("Amazon MSK", "Amazon Data Firehose"), "stream", "Operational Event Stream", "kinesis", "regional_integration", "Streaming"),
+            ServicePattern("Amazon Managed Service for Apache Flink", "Streaming feature calculation, windowing, and risk signal enrichment", ("AWS Lambda", "Amazon EMR"), "analytics", "Streaming Event Analytics", "kinesis_stream_analytics", "regional_integration", "Streaming Analytics", metadata={"role": "stream_processor", "selected_service": "managed_service_for_apache_flink"}),
+            ServicePattern("Amazon SageMaker", "Prediction service for operational risk, disruption, or next-best-action scoring", ("Amazon Bedrock", "ECS-hosted model service"), "ml", "Operational Prediction Service", "sagemaker", "regional_managed_ai", "Prediction and scoring", metadata={"role": "model_endpoint"}),
+            ServicePattern("Amazon DynamoDB", "Current operational state, dedupe keys, prediction outcomes, and action status", ("Amazon Aurora PostgreSQL", "Amazon MemoryDB"), "state", "Operational State Store", "dynamodb", "regional_managed_data", "State", metadata={"role": "operational_state_store"}),
+            ServicePattern("Amazon EventBridge", "Routes prediction, exception, and action events to workflow and notification targets", ("Amazon SNS", "Amazon SQS"), "events", "Operational Event Router", "eventbridge", "regional_integration", "Events"),
+            ServicePattern("AWS Step Functions", "Governed recovery or next-action workflow with retry and audit", ("Amazon MWAA", "Custom workflow engine"), "workflow", "Recovery Action Workflow", "step_functions", "regional_orchestration", "Workflow", metadata={"role": "governed_workflow"}),
+            ServicePattern("Amazon SNS", "Notification fan-out to operations teams, partner systems, or customer channels", ("Amazon Pinpoint", "Amazon SQS"), "notify", "Operational Notifications", "sns", "regional_integration", "Notifications"),
+            ServicePattern("Amazon S3", "Retained events, model features, audit evidence, and replay datasets", ("Amazon Redshift", "S3 Glacier tiers"), "audit_lake", "Operational Audit and Replay Store", "s3", "regional_managed_data", "Audit and history", metadata={"role": "audit_evidence_store"}),
+        ),
+        flows=(
+            ("operational_sources", "stream", "Publish operational events and status changes", "HTTPS/private integration", "event"),
+            ("stream", "analytics", "Window, enrich, and derive prediction features", None, "stream_processing"),
+            ("analytics", "state", "Update current operational state and idempotency keys", None, "data_write"),
+            ("analytics", "ml", "Score operational risk or disruption likelihood", None, "model_invocation"),
+            ("ml", "events", "Emit prediction or exception event", None, "event"),
+            ("events", "state", "Record prediction, action status, and dedupe state", None, "data_write"),
+            ("events", "workflow", "Start governed recovery or next-action workflow", None, "workflow_start"),
+            ("workflow", "notify", "Notify responsible teams or customer channels", None, "notification"),
+            ("workflow", "audit_lake", "Write action, model version, and decision evidence", None, "audit_trace"),
+            ("stream", "audit_lake", "Retain raw and curated event history for replay", None, "data_write"),
+        ),
+        pricing_dimensions=("events_per_day", "source_system_count", "feature_windows_per_day", "prediction_events_per_day", "workflow_executions_per_day", "notification_count", "retention_days"),
+        poc_scope="Validate event ingestion, feature windows, prediction quality, recovery workflow fit, notification correctness, and audit/replay evidence on representative operational event streams.",
+        production_scope="Operate resilient high-volume event ingestion, streaming enrichment, prediction scoring, governed recovery workflows, notifications, audit evidence, and graceful degradation when source connectivity is intermittent.",
+        expected_views=("production_logical_service_flow", "async_flow_view", "data_access_view", "ai_security_governance_view", "network_private_connectivity"),
     ),
     "field_service_automation": WorkloadPattern(
         id="field_service_automation",
@@ -307,17 +338,17 @@ PATTERNS: dict[str, WorkloadPattern] = {
         services=(
             ServicePattern("Amazon S3", "Image/video landing zone and labeled dataset storage", ("Amazon EFS", "Amazon FSx"), "images", "Inspection Media Store", "s3", "regional_managed_data", "Media"),
             ServicePattern("Amazon SageMaker", "Vision model training and inference", ("Amazon Rekognition Custom Labels", "ECS-hosted model"), "ml", "Vision Model Inference", "sagemaker", "regional_managed_ai", "ML"),
-            ServicePattern("Amazon Kinesis Data Streams", "Inspection event stream from lines/cameras", ("Amazon MSK", "IoT Core"), "stream", "Inspection Event Stream", "kinesis", "regional_integration", "Streaming"),
-            ServicePattern("Amazon EventBridge", "Defect event routing", ("Amazon SNS", "Amazon SQS"), "events", "Defect Event Router", "eventbridge", "regional_integration", "Events"),
+            ServicePattern("Amazon Kinesis Data Streams", "Vision event stream from cameras or source systems", ("Amazon MSK", "IoT Core"), "stream", "Vision Event Stream", "kinesis", "regional_integration", "Streaming"),
+            ServicePattern("Amazon EventBridge", "Vision/anomaly event routing", ("Amazon SNS", "Amazon SQS"), "events", "Vision Event Router", "eventbridge", "regional_integration", "Events"),
         ),
         flows=(
             ("user", "images", "Review labeled samples", "HTTPS", "human_review"),
             ("stream", "ml", "Score inspection frame", None, "ml_inference"),
-            ("ml", "events", "Emit defect event", None, "event"),
+            ("ml", "events", "Emit vision/anomaly event", None, "event"),
             ("images", "ml", "Train model", None, "training_data"),
         ),
         pricing_dimensions=("frames_per_day", "image_storage_gb", "training_hours", "inference_frequency", "defect_event_rate"),
-        poc_scope="Validate defect detection quality on representative lines, cameras, and labeled examples.",
+        poc_scope="Validate vision/anomaly detection quality on representative cameras, imagery sources, and labeled examples.",
         production_scope="Operate resilient inspection ingestion, model monitoring, event routing, review workflow, and retention controls.",
         expected_views=("production_logical_service_flow", "data_access_view", "async_flow_view", "ai_security_governance_view"),
     ),
@@ -560,6 +591,15 @@ def pattern_components(profile: UseCaseProfile, production: bool) -> list[Archit
     )
     if has_device_source:
         components.append(ArchitectureComponent(id="devices", name=_asset_source_name(profile), service="external_actor", scope="external_actor", logical_group="Sources and edge", metadata={"metrics": [metric.__dict__ for metric in profile.metrics], "role": "field_asset"}))
+    if has_device_source and _needs_edge_buffering(profile):
+        components.append(ArchitectureComponent(
+            id="edge_buffer",
+            name="Edge Buffering Gateway",
+            service="iot_greengrass",
+            scope="regional_managed_data",
+            logical_group="Sources and edge",
+            metadata={"role": "edge_buffering", "connectivity": "intermittent_store_and_forward"},
+        ))
     seen = {component.id for component in components}
     for pattern in patterns:
         for service in pattern.services:
@@ -625,6 +665,12 @@ def pattern_flows(profile: UseCaseProfile, production: bool, components: list[Ar
             metadata = _flow_metadata(profile, source, target, label, classification)
             flows.append(ArchitectureFlow(id=f"f{index}", source=source, target=target, label=label, protocol=protocol, metadata=metadata))
             index += 1
+    if "devices" in component_ids and "edge_buffer" in component_ids:
+        flows.append(ArchitectureFlow(id=f"f{index}", source="devices", target="edge_buffer", label="Buffer telemetry and video samples during intermittent connectivity", protocol="MQTT/local network", metadata={"classification": "edge_buffering"}))
+        index += 1
+        if "iot" in component_ids:
+            flows.append(ArchitectureFlow(id=f"f{index}", source="edge_buffer", target="iot", label="Forward store-and-forward batches when connectivity is restored", protocol="MQTT/TLS", metadata={"classification": "edge_buffering"}))
+            index += 1
     if production and "waf" in component_ids and "api" in component_ids and "user" in component_ids:
         if "shield" in component_ids:
             flows.append(ArchitectureFlow(id=f"f{index}", source="user", target="shield", label="DDoS-protected ingress", protocol="HTTPS", metadata={"classification": "request"}))
@@ -651,6 +697,12 @@ def pattern_flows(profile: UseCaseProfile, production: bool, components: list[Ar
             index += 1
             break
     return _dedupe_flows(flows)
+
+
+def _needs_edge_buffering(profile: UseCaseProfile) -> bool:
+    capabilities = set(_capabilities(profile))
+    posture = set(profile.deployment_posture or [])
+    return "intermittent_connectivity" in capabilities or bool({"edge_processing", "hybrid_edge", "hybrid"} & posture)
 
 
 _EFFECTFUL_CLASSIFICATIONS = {"external_write", "trade_block", "policy_change", "network_change", "device_update", "dispatch", "pre_position"}

@@ -1124,10 +1124,10 @@ def _summarize_primary_specialized_subsystems(
     if flow_types & RAG_RETRIEVAL_EDGE_TYPES and flow_types & RAG_INGESTION_EDGE_TYPES:
         summary_specs.append(
             (
-                "ai_rag_layer",
-                "AI/RAG layer",
+                "ai_ml_layer",
+                "AI/ML layer",
                 RAG_RETRIEVAL_EDGE_TYPES | RAG_INGESTION_EDGE_TYPES,
-                "AI/RAG summary",
+                "AI/ML summary",
             )
         )
     elif flow_types & {"rag_retrieval", "vector_search", "hybrid_search", "source_reference"}:
