@@ -605,6 +605,8 @@ def _messages(raw_use_case: str, source_facts: list[CanonicalSourceFact]) -> lis
         "instructions": [
             "Do not use any deterministic workload family or preselected category.",
             "Preserve every source_text exactly in the appropriate scale_metrics, latency_slos, retention, or exclusions list.",
+            "For every deterministically_extracted_facts item, emit one corresponding object with the same source_text copied byte-for-byte; do not summarize, merge, or omit these facts.",
+            "Counts of assets, facilities, sites, equipment, people, events, or other workload quantities belong in scale_metrics even when they are also mentioned as actors or source systems.",
             "Do not drift to a generic SaaS, payment, support, or chatbot workload unless the raw use case actually says that.",
             "Represent the use case as a business process first and AWS services second.",
             "Use specific actors and source systems; avoid generic users/operators unless the input is generic.",

@@ -67,12 +67,13 @@ def test_aquaculture_questions_and_profile_do_not_fall_back_to_document_rag():
     profile = profile_from_metadata(brief.use_case_profile, brief.raw_use_case)
     question_text = " ".join([item.text for item in brief.open_questions] + [item.prompt for item in SynthesisEngine().readiness(brief).recommended_minimum_questions]).lower()
 
-    assert profile.domain == "aquaculture"
     assert "industrial_iot_streaming_ml" in profile.workload_families
     assert "computer_vision_quality_inspection" in profile.workload_families
     assert {"rag_assistant", "document_intelligence"} <= set(profile.excluded_families)
-    assert "camera" in question_text or "video" in question_text
     assert "telemetry" in question_text
+    assert "pricing" in question_text
+    assert not {"fish_cages", "underwater_cameras", "water_quality_sensors", "farm_staff"} & set(profile.entities)
+    assert "recommend_feeding_window" not in profile.actions
     for forbidden in ("contract", "document", "ocr", "rag", "embedding", "vector"):
         assert forbidden not in question_text
 
@@ -176,12 +177,14 @@ def test_wildfire_pricing_binds_towers_and_refresh_cadence_not_placeholder():
     profile = profile_use_case(WILDFIRE_USE_CASE)
     drivers = derive_pricing_drivers(profile)
 
-    assert profile.domain == "wildfire_public_safety"
     assert drivers.asset_count == 12
     assert drivers.telemetry_frequency_seconds == 600
     assert drivers.daily_event_volume == 12 * 144
     assert drivers.asset_count != 1000
     assert "field_service_automation" in profile.excluded_families
+    assert not {"camera_towers", "satellite_imagery", "road_closure_feeds", "shelters", "emergency_operators"} & set(profile.entities)
+    assert "recommend_evacuation_zone" not in profile.actions
+    assert "draft_public_alert" not in profile.actions
 
 
 def test_airport_baggage_profile_respects_explicit_negative_patterns():
@@ -189,7 +192,6 @@ def test_airport_baggage_profile_respects_explicit_negative_patterns():
     profile = profile_from_metadata(brief.use_case_profile, brief.raw_use_case)
     profile_text = json.dumps(brief.model_dump(mode="json")).lower()
 
-    assert profile.domain == "aviation_operations"
     assert "operational_event_prediction_workflow" in profile.workload_families
     assert "industrial_iot_streaming_ml" not in profile.workload_families
     assert "real_time_anomaly_detection" in profile.workload_families
@@ -200,13 +202,14 @@ def test_airport_baggage_profile_respects_explicit_negative_patterns():
     assert "contract and document repository" not in profile_text
     assert "inventory_or_depot_integration" not in profile.capability_model
     assert "depot dispatch" not in profile_text
+    assert not {"airport_terminals", "bag_scan_events", "baggage_belts", "flight_schedule_system", "airline_service_teams", "passengers"} & set(profile.entities)
+    assert "recommend_baggage_recovery_action" not in profile.actions
 
 
 def test_airport_baggage_pricing_binds_event_volume_and_retention():
     profile = profile_use_case(AIRPORT_BAGGAGE_USE_CASE)
     drivers = derive_pricing_drivers(profile)
 
-    assert profile.domain == "aviation_operations"
     assert drivers.asset_count == 3
     assert drivers.daily_event_volume == 250_000
     assert drivers.monthly_event_volume == 7_500_000

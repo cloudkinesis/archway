@@ -319,8 +319,8 @@ def _question_impact(question_id: str):
 
 def _assumptions_for_profile(profile) -> list[Assumption]:
     assumptions = []
-    if _is_media_profile(profile):
-        assumptions.append(Assumption(text="Use representative viewer-hours, bitrate ladder, CDN cache-hit ratio, ad decision volume, DRM license volume, and archive retention until media traffic forecasts are confirmed.", reason="Live media cost depends on delivery, channel, rights, ad, and archive drivers rather than generic device telemetry.", impact="pricing", confidence="medium"))
+    if _is_live_delivery_profile(profile):
+        assumptions.append(Assumption(text="Use representative viewer-hours, bitrate ladder, CDN cache-hit ratio, ad decision volume, DRM license volume, and archive retention until traffic forecasts are confirmed.", reason="Live delivery cost depends on audience, bitrate, rights, ad, and archive drivers rather than generic telemetry frequency.", impact="pricing", confidence="medium"))
     elif _is_document_workflow_profile(profile):
         assumptions.append(Assumption(text="Use representative document volume, document size, ingestion cadence, embedding refresh, RAG query volume, approval workflow volume, and audit retention until legal/document workload drivers are confirmed.", reason="Document intelligence and RAG costs depend on ingestion, OCR/extraction, indexing, retrieval, model invocation, workflow, and retention drivers rather than telemetry frequency.", impact="pricing", confidence="medium"))
     elif "real_time_ingestion" in profile.capabilities:
@@ -335,29 +335,14 @@ def _assumptions_for_profile(profile) -> list[Assumption]:
 
 
 def _questions_for_profile(profile) -> list[OpenQuestion]:
-    planner_questions = [] if profile.domain in {"aquaculture", "wildfire_public_safety"} else _planner_questions(profile)
+    planner_questions = _planner_questions(profile)
     if planner_questions:
         return planner_questions[:6]
-    questions = []
-    if profile.domain == "aquaculture":
-        questions.extend([
-            OpenQuestion(text="How many cages, underwater cameras, sensor streams, and shore/edge sites should Archway model?", impact="pricing"),
-            OpenQuestion(text="What telemetry cadence, video frame/sample rate, and alert latency should be assumed for fish health and water-quality detection?", impact="performance"),
-            OpenQuestion(text="How long should raw video, telemetry, features, and scored events be retained?", impact="pricing"),
-        ])
-    elif profile.domain == "wildfire_public_safety":
-        questions.extend([
-            OpenQuestion(text="How many camera towers, satellite imagery windows, weather feeds, and alert recipients should Archway model?", impact="pricing"),
-            OpenQuestion(text="What smoke/plume detection latency, human approval rule, and public-alert escalation path should be assumed?", impact="security"),
-            OpenQuestion(text="Which sites have intermittent connectivity and need edge buffering or store-and-forward behavior?", impact="architecture"),
-        ])
-    elif _is_media_profile(profile):
-        questions.extend([
-            OpenQuestion(text="What are expected viewer-hours, peak concurrent viewers, and event hours per month?", impact="pricing"),
-            OpenQuestion(text="What bitrate ladder, regional traffic mix, CDN cache-hit ratio, and price class should be assumed?", impact="pricing"),
-            OpenQuestion(text="Which DRM, consent, ad decision, geo-rights, and QoE reporting systems must be integrated?", impact="architecture"),
-        ])
-    elif _is_telecom_hbase_profile(profile):
+    questions = [
+        OpenQuestion(text="What are the primary actors, source systems, and business events in scope for the first release?", impact="architecture"),
+        OpenQuestion(text="What expected volume, concurrency, throughput, payload size, and retention should Archway model for pricing?", impact="pricing"),
+    ]
+    if _is_telecom_hbase_profile(profile):
         questions.extend([
             OpenQuestion(text="What are the HBase access patterns before choosing the AWS target store: row-key design, read/write QPS, scan frequency, hot partitions, TTL, and consistency needs?", impact="architecture"),
             OpenQuestion(text="What HDFS data volume, retention, Spark/MapReduce job schedule, and migration cutover window should be assumed?", impact="pricing"),
@@ -375,6 +360,8 @@ def _questions_for_profile(profile) -> list[OpenQuestion]:
             OpenQuestion(text="What end-to-end detection latency is required for hot-path decisions?", impact="performance"),
             OpenQuestion(text="How long must raw, feature, and scored telemetry be retained?", impact="pricing"),
         ])
+    else:
+        questions.append(OpenQuestion(text="Which integrations, write actions, and approval boundaries must be treated as hard requirements?", impact="security"))
     if "predictive_ml" in profile.capabilities:
         questions.append(OpenQuestion(text="What false positive and false negative posture is acceptable?", impact="architecture"))
     if profile.actions:
@@ -385,11 +372,11 @@ def _questions_for_profile(profile) -> list[OpenQuestion]:
 
 def _users_for_profile(profile) -> list[UserPersona]:
     users = []
-    if profile.domain == "energy_utility":
+    if {"real_time_ingestion", "event_driven_workflow"} <= set(profile.capabilities):
         users.extend([
-            UserPersona(name="Grid operator", description="Monitors alerts and grid health."),
-            UserPersona(name="Field dispatcher", description="Coordinates crews and equipment response."),
-            UserPersona(name="Asset reliability engineer", description="Reviews failure patterns and model quality."),
+            UserPersona(name="Operations controller", description="Monitors alerts, operational health, and exception queues."),
+            UserPersona(name="Response coordinator", description="Coordinates approved follow-up actions across teams and systems."),
+            UserPersona(name="Reliability analyst", description="Reviews failure patterns, decision quality, and model performance."),
         ])
     elif "financial_fraud_detection" in profile.workload_families:
         users.append(UserPersona(name="Fraud analyst", description="Reviews risk scores, alerts, and case outcomes."))
@@ -474,8 +461,8 @@ def _has_scale_signal(brief: UseCaseBrief, profile) -> bool:
 
 def _readiness_assumptions(profile) -> list[Assumption]:
     assumptions = []
-    if _is_media_profile(profile):
-        assumptions.append(Assumption(text="Assume viewer-hours, bitrate ladder, regional traffic mix, CDN cache-hit ratio, live channel count, ad decision volume, DRM license volume, and replay/archive retention are not procurement-grade until confirmed.", reason="Media delivery cost depends on workload-specific viewer and rights/ad drivers.", impact="pricing", confidence="medium"))
+    if _is_live_delivery_profile(profile):
+        assumptions.append(Assumption(text="Assume viewer-hours, bitrate ladder, regional traffic mix, CDN cache-hit ratio, live channel count, ad decision volume, DRM license volume, and replay/archive retention are not procurement-grade until confirmed.", reason="Live delivery pricing depends on workload-specific audience and rights/ad drivers.", impact="pricing", confidence="medium"))
     elif _is_document_workflow_profile(profile):
         assumptions.append(Assumption(text="Assume contract/document volume, average document size, OCR need, embedding refresh cadence, RAG query volume, active reviewer count, approval workflow volume, and audit retention are not procurement-grade until confirmed.", reason="Legal document intelligence pricing depends on document ingestion, text extraction/OCR, vector indexing, model calls, workflow state transitions, and retention.", impact="pricing", confidence="medium"))
     elif "real_time_ingestion" in profile.capabilities:
@@ -486,7 +473,7 @@ def _readiness_assumptions(profile) -> list[Assumption]:
 
 
 def _synthesis_questions(profile, assumptions: list[Assumption]) -> list[SynthesisQuestion]:
-    planner_questions = [] if profile.domain in {"aquaculture", "wildfire_public_safety"} else _planner_questions(profile)
+    planner_questions = _planner_questions(profile)
     if planner_questions:
         return [
             SynthesisQuestion(
@@ -499,31 +486,11 @@ def _synthesis_questions(profile, assumptions: list[Assumption]) -> list[Synthes
             )
             for index, item in enumerate(planner_questions[:5])
         ]
-    prompts = []
-    if profile.domain == "aquaculture":
-        prompts.extend([
-            ("aquaculture-assets", "How many sea cages, underwater cameras, sensor streams, and edge/shore locations should I model?", "These are the primary monitored assets and drive IoT ingestion, streaming, storage, model inference, and alerting cost.", ["Known asset inventory", "Approximate farm scale", "Pilot subset only", "Let Archway assume"], assumptions[0]),
-            ("aquaculture-cadence", "What telemetry cadence, video sampling rate, and alert latency should I assume?", "Fish health detection and oxygen/water-quality response need a clear hot-path latency and retention boundary.", ["Seconds-level telemetry", "Minute-level telemetry", "Video sampled for inference", "Let Archway assume"], assumptions[0]),
-            ("aquaculture-retention", "How long should raw video, telemetry, features, and scored events be retained?", "Retention separates operational monitoring cost from analytics/model-improvement storage cost.", ["Short raw retention", "Long telemetry retention", "Separate raw/features/scored events", "Let Archway assume"], assumptions[0]),
-        ])
-    elif profile.domain == "wildfire_public_safety":
-        prompts.extend([
-            ("wildfire-assets", "How many camera towers, satellite imagery windows, weather feeds, and public alert recipients should I model?", "These quantities drive ingestion, imagery processing, notification fan-out, storage, and operational cost.", ["Known tower/feed counts", "Known alert population", "Pilot geography only", "Let Archway assume"], assumptions[0]),
-            ("wildfire-detection-latency", "What smoke/plume detection latency, human approval rule, and public alert escalation path should I assume?", "Public safety decisions require a visible boundary between automated detection, operator review, and citizen notification.", ["Human approval required", "Low-risk internal alerts", "Public alerts after approval", "Let Archway assume"], assumptions[-1]),
-            ("wildfire-connectivity", "Which towers or remote sites have intermittent connectivity and need edge buffering?", "Disconnected field sites change the architecture toward local buffering, edge inference, and store-and-forward recovery.", ["Known unreliable sites", "Assume intermittent remote connectivity", "Cloud-connected only", "Let Archway assume"], assumptions[0]),
-        ])
-    elif profile.domain == "healthcare":
-        prompts.extend([
-            ("healthcare-decision-boundary", "Should Archway model this as recommendation-only, approval-required schedule changes, or automated OR reassignment?", "This sets the safety and governance boundary for patient/surgical operations and external system writes.", ["Recommendation-only", "Charge nurse approval required", "Policy-approved automated changes", "Different by site"], assumptions[-1]),
-            ("healthcare-source-feeds", "Which OR source feeds are authoritative, and how fresh are they?", "Schedule, patient check-in, anesthesia readiness, staffing, sterile processing, room turnover, and occupancy feeds drive architecture, latency, and pricing.", ["Epic + OR command center", "Multiple hospital systems", "Near-real-time event feeds", "Batch updates are acceptable"], assumptions[0]),
-            ("healthcare-privacy-video", "What PHI and video handling boundary should the design enforce?", "The platform must avoid storing identifiable patient video unless explicitly approved and must keep HIPAA auditability visible.", ["No patient-identifiable video storage", "Ephemeral occupancy signals only", "Approved secure video retention", "Needs compliance decision"], assumptions[-1]),
-            ("healthcare-latency-sla", "What update latency and availability are required for operational decisions?", "A two-minute prediction refresh has different queueing, streaming, and failover needs than hourly optimization.", ["Under 2 minutes", "Under 5 minutes", "Near-real-time dashboard only", "Confirm by workflow"], assumptions[0]),
-            ("healthcare-pilot-success", "What pilot scope and success metrics should define the first release?", "The POC needs measurable OR utilization, delay, cancellation, and user-acceptance gates before production rollout.", ["One hospital / one service line", "Several hospitals", "All 18 hospitals", "Let Archway propose staged rollout"], assumptions[0]),
-        ])
-    elif _is_media_profile(profile):
-        prompts.append(("media-volume", "What viewer-hours, peak concurrent viewers, and live channel-hours should I use?", "This drives MediaLive, origin, CDN, ad, and archive pricing.", ["Known event forecast", "Historical comparable event", "Conservative launch estimate", "Let Archway assume"], assumptions[0]))
-        prompts.append(("media-rights", "Which DRM, consent, geo-rights, ad decision, and QoE systems must be integrated?", "These controls define playback protection, legal delivery, advertising eligibility, and operational monitoring.", ["All required", "DRM and geo-rights only", "Ads and QoE only", "Let Archway assume"], assumptions[0]))
-    elif _is_telecom_hbase_profile(profile):
+    prompts = [
+        ("workload-boundary", "What actors, source systems, business events, and out-of-scope workflows should I model?", "This keeps architecture, pricing, and diagrams aligned to the real workload rather than a named-domain template.", ["Known system inventory", "Approximate operating model", "Pilot subset only", "Let Archway assume"], assumptions[0]),
+        ("pricing-drivers", "What volume, throughput, payload size, concurrency, retention, and notification or workflow counts should I use?", "These are the common drivers behind credible directional pricing across AWS services.", ["Known measured volumes", "Approximate forecast", "Pilot-scale estimate", "Let Archway assume"], assumptions[0]),
+    ]
+    if _is_telecom_hbase_profile(profile):
         prompts.append(("telecom-hbase-access-patterns", "What HBase access patterns should I preserve before selecting the AWS target store?", "Row-key design, read/write QPS, scans, hot partitions, TTL, and consistency determine whether DynamoDB, Keyspaces, OpenSearch, EMR/S3, or another target fits.", ["Known access profile", "Mostly point reads/writes", "Heavy scans/analytics", "Let Archway assume"], assumptions[0]))
         prompts.append(("telecom-hdfs-migration-shape", "What HDFS data volume, retention, Spark/MapReduce schedule, and cutover window should I use?", "Migration sizing and target architecture depend on stored data volume, batch job shape, and parallel-run constraints.", ["Known migration plan", "Estimate from current cluster", "Parallel run required", "Let Archway assume"], assumptions[0]))
     elif _is_document_workflow_profile(profile):
@@ -549,7 +516,7 @@ def _synthesis_questions(profile, assumptions: list[Assumption]) -> list[Synthes
 def _data_sources(text: str, sensitive: bool | None, profile=None) -> list[DataSource]:
     sensitivity = "regulated" if sensitive else "unknown"
     sources = []
-    if profile and _is_media_profile(profile):
+    if profile and _is_live_delivery_profile(profile):
         sources.append(DataSource(name="Live contribution feeds", sensitivity=sensitivity))
         sources.append(DataSource(name="Playback QoE and ad decision events", sensitivity=sensitivity))
     elif profile and _is_document_workflow_profile(profile):
@@ -700,10 +667,13 @@ def _title_word(part: str, *, first: bool) -> str:
     return part.capitalize()
 
 
-def _is_media_profile(profile) -> bool:
+def _is_live_delivery_profile(profile) -> bool:
     families = set(getattr(profile, "workload_families", []) or [])
-    capabilities = set(getattr(profile, "capabilities", []) or [])
-    return bool({"live_streaming", "media_streaming"} & families or "video_streaming" in capabilities)
+    capabilities = set(getattr(profile, "capabilities", []) or []) | set(getattr(profile, "capability_model", []) or [])
+    return bool(
+        "live_streaming" in families
+        or {"video_streaming", "low_latency_media_delivery", "drm_enforcement", "geo_rights_enforcement", "targeted_ad_decisioning"} & capabilities
+    )
 
 
 def _is_telecom_hbase_profile(profile) -> bool:

@@ -1,7 +1,6 @@
 import re
 from dataclasses import dataclass, field
 
-from app.core.config import get_settings
 from app.services.capability_extractor import explicit_negative_constraints, extract_capabilities
 from app.services.metric_extractor import extract_metrics
 
@@ -137,198 +136,14 @@ def profile_from_metadata(metadata: dict | None, raw_use_case: str) -> UseCasePr
 
 def refine_profile_with_context(profile: UseCaseProfile, context_text: str) -> UseCaseProfile:
     lower = context_text.lower()
-    if profile.profile_source == "open_world_understanding":
-        return _apply_explicit_negative_constraints(profile, lower)
-    if get_settings().disable_domain_refiners:
-        return _apply_explicit_negative_constraints(profile, lower)
-    profile = _refine_aquaculture_profile(profile, lower)
-    profile = _refine_wildfire_profile(profile, lower)
-    profile = _refine_airport_operations_profile(profile, lower)
-    if not _is_healthcare_operations_scheduling(lower):
-        return _apply_explicit_negative_constraints(profile, lower)
-    healthcare_families = [
-        "healthcare_operations_scheduling",
-        "surgical_scheduling_prediction",
-        "clinical_workflow_decision_support",
-        "computer_vision_metadata_processing",
-        "approval_gated_workflow_automation",
-    ]
-    blocked = {
-        "industrial_iot_streaming_ml",
-        "field_service_automation",
-        "computer_vision_quality_inspection",
-    }
-    retained = [family for family in profile.workload_families if family not in blocked and family not in healthcare_families]
-    profile.domain = "healthcare"
-    profile.workload_families = list(dict.fromkeys(healthcare_families + retained))[:5]
-    profile.excluded_families = list(dict.fromkeys(profile.excluded_families + sorted(blocked)))
-    profile.excluded_patterns = list(dict.fromkeys(profile.excluded_patterns + sorted(blocked)))
-    profile.capabilities = list(dict.fromkeys(profile.capabilities + [
-        "ehr_integration",
-        "or_schedule_event_stream",
-        "clinical_workflow_decision_support",
-        "surgical_delay_prediction",
-        "approval_gated_workflow",
-        "video_metadata_processing",
-        "phi_safe_operational_store",
-        "hipaa_controls",
-        "private_connectivity",
-    ]))
-    profile.entities = list(dict.fromkeys(profile.entities + [
-        "operating_rooms",
-        "ehr_system",
-        "or_command_center",
-        "staffing_system",
-        "sterile_processing_system",
-    ]))
-    profile.signals = list(dict.fromkeys(profile.signals + [
-        "or_schedule_events",
-        "patient_check_in",
-        "anesthesia_readiness",
-        "staff_availability",
-        "instrument_tray_status",
-        "room_turnover_status",
-        "occupancy_metadata",
-    ]))
-    profile.actions = list(dict.fromkeys(profile.actions + ["approval_gated_schedule_change"]))
-    profile.deployment_posture = list(dict.fromkeys(profile.deployment_posture + ["hybrid", "edge_and_cloud"]))
-    if not profile.latency_class and any(term in lower for term in ("2 minutes", "two-minute", "near-real-time", "real-time")):
-        profile.latency_class = "near_real_time"
-    profile.confidence = "high"
+    capability_result = extract_capabilities(context_text)
+    context_capabilities = _detect_capabilities(lower) + [item.value for item in capability_result.capabilities]
+    profile.capabilities = list(dict.fromkeys(profile.capabilities + context_capabilities))
+    profile.capability_model = list(dict.fromkeys(profile.capability_model + [item.value for item in capability_result.capabilities]))
+    profile.deployment_posture = list(dict.fromkeys(profile.deployment_posture + [item.value for item in capability_result.deployment_posture]))
+    if not profile.latency_class and capability_result.latency_class:
+        profile.latency_class = capability_result.latency_class.value
     return _apply_explicit_negative_constraints(profile, lower)
-
-
-def _refine_airport_operations_profile(profile: UseCaseProfile, lower: str) -> UseCaseProfile:
-    if not _is_airport_operations(lower):
-        return profile
-    required = [
-        "operational_event_prediction_workflow",
-        "real_time_anomaly_detection",
-        "data_platform_analytics",
-        "agentic_workflow",
-    ]
-    blocked = {
-        "industrial_iot_streaming_ml",
-        "rag_assistant",
-        "document_intelligence",
-        "field_service_automation",
-        "supply_chain_optimization",
-    }
-    retained = [family for family in profile.workload_families if family not in blocked and family not in required]
-    profile.domain = "aviation_operations"
-    profile.workload_families = list(dict.fromkeys(required + retained))[:5]
-    profile.excluded_families = list(dict.fromkeys(profile.excluded_families + sorted(blocked)))
-    profile.excluded_patterns = list(dict.fromkeys(profile.excluded_patterns + sorted(blocked) + ["depot_inventory", "generic_field_service_dispatch"]))
-    profile.capabilities = list(dict.fromkeys(profile.capabilities + [
-        "real_time_ingestion",
-        "stream_ingestion",
-        "stream_processing",
-        "high_volume_event_ingestion",
-        "predictive_ml",
-        "anomaly_detection",
-        "alerting_notification",
-        "event_driven_workflow",
-        "operational_state",
-        "external_system_integration",
-        "security_governance",
-        "audit_trail",
-        "observability",
-        "edge_processing",
-        "intermittent_connectivity",
-    ]))
-    profile.entities = list(dict.fromkeys(profile.entities + [
-        "airport_terminals",
-        "bag_scan_events",
-        "baggage_belts",
-        "flight_schedule_system",
-        "airline_service_teams",
-        "passengers",
-    ]))
-    profile.signals = list(dict.fromkeys(profile.signals + [
-        "bag_scan_events",
-        "flight_schedule_changes",
-        "belt_telemetry",
-        "transfer_windows",
-        "connection_risk",
-    ]))
-    profile.actions = list(dict.fromkeys(profile.actions + [
-        "recommend_baggage_recovery_action",
-        "alert_airline_service_team",
-        "notify_passenger",
-    ]))
-    profile.deployment_posture = list(dict.fromkeys(profile.deployment_posture + ["edge_and_cloud", "hybrid"]))
-    if not profile.latency_class and any(term in lower for term in ("within 2 minutes", "2 minutes", "two minutes", "near-real-time", "real-time")):
-        profile.latency_class = "minutes"
-    profile.confidence = "high"
-    return profile
-
-
-def _refine_aquaculture_profile(profile: UseCaseProfile, lower: str) -> UseCaseProfile:
-    if not any(term in lower for term in ("aquaculture", "fish farm", "fish farms", "sea cage", "sea cages", "dissolved oxygen", "fish behavior")):
-        return profile
-    required = [
-        "industrial_iot_streaming_ml",
-        "real_time_anomaly_detection",
-        "computer_vision_quality_inspection",
-        "data_platform_analytics",
-    ]
-    blocked = {"rag_assistant", "document_intelligence", "field_service_automation"}
-    retained = [family for family in profile.workload_families if family not in blocked and family not in required]
-    profile.domain = "aquaculture"
-    profile.workload_families = list(dict.fromkeys(required + retained))[:5]
-    profile.excluded_families = list(dict.fromkeys(profile.excluded_families + sorted(blocked)))
-    profile.excluded_patterns = list(dict.fromkeys(profile.excluded_patterns + sorted(blocked) + ["contract_review", "ocr_document_pipeline"]))
-    profile.capabilities = list(dict.fromkeys(profile.capabilities + [
-        "real_time_ingestion",
-        "time_series_analytics",
-        "computer_vision",
-        "video_stream_processing",
-        "predictive_ml",
-        "anomaly_detection",
-        "alerting_notification",
-        "edge_and_cloud",
-    ]))
-    profile.entities = list(dict.fromkeys(profile.entities + ["fish_cages", "underwater_cameras", "water_quality_sensors", "farm_staff"]))
-    profile.signals = list(dict.fromkeys(profile.signals + ["underwater_video", "dissolved_oxygen", "feed_waste", "weather", "wave_conditions", "fish_behavior"]))
-    profile.actions = list(dict.fromkeys(profile.actions + ["recommend_feeding_window", "alert_operator"]))
-    profile.deployment_posture = list(dict.fromkeys(profile.deployment_posture + ["edge_and_cloud", "hybrid"]))
-    profile.confidence = "high"
-    return profile
-
-
-def _refine_wildfire_profile(profile: UseCaseProfile, lower: str) -> UseCaseProfile:
-    if not any(term in lower for term in ("wildfire", "smoke plume", "evacuation", "lookout tower", "camera towers", "sentinel satellite")):
-        return profile
-    required = [
-        "industrial_iot_streaming_ml",
-        "real_time_anomaly_detection",
-        "computer_vision_quality_inspection",
-        "data_platform_analytics",
-    ]
-    blocked = {"field_service_automation", "rag_assistant", "document_intelligence", "supply_chain_optimization"}
-    retained = [family for family in profile.workload_families if family not in blocked and family not in required]
-    profile.domain = "wildfire_public_safety"
-    profile.workload_families = list(dict.fromkeys(required + retained))[:5]
-    profile.excluded_families = list(dict.fromkeys(profile.excluded_families + sorted(blocked)))
-    profile.excluded_patterns = list(dict.fromkeys(profile.excluded_patterns + sorted(blocked) + ["depot_inventory", "generic_field_service_dispatch"]))
-    profile.capabilities = list(dict.fromkeys(profile.capabilities + [
-        "real_time_ingestion",
-        "computer_vision",
-        "remote_imagery_analytics",
-        "satellite_image_processing",
-        "predictive_ml",
-        "anomaly_detection",
-        "alerting_notification",
-        "human_approval",
-        "edge_processing",
-        "intermittent_connectivity",
-    ]))
-    profile.entities = list(dict.fromkeys(profile.entities + ["camera_towers", "satellite_imagery", "road_closure_feeds", "shelters", "emergency_operators"]))
-    profile.signals = list(dict.fromkeys(profile.signals + ["tower_imagery", "satellite_imagery", "weather_forecasts", "road_closures", "shelter_capacity", "911_summaries"]))
-    profile.actions = list(dict.fromkeys(profile.actions + ["recommend_evacuation_zone", "draft_public_alert"]))
-    profile.deployment_posture = list(dict.fromkeys(profile.deployment_posture + ["edge_and_cloud", "hybrid"]))
-    profile.confidence = "high"
-    return profile
 
 
 def _detect_domain(lower: str) -> str | None:
@@ -375,9 +190,11 @@ def _detect_capabilities(lower: str) -> list[str]:
         ("document_retrieval", ("document", "knowledge base", "policy manual", "manual", "rag", "retrieve", "citation", "contract", "contracts", "clause", "obligation")),
         ("generative_ai", ("assistant", "chatbot", "summarize", "generate", "llm", "foundation model", "agent")),
         ("computer_vision", ("image", "imagery", "video", "camera", "vision", "defect", "ocr", "smoke plume", "fish behavior")),
-        ("video_metadata_processing", ("occupancy signal", "occupancy signals", "video-derived", "ceiling camera", "camera metadata")),
+        ("video_metadata_processing", ("occupancy signal", "occupancy signals", "occupancy metadata", "ephemeral occupancy metadata", "video-derived", "ceiling camera", "camera metadata")),
         ("clinical_workflow_decision_support", ("or utilization", "surgical delay", "surgery delay", "operating room", "charge nurse", "clinical workflow")),
         ("ehr_integration", ("epic", "ehr", "patient check-in", "patient/surgery schedule")),
+        ("approval_gated_workflow", ("approval required", "requires approval", "human approval", "approval-gated", "approval gated", "approved before", "approval from")),
+        ("intermittent_connectivity", ("intermittent connectivity", "remote connectivity", "unreliable connectivity", "offline site", "offline sites", "store-and-forward", "edge buffering")),
         ("batch_analytics", ("data lake", "warehouse", "etl", "reporting", "dashboard", "analytics")),
         ("api_application", ("api", "mobile app", "web app", "portal")),
     ]

@@ -86,7 +86,7 @@ CAPABILITY_MARKERS: list[tuple[ArchitectureCapability, tuple[str, ...]]] = [
     (ArchitectureCapability.BIOMETRIC_MATCHING, ("biometric", "match/no-match")),
     (ArchitectureCapability.MOLECULAR_GRAPH_MODELING, ("molecular graph", "compound pairs")),
     (ArchitectureCapability.PERSONALIZATION, ("personalization", "personalized")),
-    (ArchitectureCapability.EDGE_PROCESSING, ("edge", "hospital-local", "vehicle", "offline", "factory", "ot/it")),
+    (ArchitectureCapability.EDGE_PROCESSING, ("edge", "hospital-local", "vehicle", "offline", "factory", "ot/it", "intermittent connectivity", "remote connectivity", "unreliable connectivity", "store-and-forward", "edge buffering")),
     (ArchitectureCapability.AIR_GAPPED_DEPLOYMENT, ("air-gapped", "no public cloud egress")),
     (ArchitectureCapability.SOVEREIGN_DEPLOYMENT, ("sovereign", "data sovereignty", "data residency")),
     (ArchitectureCapability.HYBRID_CLOUD, ("hybrid", "on-prem", "hospital", "co-location", "edge")),
@@ -170,7 +170,7 @@ def infer_deployment_posture(lower: str, capabilities: list[ArchitectureCapabili
         posture.append(DeploymentPosture.SOVEREIGN_CLOUD)
     if any(term in lower for term in ("microsecond", "co-located", "exchange data centers")) or ArchitectureCapability.EXCHANGE_COLOCATION in capabilities:
         posture.extend([DeploymentPosture.EXCHANGE_COLOCATED, DeploymentPosture.HYBRID])
-    if any(term in lower for term in ("edge", "offline", "hospital", "vehicle", "factory", "urllc", "1ms", "1 ms")):
+    if any(term in lower for term in ("edge", "offline", "hospital", "vehicle", "factory", "urllc", "1ms", "1 ms", "intermittent connectivity", "remote connectivity", "unreliable connectivity", "store-and-forward", "edge buffering")):
         posture.extend([DeploymentPosture.EDGE_AND_CLOUD, DeploymentPosture.HYBRID])
     operational_integration = {
         ArchitectureCapability.EXTERNAL_SYSTEM_INTEGRATION,

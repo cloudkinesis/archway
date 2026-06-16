@@ -326,16 +326,15 @@ def derive_pricing_drivers(profile: UseCaseProfile, pricing_driver_overrides: di
             scenario_profile_id=str(overrides.get("scenario_profile_id")) if overrides.get("scenario_profile_id") else None,
             pricing_driver_overrides=overrides,
         )
-    model = derive_industrial_iot_pricing_model(profile)
-    if _is_streaming_ml_profile(profile):
-        return _flatten_industrial_model(model)
-    cdrs_per_day = _structured_metric(profile, "business_targets", "cdrs_per_day")
-    if cdrs_per_day:
-        asset_count = int(_structured_metric(profile, "asset_counts", "cell_towers") or _asset_count(profile) or 1)
-        daily_event_volume = int(cdrs_per_day)
+    if selected_family == PricingDriverFamily.TELECOM_CDR_ANALYTICS:
+        cdrs_per_day = _structured_metric(profile, "business_targets", "cdrs_per_day")
+        asset_count = int(_structured_metric(profile, "asset_counts", "cell_towers") or _asset_count(profile) or 100)
+        daily_event_volume = int(cdrs_per_day or overrides.get("cdrs_per_day") or max(asset_count * 100_000, 10_000_000))
         monthly_event_volume = daily_event_volume * 30
         retention_years = int(_structured_metric(profile, "business_targets", "retention_years") or 2)
         prediction_minutes = int(_structured_metric(profile, "business_targets", "prediction_horizon_minutes") or 15)
+        storage_gb = float(overrides.get("storage_gb") or max(500.0, monthly_event_volume * 0.25 / 1024 / 1024))
+        query_tb_scanned = float(overrides.get("query_tb_scanned") or max(5.0, storage_gb / 200))
         return PricingDrivers(
             asset_count=asset_count,
             telemetry_frequency_seconds=max(60, prediction_minutes * 60),
@@ -356,9 +355,15 @@ def derive_pricing_drivers(profile: UseCaseProfile, pricing_driver_overrides: di
             integration_api_calls_per_day=max(1, daily_event_volume // 10_000_000) if profile.actions else 0,
             notification_events_per_day=max(1, daily_event_volume // 1_000_000),
             scoring_strategy="score_aggregated_windows",
-            source="telecom_cdr_extracted_metrics",
+            source="telecom_cdr_extracted_metrics" if cdrs_per_day else "telecom_analytics_directional_defaults",
             pricing_driver_family=PricingDriverFamily.TELECOM_CDR_ANALYTICS.value,
+            result_storage_gb_per_month=storage_gb,
+            reporting_query_tb_scanned_monthly=query_tb_scanned,
+            pricing_driver_overrides=overrides,
         )
+    model = derive_industrial_iot_pricing_model(profile)
+    if _is_streaming_ml_profile(profile):
+        return _flatten_industrial_model(model)
     positions = _structured_metric(profile, "asset_counts", "open_derivatives_positions")
     greeks_seconds = _structured_metric(profile, "business_targets", "greeks_frequency_seconds")
     if positions and greeks_seconds:

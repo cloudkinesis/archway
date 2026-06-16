@@ -2,7 +2,7 @@ import pytest
 
 from app.models.domain import AWSServiceSelection
 from app.services.pattern_catalog import expected_views, pricing_dimensions, service_recommendations
-from app.services.pricing import PricingEngine
+from app.services.pricing import PricingEngine, derive_pricing_drivers
 from app.services.pricing_driver_selector import PricingDriverFamily, select_pricing_driver_family
 from app.services.synthesis import SynthesisEngine
 from app.services.use_case_profile import profile_use_case
@@ -84,6 +84,7 @@ def test_telecom_hbase_migration_stays_telecom_and_asks_access_pattern_first():
     assert profile.domain == "telecommunications"
     assert "telecom_network_analytics" in profile.workload_families or "data_platform_analytics" in profile.workload_families
     assert select_pricing_driver_family(profile) == PricingDriverFamily.TELECOM_CDR_ANALYTICS
+    assert derive_pricing_drivers(profile).pricing_driver_family == PricingDriverFamily.TELECOM_CDR_ANALYTICS.value
     assert "healthcare_operations_scheduling" not in profile.workload_families
     assert "healthcare_operations_scheduling" not in expected_views(profile, production=True)
     assert "ai_security_governance_view" not in expected_views(profile, production=True)

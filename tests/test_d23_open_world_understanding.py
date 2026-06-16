@@ -252,26 +252,25 @@ def test_synthesis_uses_live_open_world_understanding_without_seeded_profile(mon
     get_settings.cache_clear()
 
 
-def test_refiners_disabled_guard_skips_domain_specific_refiners(monkeypatch):
+def test_refine_profile_context_only_applies_domain_blind_constraints(monkeypatch):
     monkeypatch.setenv("ARCHWAY_DISABLE_DOMAIN_REFINERS", "true")
     get_settings.cache_clear()
     profile = UseCaseProfile(
         domain=None,
-        workload_families=["web_api_application"],
+        workload_families=["web_api_application", "rag_assistant"],
         excluded_families=[],
-        capabilities=[],
+        capabilities=["document_retrieval", "api_application"],
         entities=[],
         signals=[],
         actions=[],
     )
 
-    def fail_refiner(*args, **kwargs):
-        raise AssertionError("domain refiner should not run")
-
-    monkeypatch.setattr("app.services.use_case_profile._refine_airport_operations_profile", fail_refiner)
     refined = refine_profile_with_context(profile, AIRPORT_USE_CASE)
 
+    assert refined.domain is None
     assert refined.workload_families == ["web_api_application"]
+    assert "rag_assistant" in refined.excluded_families
+    assert "document_retrieval" not in refined.capabilities
     get_settings.cache_clear()
 
 
