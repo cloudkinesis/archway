@@ -60,6 +60,8 @@ class CanonicalCandidate(BaseModel):
     @classmethod
     def _normalize_provenance(cls, value: Any) -> str:
         lowered = str(value or "model_proposed").lower().replace("-", "_").replace(" ", "_")
+        if lowered in {"source_term_repaired", "repaired", "repair"}:
+            return "source_term_repaired"
         if lowered in {"user", "user_input", "source", "source_text", "raw_input"}:
             return "user_input"
         if lowered in {"derived", "deterministic", "inferred"}:
@@ -234,6 +236,7 @@ def build_result_from_understanding(
     understanding, term_repair_issues = repair_missing_source_terms(raw_use_case, source_facts, understanding)
     issues = fact_repair_issues + term_repair_issues + validate_fact_preservation(source_facts, understanding)
     issues.extend(validate_exclusions(source_facts, understanding))
+    issues.extend(validate_placeholder_content(understanding))
     service_validations = [classify_aws_service(item.label) for item in understanding.candidate_aws_services]
     issues.extend(
         UnderstandingValidationIssue(
@@ -373,7 +376,7 @@ def repair_missing_source_terms(
             continue
         if any(exclusion and _term_overlaps_exclusion(normalized, exclusion) for exclusion in exclusions):
             continue
-        candidate = CanonicalCandidate(label=term, source_text=term, confidence="medium", provenance="derived")
+        candidate = CanonicalCandidate(label=term, source_text=term, confidence="medium", provenance="source_term_repaired")
         bucket = _term_repair_bucket(normalized)
         getattr(repaired, bucket).append(candidate)
         text += " " + normalized
@@ -418,6 +421,39 @@ def validate_exclusions(
                 code="open_world_understanding.exclusion_violated",
                 message=f"Explicit exclusion was reintroduced: {fact.source_text}",
                 target=fact.fact_id,
+            ))
+    return issues
+
+
+def validate_placeholder_content(understanding: CanonicalWorkloadUnderstanding) -> list[UnderstandingValidationIssue]:
+    issues: list[UnderstandingValidationIssue] = []
+    candidate_buckets = {
+        "domain_candidates": understanding.domain_candidates,
+        "actors": understanding.actors,
+        "source_systems": understanding.source_systems,
+        "events_signals": understanding.events_signals,
+        "data_classes": understanding.data_classes,
+        "actions_workflows": understanding.actions_workflows,
+        "constraints": understanding.constraints,
+        "candidate_aws_capabilities": understanding.candidate_aws_capabilities,
+        "candidate_aws_services": understanding.candidate_aws_services,
+    }
+    for bucket_name, candidates in candidate_buckets.items():
+        for candidate in candidates:
+            if _looks_like_placeholder(candidate.label):
+                issues.append(UnderstandingValidationIssue(
+                    severity="error",
+                    code="open_world_understanding.placeholder_content",
+                    message=f"Placeholder label is not acceptable in {bucket_name}: {candidate.label}",
+                    target=bucket_name,
+                ))
+    for question in understanding.missing_questions:
+        if _looks_like_placeholder(question.question) or _looks_like_placeholder(question.why_it_matters):
+            issues.append(UnderstandingValidationIssue(
+                severity="error",
+                code="open_world_understanding.placeholder_content",
+                message=f"Placeholder question is not acceptable: {question.question}",
+                target="missing_questions",
             ))
     return issues
 
@@ -781,12 +817,17 @@ def _normalize_service_name(service_name: str) -> str:
 
 def _obviously_fake_service(normalized: str) -> bool:
     fake_terms = ("magic", "baggageai", "fraudbrain", "madeup", "fictional", "fake")
-    return any(term in normalized for term in fake_terms)
+    return any(term in normalized for term in fake_terms) or _looks_like_placeholder(normalized)
 
 
 def _looks_like_bare_service_candidate(normalized: str) -> bool:
     tokens = normalized.split()
     return bool(1 <= len(tokens) <= 4 and all(re.fullmatch(r"[a-z][a-z0-9]*", token) for token in tokens))
+
+
+def _looks_like_placeholder(value: str | None) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+    return bool(re.fullmatch(r"(aws)?service\d+", normalized) or re.fullmatch(r"(missing)?question\d+", normalized) or normalized in {"placeholder", "todo", "tbd"})
 
 
 def _capabilities_from_understanding(understanding: CanonicalWorkloadUnderstanding) -> list[str]:

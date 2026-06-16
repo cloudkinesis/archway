@@ -215,7 +215,7 @@ def run_fixture_eval(scenarios: list[D23EvalScenario] | None = None) -> dict:
     for scenario in scenarios:
         understanding = fixture_understanding_for_scenario(scenario)
         result = build_result_from_understanding(scenario.use_case, understanding)
-        results.append(_score_result(scenario, result))
+        results.append(_score_result(scenario, result, require_live=False))
     passed_count = sum(1 for item in results if item["passed"])
     return {
         "battery": "d23_open_world_understanding_fixture_eval",
@@ -236,7 +236,7 @@ def run_live_eval(*, session_prefix: str = "d23_live_eval", scenarios: list[D23E
             scenario.use_case,
             session_id=f"{session_prefix}_{scenario.scenario_id}",
         )
-        results.append(_score_result(scenario, result))
+        results.append(_score_result(scenario, result, require_live=True))
     passed_count = sum(1 for item in results if item["passed"])
     return {
         "battery": "d23_open_world_understanding_live_eval",
@@ -248,14 +248,23 @@ def run_live_eval(*, session_prefix: str = "d23_live_eval", scenarios: list[D23E
     }
 
 
-def _score_result(scenario: D23EvalScenario, result: OpenWorldUnderstandingResult) -> dict:
+def _score_result(scenario: D23EvalScenario, result: OpenWorldUnderstandingResult, *, require_live: bool) -> dict:
     understanding = result.trace.understanding
-    text = _understanding_text(understanding)
-    preserved_terms = [term for term in scenario.expected_terms if term.lower() in text]
-    forbidden_leaks = [term for term in scenario.forbidden_terms if _contains_unnegated_term(text, term)]
+    raw_text = _understanding_text(understanding, include_repaired=False)
+    post_repair_text = _understanding_text(understanding, include_repaired=True)
+    raw_preserved_terms = [term for term in scenario.expected_terms if term.lower() in raw_text]
+    post_repair_preserved_terms = [term for term in scenario.expected_terms if term.lower() in post_repair_text]
+    forbidden_leaks = [term for term in scenario.forbidden_terms if _contains_unnegated_term(raw_text, term)]
     required = max(2, len(scenario.expected_terms) - 1)
-    passed = bool(result.profile) and result.trace.accepted and len(preserved_terms) >= required and not forbidden_leaks
     live_call = result.trace.live_call
+    live_passed = result.trace.provider == "bedrock" and live_call is not None and live_call.status == "accepted"
+    passed = (
+        bool(result.profile)
+        and result.trace.accepted
+        and len(raw_preserved_terms) >= required
+        and not forbidden_leaks
+        and (live_passed if require_live else True)
+    )
     return {
         "scenario_id": scenario.scenario_id,
         "title": scenario.title,
@@ -266,31 +275,42 @@ def _score_result(scenario: D23EvalScenario, result: OpenWorldUnderstandingResul
         "live_status": live_call.status if live_call else None,
         "error_type": live_call.error_type if live_call else None,
         "error_message": live_call.error_message if live_call else None,
+        "live_passed": live_passed,
         "validation_issues": [issue.model_dump(mode="json") for issue in result.trace.validation_issues],
         "service_validations": [item.model_dump(mode="json") for item in result.trace.service_validations],
         "questions": [question.text for question in result.open_questions[:4]],
-        "preserved_terms": preserved_terms,
-        "preserved_term_count": len(preserved_terms),
+        "preserved_terms": raw_preserved_terms,
+        "preserved_term_count": len(raw_preserved_terms),
+        "raw_bedrock_preserved_terms": raw_preserved_terms,
+        "raw_bedrock_preserved_term_count": len(raw_preserved_terms),
+        "post_repair_preserved_terms": post_repair_preserved_terms,
+        "post_repair_preserved_term_count": len(post_repair_preserved_terms),
         "required_preserved_term_count": required,
         "forbidden_leaks": forbidden_leaks,
         "passed": passed,
     }
 
 
-def _understanding_text(understanding: CanonicalWorkloadUnderstanding | None) -> str:
+def _understanding_text(understanding: CanonicalWorkloadUnderstanding | None, *, include_repaired: bool) -> str:
     if understanding is None:
         return ""
+    def labels(items: list[CanonicalCandidate]) -> str:
+        return " ".join(
+            item.label
+            for item in items
+            if include_repaired or item.provenance not in {"derived", "source_term_repaired"}
+        )
     return " ".join([
         understanding.workload_intent,
-        " ".join(item.label for item in understanding.domain_candidates),
-        " ".join(item.label for item in understanding.actors),
-        " ".join(item.label for item in understanding.source_systems),
-        " ".join(item.label for item in understanding.events_signals),
-        " ".join(item.label for item in understanding.data_classes),
-        " ".join(item.label for item in understanding.actions_workflows),
-        " ".join(item.label for item in understanding.constraints),
-        " ".join(item.label for item in understanding.candidate_aws_capabilities),
-        " ".join(item.label for item in understanding.candidate_aws_services),
+        labels(understanding.domain_candidates),
+        labels(understanding.actors),
+        labels(understanding.source_systems),
+        labels(understanding.events_signals),
+        labels(understanding.data_classes),
+        labels(understanding.actions_workflows),
+        labels(understanding.constraints),
+        labels(understanding.candidate_aws_capabilities),
+        labels(understanding.candidate_aws_services),
         " ".join(question.question for question in understanding.missing_questions),
     ]).lower()
 

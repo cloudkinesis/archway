@@ -78,7 +78,9 @@ def _report(result: dict) -> str:
             f"- profile source: `{item['profile_source']}`",
             f"- provider: `{item.get('provider')}`",
             f"- live status: `{item.get('live_status')}`",
-            f"- preserved terms: {', '.join(item['preserved_terms']) or 'none'}",
+            f"- live pass gate: `{item.get('live_passed')}`",
+            f"- raw Bedrock preserved terms: {', '.join(item.get('raw_bedrock_preserved_terms') or item['preserved_terms']) or 'none'}",
+            f"- post-repair preserved terms: {', '.join(item.get('post_repair_preserved_terms') or []) or 'none'}",
             f"- forbidden leaks: {', '.join(item['forbidden_leaks']) or 'none'}",
             "",
         ])

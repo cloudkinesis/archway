@@ -4,7 +4,7 @@ from app.core.config import get_settings
 from app.models.domain import OpenQuestion
 from app.services.agentic.live_audit import BudgetState, LiveCallAudit, LiveCallResult
 from app.services.llm.base import LLMTaskType
-from app.services.open_world_eval import _contains_unnegated_term, d23_eval_scenarios, run_fixture_eval
+from app.services.open_world_eval import _contains_unnegated_term, _score_result, d23_eval_scenarios, run_fixture_eval
 from app.services.open_world_eval import fixture_understanding_for_scenario, run_live_eval
 from app.services.open_world_understanding import (
     CanonicalCandidate,
@@ -77,6 +77,20 @@ def _airport_understanding() -> CanonicalWorkloadUnderstanding:
             ),
         ],
         confidence="medium",
+    )
+
+
+def _accepted_live_audit() -> LiveCallAudit:
+    return LiveCallAudit(
+        provider="bedrock",
+        model_id="amazon.nova-pro-v1:0",
+        task_type=LLMTaskType.open_world_understanding,
+        lane="open_world_understanding",
+        status="accepted",
+        validated=True,
+        prompt_hash="sha256:prompt",
+        response_hash="sha256:response",
+        budget_state=BudgetState(calls_used=1, max_calls=12),
     )
 
 
@@ -170,6 +184,7 @@ def test_service_validation_is_three_state():
     assert classify_aws_service("future_data_exchange").state == "unknown-unverified"
     assert classify_aws_service("AWS Quantum Unicorn Ledger").state == "unknown-unverified"
     assert classify_aws_service("BaggageAI Magic Router").state == "likely-hallucinated"
+    assert classify_aws_service("AWSService1").state == "likely-hallucinated"
 
 
 def test_forbidden_term_scorer_uses_word_boundaries_and_negation():
@@ -177,6 +192,17 @@ def test_forbidden_term_scorer_uses_word_boundaries_and_negation():
     assert not _contains_unnegated_term("This is not a RAG chatbot.", "rag")
     assert not _contains_unnegated_term("constraint:not_rag_chatbot", "rag")
     assert _contains_unnegated_term("The proposal reintroduced RAG retrieval.", "rag")
+
+
+def test_placeholder_content_is_rejected():
+    understanding = _airport_understanding()
+    understanding.candidate_aws_services.append(CanonicalCandidate(label="AWSService1"))
+    understanding.missing_questions.append(CanonicalQuestion(question="MissingQuestion1", why_it_matters="TBD"))
+
+    result = build_result_from_understanding(AIRPORT_USE_CASE, understanding)
+
+    assert not result.trace.accepted
+    assert any(issue.code == "open_world_understanding.placeholder_content" for issue in result.trace.validation_issues)
 
 
 def test_adapter_generates_open_world_profile_and_questions():
@@ -271,6 +297,7 @@ def test_d23_live_eval_path_scores_model_results_without_fixtures(monkeypatch):
                 fixture_understanding_for_scenario(scenario),
                 provider="bedrock",
                 model_id="amazon.nova-pro-v1:0",
+                live_call=_accepted_live_audit(),
             )
 
     monkeypatch.setattr("app.services.open_world_eval.OpenWorldUnderstandingService", FakeOpenWorldUnderstandingService)
@@ -281,6 +308,52 @@ def test_d23_live_eval_path_scores_model_results_without_fixtures(monkeypatch):
     assert result["scenario_count"] == len(scenarios)
     assert result["failed"] == 0
     assert {item["provider"] for item in result["results"]} == {"bedrock"}
+    assert {item["live_passed"] for item in result["results"]} == {True}
+
+
+def test_d23_live_eval_requires_accepted_bedrock_audit(monkeypatch):
+    scenarios = d23_eval_scenarios()[:1]
+
+    class FakeFallbackLikeOpenWorldUnderstandingService:
+        def build(self, raw_use_case: str, *, session_id: str | None = None):
+            return build_result_from_understanding(
+                raw_use_case,
+                fixture_understanding_for_scenario(scenarios[0]),
+                provider="bedrock",
+                model_id="amazon.nova-pro-v1:0",
+            )
+
+    monkeypatch.setattr("app.services.open_world_eval.OpenWorldUnderstandingService", FakeFallbackLikeOpenWorldUnderstandingService)
+
+    result = run_live_eval(session_prefix="test_d23_live", scenarios=scenarios)
+
+    assert result["failed"] == 1
+    assert result["results"][0]["live_passed"] is False
+
+
+def test_d23_score_reports_raw_and_post_repair_preservation_separately():
+    scenario = next(item for item in d23_eval_scenarios() if item.scenario_id == "maritime_engine_predictive_maintenance")
+    understanding = CanonicalWorkloadUnderstanding(
+        domain_candidates=[],
+        workload_intent="Predict operational failure risk.",
+        risks_unknowns=[],
+        candidate_aws_services=[],
+        missing_questions=[],
+    )
+    result = build_result_from_understanding(
+        scenario.use_case,
+        understanding,
+        provider="bedrock",
+        model_id="amazon.nova-pro-v1:0",
+        live_call=_accepted_live_audit(),
+    )
+
+    scored = _score_result(scenario, result, require_live=True)
+
+    assert scored["live_passed"] is True
+    assert scored["raw_bedrock_preserved_term_count"] < scored["post_repair_preserved_term_count"]
+    assert scored["post_repair_preserved_term_count"] >= scored["required_preserved_term_count"]
+    assert scored["passed"] is False
 
 
 def test_open_world_questions_are_preserved_through_synthesis_planner():
