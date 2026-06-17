@@ -658,6 +658,8 @@ class ExportPackageService:
             report,
         ):
             _add_live_audit_once(live_run_context, audit)
+        for audit in _llm_telemetry_live_audits(llm_telemetry_store.list(session.id)):
+            _add_live_audit_once(live_run_context, audit)
         live_agent_calls = [audit.model_dump(mode="json") for audit in live_run_context.audits]
         (raw_dir / "live_agent_calls.json").write_text(
             json.dumps(live_agent_calls, indent=2, sort_keys=True, default=str),
@@ -907,45 +909,45 @@ class ExportPackageService:
         lines = [
             "# Research Report",
             "",
-            f"Executive verdict: {report.get('executive_verdict', '')}",
+            f"Executive verdict: {clean_presentation_text(report.get('executive_verdict', ''))}",
             "",
             f"Research quality: {research_quality.get('label', 'Unknown')}",
             "",
-            research_quality.get("reason", ""),
+            clean_presentation_text(research_quality.get("reason", "")),
             "",
             f"Citation coverage: {coverage.get('coverage_percent', 0)}%",
             f"Evidence authority: {str(evidence_quality.get('evidence_authority', 'unknown')).title()}",
             f"Customer readiness: {str(customer_readiness.get('status', 'unknown')).replace('_', ' ').title()}",
             "",
-            *[f"- Blocker: {item}" for item in customer_readiness.get("blockers", [])],
-            *[f"- Warning: {item}" for item in customer_readiness.get("warnings", [])],
+            *[f"- Blocker: {clean_presentation_text(item)}" for item in customer_readiness.get("blockers", [])],
+            *[f"- Warning: {clean_presentation_text(item)}" for item in customer_readiness.get("warnings", [])],
             "",
             "## Service Validation Notes",
-            *_bullets([f"{item}" for item in metadata.get("service_validation_notes", [])]),
+            *_bullets([clean_presentation_text(item) for item in metadata.get("service_validation_notes", [])]),
             "",
             "## Service Decision Records",
             *_bullets([
-                f"{item.get('decision_id')}: {item.get('selected_service')} for {item.get('capability')} ({item.get('selection_reason')})"
+                clean_presentation_text(f"{item.get('decision_id')}: {item.get('selected_service')} for {item.get('capability')} ({item.get('selection_reason')})")
                 for item in metadata.get("service_decision_records", [])
             ]),
             "",
             "## Facts",
-            *[f"- {claim.get('text')} [{', '.join(claim.get('evidence_ids', []))}]" for claim in report.get("facts", [])],
+            *[f"- {clean_presentation_text(claim.get('text'))} [{', '.join(claim.get('evidence_ids', []))}]" for claim in report.get("facts", [])],
             "",
             "## Recommendations",
-            *[f"- {claim.get('text')} [{', '.join(claim.get('evidence_ids', []))}]" for claim in report.get("recommendations", [])],
+            *[f"- {clean_presentation_text(claim.get('text'))} [{', '.join(claim.get('evidence_ids', []))}]" for claim in report.get("recommendations", [])],
             "",
             "## Uncertainty",
-            *[f"- {claim.get('text')} ({claim.get('citation_status')})" for claim in report.get("uncertainties", [])],
+            *[f"- {clean_presentation_text(claim.get('text'))} ({claim.get('citation_status')})" for claim in report.get("uncertainties", [])],
             "",
             "## Feasibility",
-            report.get("feasibility_analysis", ""),
+            clean_presentation_text(report.get("feasibility_analysis", "")),
             "",
             "## Viability",
-            report.get("viability_analysis", ""),
+            clean_presentation_text(report.get("viability_analysis", "")),
             "",
             "## Competitor Scan",
-            report.get("competitor_analysis", ""),
+            clean_presentation_text(report.get("competitor_analysis", "")),
             "",
         ]
         return "\n".join(lines)
@@ -1411,6 +1413,67 @@ def _prior_live_call_audits(*payloads) -> list[LiveCallAudit]:
             seen.add(key)
             audits.append(audit)
     return audits
+
+
+def _llm_telemetry_live_audits(items) -> list[LiveCallAudit]:
+    audits: list[LiveCallAudit] = []
+    for item in items or []:
+        payload = item.model_dump(mode="json") if hasattr(item, "model_dump") else dict(item or {})
+        provider = str(payload.get("provider") or "")
+        if provider != "bedrock":
+            continue
+        status = "accepted" if payload.get("status") == "succeeded" else "failed"
+        token_usage = {}
+        if payload.get("input_tokens") is not None:
+            token_usage["input_tokens"] = payload.get("input_tokens")
+        if payload.get("output_tokens") is not None:
+            token_usage["output_tokens"] = payload.get("output_tokens")
+        response_hash = "sha256:" + hash_payload({
+            "call_id": payload.get("call_id"),
+            "task_type": payload.get("task_type"),
+            "status": payload.get("status"),
+            "completed_at": payload.get("completed_at"),
+            "schema_name": payload.get("schema_name"),
+        })
+        warnings = list(payload.get("warnings") or [])
+        warnings.append("Derived from raw/llm_call_telemetry.json; raw model response text is not stored in telemetry.")
+        try:
+            audits.append(LiveCallAudit(
+                provider=provider,
+                model_id=payload.get("model_id"),
+                task_type=payload.get("task_type"),
+                lane=_live_lane_for_task(payload.get("task_type")),
+                session_id=payload.get("session_id"),
+                duration_ms=payload.get("duration_ms"),
+                token_usage=token_usage or None,
+                retry_count=int(payload.get("retry_count") or 0),
+                validated=bool(payload.get("schema_validated")),
+                prompt_hash=payload.get("prompt_hash"),
+                response_hash=response_hash,
+                status=status,
+                warnings=warnings,
+                created_at=str(payload.get("started_at") or ""),
+            ))
+        except Exception:
+            continue
+    return audits
+
+
+def _live_lane_for_task(task_type: str | None) -> str:
+    task = str(task_type or "llm")
+    if "understanding" in task:
+        return "understanding"
+    if "research" in task or "dossier" in task or "summary" in task:
+        return "research"
+    if "pricing" in task:
+        return "pricing"
+    if "architecture" in task:
+        return "architecture"
+    if "diagram" in task:
+        return "diagram"
+    if "review" in task or "critique" in task:
+        return "reviewer"
+    return "llm"
 
 
 def _iter_live_call_payloads(payload):

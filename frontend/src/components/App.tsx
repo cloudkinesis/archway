@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -629,16 +629,37 @@ function ArchitectureView({
 function DiagramView({ session, galleries, setGalleries, latestExport, setLatestExport }: Parameters<typeof Workspace>[0]) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [exportJobId, setExportJobId] = useState<string | null>(null);
+  const [diagramRefreshError, setDiagramRefreshError] = useState<string | null>(null);
+  const [diagramRefreshPending, setDiagramRefreshPending] = useState(false);
   const [selected, setSelected] = useState<{
     gallery: DiagramGalleryResult;
     diagram: DiagramGalleryResult["diagrams"][number];
     qa?: DiagramGalleryResult["qa_reports"][number];
   } | null>(null);
-  const job = useJobPolling(session.id, jobId, async () => {
-    const result = await api.getDiagrams(session.id);
-    setGalleries(result.galleries);
+  const refreshDiagrams = useCallback(async () => {
+    setDiagramRefreshError(null);
+    setDiagramRefreshPending(true);
+    try {
+      const result = await retryArtifactRead(() => api.getDiagrams(session.id));
+      setGalleries(result.galleries);
+      if (!result.galleries.length) {
+        setDiagramRefreshError("Diagram generation completed, but no diagram artifacts were returned. Export remains available and diagnostics were recorded.");
+      }
+    } catch (error) {
+      setDiagramRefreshError((error as Error).message);
+    } finally {
+      setDiagramRefreshPending(false);
+    }
+  }, [session.id, setGalleries]);
+  const job = useJobPolling(session.id, jobId, refreshDiagrams);
+  const generate = useMutation({
+    mutationFn: () => api.generateDiagrams(session.id),
+    onSuccess: (result) => {
+      setDiagramRefreshError(null);
+      setGalleries([]);
+      setJobId(result.job.id);
+    }
   });
-  const generate = useMutation({ mutationFn: () => api.generateDiagrams(session.id), onSuccess: (result) => setJobId(result.job.id) });
   const exportJob = useJobPolling(session.id, exportJobId, async () => {
     const result = await api.getExport(session.id);
     setLatestExport(result.export);
@@ -672,7 +693,16 @@ function DiagramView({ session, galleries, setGalleries, latestExport, setLatest
       {galleries.length === 0 ? (
         <div className="space-y-4">
           {job.job ? <JobProgress job={job.job} onCancel={() => job.cancel.mutate()} /> : null}
-          <Button icon={generate.isPending || job.isActive ? Loader2 : Image} disabled={generate.isPending || job.isActive} onClick={() => generate.mutate()}>{generate.isPending || job.isActive ? "Generating through existing compiler" : "Generate diagrams"}</Button>
+          {diagramRefreshPending ? <Banner tone="info" text="Diagram job finished. Loading generated diagram artifacts..." /> : null}
+          {diagramRefreshError ? <Banner tone="warning" text={`Diagram artifacts could not be loaded yet: ${diagramRefreshError}`} /> : null}
+          <div className="flex flex-wrap gap-2">
+            <Button icon={generate.isPending || job.isActive ? Loader2 : Image} disabled={generate.isPending || job.isActive || diagramRefreshPending} onClick={() => generate.mutate()}>{generate.isPending || job.isActive ? "Generating through existing compiler" : "Generate diagrams"}</Button>
+            {job.job?.status === "succeeded" ? (
+              <Button icon={diagramRefreshPending ? Loader2 : RefreshCw} variant="secondary" disabled={diagramRefreshPending} onClick={() => refreshDiagrams()}>
+                {diagramRefreshPending ? "Loading diagrams" : "Refresh diagrams"}
+              </Button>
+            ) : null}
+          </div>
           <Banner tone="info" text="If architecture validation still has blockers, Archway generates candidate diagnostic diagrams instead of stopping the session." />
           {job.job?.status === "failed" ? <Banner tone="danger" text={job.job.error ?? "Diagram generation failed. Diagnostics were recorded."} /> : null}
         </div>
@@ -718,6 +748,19 @@ function DiagramView({ session, galleries, setGalleries, latestExport, setLatest
       {selected ? <DiagramInspector sessionId={session.id} selection={selected} onClose={() => setSelected(null)} /> : null}
     </Panel>
   );
+}
+
+async function retryArtifactRead<T>(read: () => Promise<T>, attempts = 8, delayMs = 750): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await read();
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Artifact refresh timed out.");
 }
 
 function DiagramInspector({

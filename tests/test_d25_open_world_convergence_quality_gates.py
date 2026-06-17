@@ -18,7 +18,7 @@ from app.services.architecture_revisions import ArchitectureRevisionService
 from app.services.client_pack import client_pack_files
 from app.services.convergence.golden_convergence_orchestrator import _diagram_findings, _pricing_findings
 from app.services.diagram_compiler_adapter import DiagramCompilerAdapter
-from app.services.export_package import ExportPackageService, _prior_live_call_audits
+from app.services.export_package import ExportPackageService, _llm_telemetry_live_audits, _prior_live_call_audits
 from app.services.llm.base import LLMTaskType
 from app.services.pricing import derive_industrial_iot_pricing_model, derive_pricing_drivers
 from app.services.pricing_driver_selector import PricingDriverFamily, select_pricing_driver_family
@@ -473,6 +473,36 @@ def test_export_live_agent_call_collector_finds_nested_profile_trace():
     assert audits[0].provider == "bedrock"
 
 
+def test_export_live_agent_calls_include_bedrock_llm_telemetry():
+    telemetry = SimpleNamespace(model_dump=lambda mode="json": {
+        "call_id": "llm_test123",
+        "session_id": "sess_test",
+        "task_type": LLMTaskType.deep_use_case_understanding.value,
+        "provider": "bedrock",
+        "model_id": "us.amazon.nova-pro-v1:0",
+        "started_at": "2026-06-17T00:00:00Z",
+        "completed_at": "2026-06-17T00:00:03Z",
+        "duration_ms": 3000,
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "schema_validated": True,
+        "retry_count": 1,
+        "status": "succeeded",
+        "schema_name": "DeepUseCaseUnderstanding",
+        "prompt_hash": "sha256:prompt",
+        "warnings": [],
+    })
+
+    audits = _llm_telemetry_live_audits([telemetry])
+
+    assert len(audits) == 1
+    assert audits[0].provider == "bedrock"
+    assert audits[0].status == "accepted"
+    assert audits[0].lane == "understanding"
+    assert audits[0].validated is True
+    assert audits[0].token_usage == {"input_tokens": 100, "output_tokens": 50}
+
+
 def test_client_pack_hides_legacy_range_for_generic_not_estimated_pricing_and_shows_derived_quantities():
     dossier = SimpleNamespace(
         title="Open World Scenario",
@@ -618,6 +648,31 @@ def test_root_solution_brief_strips_interview_scaffolding_and_negation_lists():
     assert "Synthesis interview note:" not in markdown
     assert "not legal, not document search" not in markdown.lower()
     assert "Customer clarified: Use 1.5 KB per event" in markdown
+
+
+def test_root_research_markdown_strips_interview_scaffolding_and_negation_lists():
+    markdown = ExportPackageService()._research_markdown({
+        "executive_verdict": "Proceed. Not legal, not document search, not RAG.",
+        "citation_coverage": {},
+        "metadata": {
+            "research_quality": {"label": "Mixed", "reason": "Synthesis interview note: Why? Answer: Because."},
+            "evidence_quality": {},
+            "customer_readiness": {"status": "directional_only", "warnings": ["Interview answer for 'scale?': 100 assets."]},
+            "service_validation_notes": [],
+            "service_decision_records": [],
+        },
+        "facts": [{"text": "Interview answer for 'payload?': 1 KB per event.", "evidence_ids": []}],
+        "recommendations": [],
+        "uncertainties": [{"text": "Not retail, not chatbot, not legal.", "citation_status": "gap"}],
+        "feasibility_analysis": "Feasible. Not retail, not chatbot, not legal.",
+        "viability_analysis": "Synthesis interview note: What? Answer: yes.",
+        "competitor_analysis": "Interview answer for 'competitor?': none.",
+    })
+
+    assert "Synthesis interview note:" not in markdown
+    assert "Interview answer for" not in markdown
+    assert "not retail, not chatbot" not in markdown.lower()
+    assert "Customer clarified: 1 KB per event" in markdown
 
 
 def test_compiler_catalog_canonicalizes_slugged_aws_step_functions_alias():
