@@ -42,7 +42,6 @@ class ResearchOrchestrator:
         progress(8, "Understanding use case and tool-governance constraints.")
         self.registry.assert_allowed("local_policy", SessionPhase.research, brief.model_dump(), session_id)
         profile = _profile_for_research(brief)
-        canonical_snapshot = build_canonical_fact_snapshot(brief)
         progress(15, "Running domain classification and workload-family checks.")
         brief = brief.model_copy(deep=True)
         brief.use_case_profile = profile_to_metadata(profile)
@@ -52,6 +51,8 @@ class ResearchOrchestrator:
         effective_brief = brief.model_copy(deep=True)
         effective_brief.use_case_profile = understanding_merge.profile_metadata
         profile = profile_from_metadata(effective_brief.use_case_profile, effective_brief.raw_use_case)
+        effective_brief.use_case_profile = profile_to_metadata(profile)
+        canonical_snapshot = build_canonical_fact_snapshot(effective_brief)
         workload_label = ", ".join(profile.workload_families)
         evidence = [
             EvidenceItem(

@@ -1143,31 +1143,7 @@ def _apply_live_demo_pricing_hardening(pricing: PricingAnalysis, profile: UseCas
             "canonical_value": int(explicit_events),
             "pricing_value": drivers.daily_event_volume,
         })
-    provenance = []
-    for key in (
-        "camera_towers",
-        "underwater_cameras",
-        "fish_cages",
-        "staff_users",
-        "resident_alert_recipients",
-        "terminal_count",
-        "telemetry_frequency_seconds",
-        "refresh_cadence_minutes",
-        "imagery_windows_per_day",
-        "events_per_day",
-        "retention_days",
-        "latency_target_minutes",
-    ):
-        section = "asset_counts" if key in {"camera_towers", "underwater_cameras", "fish_cages", "staff_users", "resident_alert_recipients", "terminal_count"} else "business_targets"
-        value = _structured_metric(profile, section, key)
-        if value:
-            provenance.append({
-                "driver_key": key,
-                "value": value,
-                "source": "user_confirmed",
-                "canonical_fact_ref": key,
-                "confidence": "high",
-            })
+    provenance = _generic_driver_provenance(profile)
     closure = dict(pricing.metadata.get("pricing_driver_closure") or {})
     if not closure and provenance:
         closure = {
@@ -1241,6 +1217,28 @@ def _apply_live_demo_pricing_hardening(pricing: PricingAnalysis, profile: UseCas
         ]))
     else:
         pricing.metadata.setdefault("pricing_scenario_validity", "directional")
+
+
+def _generic_driver_provenance(profile: UseCaseProfile) -> list[dict[str, Any]]:
+    provenance: list[dict[str, Any]] = []
+    structured = profile.structured_metrics or {}
+    for section in ("asset_counts", "business_targets"):
+        for key, payload in (structured.get(section) or {}).items():
+            if not isinstance(payload, dict):
+                continue
+            value = payload.get("value")
+            if value in (None, 0, "") or payload.get("derived"):
+                continue
+            provenance.append({
+                "driver_key": key,
+                "value": value,
+                "unit": payload.get("unit"),
+                "source": "user_confirmed",
+                "source_text": payload.get("raw") or payload.get("source_text"),
+                "canonical_fact_ref": key,
+                "confidence": "high",
+            })
+    return provenance
 
 
 def _known_dimension_names(profile: UseCaseProfile) -> set[str]:

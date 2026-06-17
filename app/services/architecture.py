@@ -56,6 +56,7 @@ class ArchitecturePlanner:
                 "network_view_reason": _network_view_reason(profile, production),
                 "network_private_connectivity_view_status": _network_view_status(semantic, compiler),
                 "requirement_coverage": _requirement_coverage(profile, components, flows, production=production),
+                "workload_specific_context": _workload_specific_context(profile, (report.metadata or {}).get("canonical_fact_snapshot")),
                 "architecture_generation": "pattern_catalog",
             },
         )
@@ -151,6 +152,19 @@ def _requirement_coverage(profile, components, flows, production: bool) -> dict[
     """
     capabilities = set(profile.capabilities or [])
     posture = set(profile.deployment_posture or [])
+    profile_text = " ".join(
+        str(item)
+        for item in [
+            profile.domain,
+            *list(profile.capabilities or []),
+            *list(profile.capability_model or []),
+            *list(profile.entities or []),
+            *list(profile.signals or []),
+            *list(profile.actions or []),
+            *list(profile.business_targets or []),
+        ]
+        if item
+    ).lower()
     component_text = " ".join([*(getattr(component, "name", "") for component in components), *(getattr(component, "purpose", "") for component in components)]).lower()
     flow_text = " ".join([*(getattr(flow, "label", "") or "" for flow in flows), *(" ".join(str(value) for value in getattr(flow, "metadata", {}).values()) for flow in flows)]).lower()
     body = f"{component_text} {flow_text}"
@@ -164,13 +178,26 @@ def _requirement_coverage(profile, components, flows, production: bool) -> dict[
             "message": message,
         })
 
-    if "computer_vision" in capabilities:
-        covered = any(term in body for term in ("video", "image", "vision", "sagemaker", "rekognition", "inference"))
+    image_or_video_required = "computer_vision" in capabilities or any(
+        term in profile_text
+        for term in ("image", "imagery", "photo", "video", "camera", "vision", "multispectral", "ocr", "scan")
+    )
+    if image_or_video_required:
+        covered = any(term in body for term in ("video", "image", "imagery", "photo", "camera", "vision", "multispectral", "ocr", "rekognition", "textract"))
         add(
             "computer_vision_hot_path",
             "Computer vision / imagery processing",
             "covered" if covered else "unmet",
             "Architecture carries an imagery/video inference path." if covered else "Computer-vision requirement was extracted but no imagery/video inference path is explicit.",
+        )
+    document_required = "document_retrieval" in capabilities or any(term in profile_text for term in ("document", "pdf", "docx", "note", "contract", "text", "ocr"))
+    if document_required:
+        covered = any(term in body for term in ("document", "pdf", "docx", "text", "ocr", "textract", "knowledge base", "opensearch", "bedrock"))
+        add(
+            "document_processing_path",
+            "Document / text processing",
+            "covered" if covered else "unmet",
+            "Architecture carries a document/text processing path." if covered else "Document/text requirement was extracted but no document processing path is explicit.",
         )
     if "real_time_ingestion" in capabilities:
         covered = any(term in body for term in ("stream", "kinesis", "iot", "telemetry", "event"))
@@ -196,8 +223,37 @@ def _requirement_coverage(profile, components, flows, production: bool) -> dict[
             "covered" if covered else "unmet",
             "Architecture carries approval/workflow controls for actions." if covered else "Actions were extracted but approval/workflow controls are not explicit.",
         )
+    if any(term in profile_text for term in ("residency", "sovereign", "eu", "europe", "regional", "country")):
+        covered = any(term in body for term in ("region", "residency", "multi-region", "cross-region", "kms", "backup", "replication"))
+        add(
+            "data_residency_boundary",
+            "Data residency / regional boundary",
+            "covered" if covered else "unmet",
+            "Architecture names regional/residency controls." if covered else "Data residency or regional constraints were extracted but no boundary/control is explicit.",
+        )
     return {
         "schema": "architecture_requirement_coverage_v1",
         "mode": "production" if production else "poc",
         "requirements": requirements,
+    }
+
+
+def _workload_specific_context(profile, snapshot: dict | None) -> dict:
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    quantities = []
+    for item in snapshot.get("quantities") or []:
+        if not isinstance(item, dict):
+            continue
+        source = item.get("source_text")
+        if source and source not in quantities:
+            quantities.append(source)
+    return {
+        "domain": profile.domain,
+        "signals": list(dict.fromkeys(profile.signals or []))[:12],
+        "actions": list(dict.fromkeys(profile.actions or []))[:12],
+        "entities": list(dict.fromkeys(profile.entities or []))[:12],
+        "quantities": quantities[:16],
+        "latency_slos": list(snapshot.get("latency_slos") or [])[:8],
+        "connectivity_constraints": list(snapshot.get("connectivity_constraints") or [])[:8],
+        "compliance_security_hints": list(snapshot.get("compliance_security_hints") or [])[:8],
     }

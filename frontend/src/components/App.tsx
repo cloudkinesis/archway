@@ -341,7 +341,7 @@ function Workspace(props: {
   ];
   return (
     <div className="flex min-h-full flex-col">
-      <nav className="flex gap-1 border-b border-awsBorder bg-surface px-4 py-3">
+      <nav className="sticky top-0 z-30 flex gap-1 border-b border-awsBorder bg-surface px-4 py-3">
         {tabs.map(([id, label, Icon]) => (
           <button key={id} onClick={() => props.setView(id)} className={`flex items-center gap-2 border px-3 py-2 text-sm ${props.view === id ? "border-awsOrange bg-awsPanelSoft text-awsTextPrimary" : "border-transparent text-awsTextMuted hover:border-awsBorder"}`}>
             <Icon className="h-4 w-4" />
@@ -450,7 +450,7 @@ function SynthesisView({ session, setSession, readiness, setReadiness, setView }
             <div className="text-xs text-awsTextMuted">Natural language is fine. Short answers are fine too.</div>
             <div className="flex flex-wrap gap-2">
               <Button icon={MessageSquareText} disabled={!message.trim() || send.isPending} onClick={() => send.mutate()} variant="secondary">{send.isPending ? "Capturing" : "Send Answer"}</Button>
-              <Button icon={ChevronRight} disabled={proceed.isPending} onClick={() => proceed.mutate(false)}>{showOptionalProceed ? "Proceed to Research" : "Ask Next Question"}</Button>
+              <Button icon={ChevronRight} disabled={proceed.isPending} onClick={() => proceed.mutate(showOptionalProceed)}>{showOptionalProceed ? "Proceed to Research" : "Ask Next Question"}</Button>
             </div>
           </div>
           {send.error ? <Banner tone="danger" text={(send.error as Error).message} /> : null}
@@ -851,7 +851,10 @@ function DiagnosticsView({ session, latestExport, setLatestExport }: Parameters<
         {generate.error ? <Banner tone="danger" text={(generate.error as Error).message} /> : null}
         {job.job?.status === "failed" ? <Banner tone="danger" text={job.job.error ?? "Export failed. Diagnostics were recorded."} /> : null}
       </div>
-      <pre className="archway-scroll max-h-[640px] overflow-auto border border-awsBorder bg-white p-4 text-xs text-awsTextSecondary">{JSON.stringify(diagnostics.data ?? { loading: true }, null, 2)}</pre>
+      <details className="border border-awsBorder bg-white p-4">
+        <summary className="cursor-pointer text-sm font-semibold">Raw diagnostics JSON</summary>
+        <pre className="archway-scroll mt-3 max-h-[640px] overflow-auto border border-awsBorder bg-surface p-4 text-xs text-awsTextSecondary">{JSON.stringify(diagnostics.data ?? { loading: true }, null, 2)}</pre>
+      </details>
     </Panel>
   );
 }
@@ -1018,6 +1021,7 @@ function Report({
       onNarrativeUpdated(updated.research_narrative ?? null);
       onDigestUpdated(updated.research_digest ?? null);
       onViewModelUpdated(updated.research_view_model ?? null);
+      onNext();
     }
   });
   if (viewModel) {

@@ -37,29 +37,7 @@ class SourceTruthPricingCompiler:
     def compile(self, *, profile: UseCaseProfile, drivers: Any, pricing: PricingAnalysis) -> PricingAnalysis:
         family = str(getattr(drivers, "pricing_driver_family", "generic_directional"))
         if family not in SUPPORTED_FAMILIES:
-            pricing.metadata = {
-                **pricing.metadata,
-                "source_truth_pricing_compiler": {
-                    "enabled": False,
-                    "reason": "Legacy directional pricing path remains in use for this workload family.",
-                },
-                "pricing_can_be_displayed_as_headline": False,
-                "headline_display": "Pricing withheld from executive headline because pricing trace is unavailable for this workload family.",
-                "pricing_sanity_findings": [
-                    finding(
-                        code="pricing.nonzero_total_without_pricing_ledger",
-                        severity="critical",
-                        category="pricing",
-                        title="Non-Zero Pricing Without Ledger",
-                        description="A non-zero directional estimate exists, but no source-truth pricing ledger was produced.",
-                        evidence=["pricing.metadata.source_truth_pricing_compiler.enabled=false"],
-                        auto_repairable=True,
-                        repair_strategy="Hide headline pricing until a workload-specific pricing ledger is produced.",
-                        customer_readiness_impact="cap_to_directional",
-                    ).model_dump(mode="json")
-                ] if pricing.expected_monthly_usd else [],
-            }
-            return pricing
+            return _compile_generic_not_estimated(profile=profile, drivers=drivers, pricing=pricing, family=family)
 
         facts = _canonical_facts(profile, drivers)
         assumptions = _assumptions(profile, drivers)
@@ -130,7 +108,7 @@ def _canonical_facts(profile: UseCaseProfile, drivers: Any) -> CanonicalFactsLed
                 value=payload.get("value"),
                 unit=payload.get("unit"),
                 source="user_input",
-                source_text=payload.get("source_text"),
+                source_text=payload.get("source_text") or payload.get("raw"),
                 confidence="high",
                 used_by=["pricing", "architecture", "research"],
                 validation_status="confirmed",
@@ -151,6 +129,143 @@ def _canonical_facts(profile: UseCaseProfile, drivers: Any) -> CanonicalFactsLed
             validation_status="assumed" if "assumed" in formula.lower() else "confirmed",
         ))
     return CanonicalFactsLedger(facts=facts, missing_explicit_metrics=[])
+
+
+def _compile_generic_not_estimated(
+    *,
+    profile: UseCaseProfile,
+    drivers: Any,
+    pricing: PricingAnalysis,
+    family: str,
+) -> PricingAnalysis:
+    facts = _canonical_facts(profile, drivers)
+    assumptions = AssumptionLedger(assumptions=[])
+    driver_bindings: list[PricingDriverBinding] = [
+        PricingDriverBinding(
+            driver_name=fact.name,
+            value=fact.value,
+            source_fact_id=fact.id,
+            status="confirmed" if fact.validation_status == "confirmed" else "derived",
+            required_for_headline_pricing=False,
+        )
+        for fact in facts.facts
+    ]
+    usage_dimensions = [_generic_usage_dimension(line.service, line.unit_basis, pricing.region) for line in pricing.line_items]
+    rate_bindings = [
+        AwsRateBinding(
+            service_name=dimension.service_name,
+            aws_service_code=dimension.aws_service_code,
+            unit=dimension.unit,
+            source="unbound",
+            confidence="none",
+            binding_status="unsupported",
+            notes=[
+                "No workload-specific usage formula is bound for this pricing family yet.",
+                "Confirm exact service SKU/tier, unit, and quantity before using this line for budget or procurement.",
+            ],
+        )
+        for dimension in usage_dimensions
+    ]
+    ledger = PricingLedger(
+        line_items=[
+            PricingLedgerLineItem(
+                service_name=dimension.service_name,
+                usage_name=dimension.usage_name,
+                quantity=None,
+                quantity_unit=dimension.unit,
+                formula=dimension.formula,
+                rate_binding_id=rate_bindings[index].id if index < len(rate_bindings) else None,
+                unit_price=None,
+                monthly_total=None,
+                evidence_class="not_estimated",
+                procurement_ready=False,
+                confidence="low",
+                assumptions=[],
+                limitations=[
+                    "Directional local range exists, but source-truth usage and AWS rate binding are not yet available for this workload family.",
+                ],
+            )
+            for index, dimension in enumerate(usage_dimensions)
+        ],
+        summary=PricingLedgerSummary(
+            sku_tier_backed_subtotal=Decimal("0"),
+            pricing_page_or_mcp_backed_subtotal=Decimal("0"),
+            heuristic_subtotal=Decimal("0"),
+            not_estimated_items=[dimension.service_name for dimension in usage_dimensions],
+            headline_safe=False,
+            procurement_ready=False,
+        ),
+    )
+    sanity = [
+        finding(
+            code="pricing.unsupported_family_not_estimated",
+            severity="warning",
+            category="pricing",
+            title="Pricing Family Needs Usage Binding",
+            description=(
+                "Archway captured workload facts, but this workload family does not yet have a source-truth "
+                "pricing formula and exact AWS rate binding. Treat any directional range as a planning placeholder."
+            ),
+            evidence=["pricing.metadata.source_truth_pricing_compiler.enabled=true"],
+            auto_repairable=True,
+            repair_strategy="Use the pricing-dimension lane to bind service-specific units, quantities, and AWS rates before showing a headline.",
+            customer_readiness_impact="cap_to_directional",
+        )
+    ]
+    pricing.metadata = {
+        **pricing.metadata,
+        "source_truth_pricing_compiler": {
+            "enabled": True,
+            "workload_family": family,
+            "headline_safe": False,
+            "procurement_ready": False,
+            "mode": "generic_not_estimated",
+            "reason": "No source-truth pricing formula is bound for this workload family yet.",
+        },
+        "canonical_facts": facts.model_dump(mode="json"),
+        "assumption_ledger": assumptions.model_dump(mode="json"),
+        "pricing_driver_bindings": [item.model_dump(mode="json") for item in driver_bindings],
+        "service_usage_dimensions": [item.model_dump(mode="json") for item in usage_dimensions],
+        "aws_rate_bindings": [item.model_dump(mode="json") for item in rate_bindings],
+        "pricing_ledger": ledger.model_dump(mode="json"),
+        "pricing_sanity_findings": [item.model_dump(mode="json") for item in sanity],
+        "pricing_can_be_displayed_as_headline": False,
+        "headline_display": "Pricing withheld from executive headline because exact usage and AWS rate bindings are not available for this workload family.",
+    }
+    closure = build_pricing_driver_closure(pricing, scenario_profile_used=getattr(drivers, "scenario_profile_id", None))
+    pricing.metadata = {
+        **pricing.metadata,
+        "pricing_driver_closure": closure.model_dump(mode="json"),
+        "pricing_maturity": closure.pricing_maturity,
+        "scenario_profile_used": getattr(drivers, "scenario_profile_id", None),
+        "directional_scenario_allowed": closure.directional_scenario_allowed,
+    }
+    for line in pricing.line_items:
+        line.pricing_trace = {
+            **(line.pricing_trace or {}),
+            "calculation_source": "generic_not_estimated_source_truth_trace",
+            "procurement_ready": False,
+            "headline_safe": False,
+            "pricing_validity": "not_estimated",
+            "reason": "No source-truth usage dimension and AWS rate binding are available for this service/workload family yet.",
+        }
+    return pricing
+
+
+def _generic_usage_dimension(service_name: str, unit_basis: str | None, region_code: str | None) -> ServiceUsageDimension:
+    plan = pricing_filter_plan_for_service(service_name, region_code=region_code or "us-east-1")
+    service_code = plan.service_code if plan else "unknown"
+    return ServiceUsageDimension(
+        service_name=service_name,
+        usage_name="workload-specific usage not yet bound",
+        aws_service_code=service_code,
+        quantity=None,
+        unit=unit_basis or "usage unit to confirm",
+        formula="No exact quantity formula is bound; confirm workload driver, AWS usage unit, SKU/tier, and region.",
+        driver_binding_ids=[],
+        assumption_ids=[],
+        required_rate_dimensions={},
+    )
 
 
 def _fact_from_metric(metric: ExtractedMetric) -> CanonicalFact:

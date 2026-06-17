@@ -138,12 +138,38 @@ def refine_profile_with_context(profile: UseCaseProfile, context_text: str) -> U
     lower = context_text.lower()
     capability_result = extract_capabilities(context_text)
     context_capabilities = _detect_capabilities(lower) + [item.value for item in capability_result.capabilities]
+    context_metrics = extract_metrics(context_text)
     profile.capabilities = list(dict.fromkeys(profile.capabilities + context_capabilities))
     profile.capability_model = list(dict.fromkeys(profile.capability_model + [item.value for item in capability_result.capabilities]))
     profile.deployment_posture = list(dict.fromkeys(profile.deployment_posture + [item.value for item in capability_result.deployment_posture]))
+    profile.entities = list(dict.fromkeys(profile.entities + _detect_entities(lower)))
+    profile.signals = list(dict.fromkeys(profile.signals + _detect_signals(lower) + context_metrics.telemetry_signals))
+    profile.actions = list(dict.fromkeys(profile.actions + _detect_actions(lower) + context_metrics.operational_actions))
+    profile.structured_metrics = _merge_structured_metrics(profile.structured_metrics, context_metrics.model_dump())
+    profile.metrics = _dedupe_metrics(profile.metrics + _extract_metrics(context_metrics))
+    profile.business_targets = list(dict.fromkeys(profile.business_targets + _detect_business_targets(context_text)))
+    latency_target = _detect_latency_target(context_text)
+    if latency_target:
+        profile.latency_target = latency_target
     if not profile.latency_class and capability_result.latency_class:
         profile.latency_class = capability_result.latency_class.value
     return _apply_explicit_negative_constraints(profile, lower)
+
+
+def _merge_structured_metrics(existing: dict | None, incoming: dict) -> dict:
+    merged = dict(existing or {})
+    for section in ("asset_counts", "business_targets"):
+        values = dict(merged.get(section) or {})
+        for key, payload in (incoming.get(section) or {}).items():
+            if not isinstance(payload, dict):
+                continue
+            current = values.get(key)
+            if current is None or (isinstance(current, dict) and current.get("derived") and not payload.get("derived")):
+                values[key] = dict(payload)
+        merged[section] = values
+    for section in ("telemetry_signals", "detection_targets", "operational_actions", "assumptions"):
+        merged[section] = list(dict.fromkeys(list(merged.get(section) or []) + list(incoming.get(section) or [])))
+    return merged
 
 
 def _detect_domain(lower: str) -> str | None:
@@ -442,17 +468,31 @@ def _apply_explicit_negative_constraints(profile: UseCaseProfile, lower: str) ->
 
 
 def _detect_entities(lower: str) -> list[str]:
-    markers = ("smart meter", "transformer", "feeder", "sensor", "customer", "patient", "transaction", "order", "document", "image", "vehicle", "machine", "asset", "field crew", "depot", "airport", "terminal", "baggage", "flight schedule")
+    markers = (
+        "smart meter", "transformer", "feeder", "sensor", "customer", "patient", "transaction", "order",
+        "document", "pdf", "docx", "note", "image", "photo", "video", "object", "record", "case",
+        "vehicle", "machine", "asset", "site", "field crew", "depot", "airport", "terminal", "baggage",
+        "flight schedule",
+    )
     return [marker.replace(" ", "_") for marker in markers if marker in lower]
 
 
 def _detect_signals(lower: str) -> list[str]:
-    markers = ("voltage", "load imbalance", "ambient temperature", "temperature", "oscillation", "current", "vibration", "pressure", "humidity", "location", "payment velocity", "clickstream")
+    markers = (
+        "voltage", "load imbalance", "ambient temperature", "temperature", "oscillation", "current",
+        "vibration", "pressure", "humidity", "location", "payment velocity", "clickstream", "image",
+        "imagery", "photo", "video", "multispectral", "sensor reading", "readings", "document", "pdf",
+        "docx",
+    )
     return [marker.replace(" ", "_") for marker in markers if marker in lower]
 
 
 def _detect_actions(lower: str) -> list[str]:
-    markers = ("dispatch", "pre-position", "notify", "alert", "create ticket", "block transaction", "block high-confidence", "block high confidence", "queue suspicious", "analyst review", "approve", "recommend", "schedule", "route")
+    markers = (
+        "dispatch", "pre-position", "notify", "alert", "create ticket", "block transaction",
+        "block high-confidence", "block high confidence", "queue suspicious", "analyst review", "approve",
+        "human approval", "recommend", "triage", "review", "escalate", "schedule", "route",
+    )
     return [marker.replace("-", "_").replace(" ", "_") for marker in markers if marker in lower]
 
 

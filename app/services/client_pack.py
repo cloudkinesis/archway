@@ -84,6 +84,7 @@ def client_pack_files(
         narrative_trace=candidate_traces.get("narrative"),
         reviewer_trace=candidate_traces.get("reviewer"),
     )
+    workload_context = _workload_context(brief, report, pricing, architectures)
     # One tier computation feeds every client surface — readiness wording can
     # never diverge between the memo and the pricing summary.
     tier = compute_readiness_tier(report=report, pricing=pricing, architectures=architectures)
@@ -92,8 +93,8 @@ def client_pack_files(
         "START_HERE.md": _start_here(session_name, client_plan),
         "01-executive-memo.md": _executive_memo(report, deep_dossier, tier, client_plan),
         "02-solution-brief.md": _solution_brief(brief, deep_dossier),
-        "03-architecture-summary.md": _architecture_summary(architectures, decision_records, client_plan),
-        "04-pricing-summary.md": _pricing_summary(pricing, deep_dossier, tier, client_plan),
+        "03-architecture-summary.md": _architecture_summary(architectures, decision_records, client_plan, workload_context),
+        "04-pricing-summary.md": _pricing_summary(pricing, deep_dossier, tier, client_plan, workload_context),
         "05-risks-and-gates.md": _risks_and_gates(deep_dossier, tier, client_plan),
         "06-evidence-summary.md": _evidence_summary(report, deep_dossier),
         "07-diagrams-index.md": _diagrams_index(diagrams, client_plan),
@@ -242,8 +243,10 @@ def _architecture_summary(
     architectures: list,
     decision_records: list,
     client_plan: ClientFacingPlan | None = None,
+    workload_context: dict | None = None,
 ) -> str:
     lines = ["# Architecture Summary", ""]
+    lines.extend(_workload_context_section(workload_context))
     if _candidate_mode(client_plan):
         architecture = client_plan.architecture_candidate
         lines.extend([
@@ -287,11 +290,21 @@ def _architecture_summary(
         return "\n".join(lines)
     for spec in specs:
         mode = display_label(str(spec.get("mode") or "architecture"))
+        coverage_rows = _requirement_coverage_rows(spec)
         lines.extend([
             f"## {mode} architecture",
             "",
             _sentence(str(spec.get("summary") or "Summary pending")),
             "",
+            *(
+                [
+                    "Requirement coverage:",
+                    "",
+                    *_bullets(coverage_rows),
+                    "",
+                ]
+                if coverage_rows else []
+            ),
             "Key services:",
             "",
             *_bullets([
@@ -342,6 +355,7 @@ def _pricing_summary(
     dossier,
     tier: dict,
     client_plan: ClientFacingPlan | None = None,
+    workload_context: dict | None = None,
 ) -> str:
     metadata = pricing.get("metadata") or {}
     closure = metadata.get("pricing_driver_closure") or {}
@@ -368,6 +382,22 @@ def _pricing_summary(
         _sentence("Pricing scenario needs repair: driver set does not match the confirmed workload. No polished monthly range is displayed for this invalid scenario." if invalid else dossier.estimated_monthly_cost_range),
         "",
     ]
+    quantity_rows = _workload_quantity_rows(workload_context)
+    if quantity_rows:
+        lines.extend([
+            "## Workload facts carried into pricing",
+            "",
+            *_bullets(quantity_rows),
+            "",
+        ])
+    unbound_rows = _unbound_usage_rows(metadata)
+    if unbound_rows:
+        lines.extend([
+            "## Service dimensions still to bind",
+            "",
+            *_bullets(unbound_rows),
+            "",
+        ])
     if _candidate_mode(client_plan) and client_plan.pricing_candidate:
         pricing_candidate = client_plan.pricing_candidate
         lines.extend([
@@ -582,6 +612,105 @@ def _view_fallback_notes(diagrams: list) -> str:
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
+def _workload_context(brief: dict, report: dict, pricing: dict, architectures: list) -> dict:
+    snapshot = ((report.get("metadata") or {}).get("canonical_fact_snapshot") or {})
+    profile = brief.get("use_case_profile") or ((report.get("metadata") or {}).get("use_case_profile") or {})
+    quantities: list[str] = []
+    for item in snapshot.get("quantities") or []:
+        if isinstance(item, dict) and item.get("source_text"):
+            quantities.append(str(item["source_text"]))
+    pricing_facts = (((pricing.get("metadata") or {}).get("canonical_facts") or {}).get("facts") or [])
+    for item in pricing_facts:
+        if isinstance(item, dict) and item.get("source_text"):
+            quantities.append(str(item["source_text"]))
+    signals = list(snapshot.get("signals") or [])
+    actions = list(snapshot.get("actions") or [])
+    actors = list(snapshot.get("actors") or [])
+    for spec in architectures:
+        if not isinstance(spec, dict):
+            continue
+        context = (spec.get("metadata") or {}).get("workload_specific_context") or {}
+        signals.extend(context.get("signals") or [])
+        actions.extend(context.get("actions") or [])
+        actors.extend(context.get("entities") or [])
+        quantities.extend(context.get("quantities") or [])
+    return {
+        "problem": brief.get("refined_problem_statement") or brief.get("raw_use_case"),
+        "domain": snapshot.get("domain") or profile.get("domain"),
+        "workload_families": snapshot.get("workload_families") or profile.get("workload_families") or [],
+        "signals": list(dict.fromkeys(str(item) for item in signals if item))[:12],
+        "actions": list(dict.fromkeys(str(item) for item in actions if item))[:12],
+        "actors": list(dict.fromkeys(str(item) for item in actors if item))[:12],
+        "quantities": list(dict.fromkeys(str(item) for item in quantities if item))[:16],
+        "latency_slos": list(dict.fromkeys(str(item) for item in snapshot.get("latency_slos") or [] if item))[:8],
+        "connectivity_constraints": list(dict.fromkeys(str(item) for item in snapshot.get("connectivity_constraints") or [] if item))[:8],
+        "compliance_security_hints": list(dict.fromkeys(str(item) for item in snapshot.get("compliance_security_hints") or [] if item))[:8],
+    }
+
+
+def _workload_context_section(context: dict | None) -> list[str]:
+    context = context or {}
+    rows: list[str] = []
+    if context.get("problem"):
+        rows.append(f"Problem context: {_client_sentence(context['problem'])}")
+    if context.get("signals"):
+        rows.append("Data and signals: " + ", ".join(_client_label(item, capitalize=False) for item in context["signals"]))
+    if context.get("actions"):
+        rows.append("Governed actions: " + ", ".join(_client_label(item, capitalize=False) for item in context["actions"]))
+    if context.get("quantities"):
+        rows.append("Confirmed quantities: " + "; ".join(_client_text(item) for item in context["quantities"][:8]))
+    if context.get("latency_slos"):
+        rows.append("Latency or cadence constraints: " + "; ".join(_client_text(item) for item in context["latency_slos"]))
+    if context.get("connectivity_constraints"):
+        rows.append("Connectivity constraints: " + ", ".join(_client_label(item, capitalize=False) for item in context["connectivity_constraints"]))
+    if context.get("compliance_security_hints"):
+        rows.append("Security/compliance hints: " + ", ".join(_client_label(item, capitalize=False) for item in context["compliance_security_hints"]))
+    if not rows:
+        return []
+    return [
+        "## Workload-specific facts carried forward",
+        "",
+        *_bullets(rows),
+        "",
+    ]
+
+
+def _workload_quantity_rows(context: dict | None) -> list[str]:
+    context = context or {}
+    rows = [_client_text(item) for item in context.get("quantities") or []]
+    rows.extend(_client_text(item) for item in context.get("latency_slos") or [])
+    return list(dict.fromkeys(rows))[:12]
+
+
+def _requirement_coverage_rows(spec: dict) -> list[str]:
+    coverage = ((spec.get("metadata") or {}).get("requirement_coverage") or {})
+    rows: list[str] = []
+    for item in coverage.get("requirements") or []:
+        if not isinstance(item, dict):
+            continue
+        label = _client_label(item.get("label") or item.get("id") or "Requirement")
+        status = _client_label(item.get("status") or "unknown", capitalize=False)
+        message = _client_sentence(item.get("message") or "")
+        rows.append(f"**{label}** — {status}. {message}")
+    return rows
+
+
+def _unbound_usage_rows(metadata: dict) -> list[str]:
+    rows: list[str] = []
+    for item in metadata.get("service_usage_dimensions") or []:
+        if not isinstance(item, dict):
+            continue
+        quantity = item.get("quantity")
+        formula = str(item.get("formula") or "")
+        if quantity not in (None, "", 0) and formula.lower() != "not_estimated":
+            continue
+        service = _client_text(item.get("service_name") or "Service")
+        usage = _client_label(item.get("usage_name") or "usage")
+        unit = _client_text(item.get("unit") or "unit to confirm")
+        rows.append(f"**{service}** — {usage}; unit: {unit}. {_client_sentence(formula or 'Usage quantity requires confirmation')}")
+    return rows[:12]
+
+
 def _candidate_mode(client_plan: ClientFacingPlan | None) -> bool:
     return bool(client_plan and client_plan.is_candidate)
 
