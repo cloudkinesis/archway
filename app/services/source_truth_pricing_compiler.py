@@ -354,6 +354,7 @@ def _generic_usage_dimension(
 
 def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
     values: dict[str, float] = {}
+    direct_values: dict[str, float] = {}
     names_by_key: dict[str, str] = {}
     for fact in facts.facts:
         try:
@@ -418,8 +419,10 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
 
 def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
     values: dict[str, float] = {}
+    direct_values: dict[str, float] = {}
     names_by_key: dict[str, str] = {}
     asset_count = 0.0
+    asset_count_candidates: list[tuple[float, str]] = []
     cadence_seconds = 0.0
     telemetry_payload_kb = 0.0
     media_payload_mb = 0.0
@@ -433,6 +436,7 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
     direct_daily_events = 0.0
     direct_hourly_events = 0.0
     direct_annual_events = 0.0
+    derived_monthly_events = 0.0
 
     for fact in facts.facts:
         try:
@@ -450,9 +454,11 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
         key = _generic_fact_key(name, unit, source)
         values[key] = max(values.get(key, 0), value)
         names_by_key[key] = name
+        if fact.source != "derived":
+            direct_values[key] = max(direct_values.get(key, 0), value)
 
         if _looks_like_asset_count(name, unit, source):
-            asset_count = max(asset_count, value)
+            asset_count_candidates.append((value, f"{name} {unit} {source}"))
         if _looks_like_cadence_seconds(name, unit, source):
             cadence_seconds = min(cadence_seconds or value, value)
         if _looks_like_payload_kb(name, unit, source):
@@ -470,22 +476,31 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
         if retention_class:
             retention_months_by_class[retention_class] = max(
                 retention_months_by_class.get(retention_class, 0),
-                _retention_months(value, text),
+                _retention_months(value, name=name, unit=unit, source=source),
             )
         if _looks_like_text_items_per_month(name, unit, source):
             text_items_monthly += value
-        if key == "annual_base":
-            direct_annual_events = max(direct_annual_events, value)
-        elif key == "monthly_base":
-            direct_monthly_events += value
-        elif key == "events_per_day":
-            direct_daily_events += value
-        elif key.endswith("_per_hour"):
-            direct_hourly_events += value
+        if fact.source == "derived":
+            if key == "monthly_base":
+                derived_monthly_events = max(derived_monthly_events, value)
+            elif key == "events_per_day":
+                derived_monthly_events = max(derived_monthly_events, value * 30)
+            elif key == "annual_base":
+                derived_monthly_events = max(derived_monthly_events, value / 12)
+        else:
+            if key == "annual_base":
+                direct_annual_events = max(direct_annual_events, value)
+            elif key == "monthly_base":
+                direct_monthly_events += value
+            elif key == "events_per_day":
+                direct_daily_events += value
+            elif key.endswith("_per_hour"):
+                direct_hourly_events += value
 
-    annual_base = _first_value(values, "annual_base", "items_per_year", "records_per_year", "transactions_per_year", "requests_per_year")
-    monthly_base = _first_value(values, "monthly_base", "items_per_month", "records_per_month", "transactions_per_month", "requests_per_month")
-    daily_base = _first_value(values, "events_per_day", "items_per_day", "records_per_day", "transactions_per_day", "requests_per_day")
+    asset_count = _compose_asset_count(asset_count_candidates)
+    annual_base = _first_value(direct_values, "annual_base", "items_per_year", "records_per_year", "transactions_per_year", "requests_per_year")
+    monthly_base = _first_value(direct_values, "monthly_base", "items_per_month", "records_per_month", "transactions_per_month", "requests_per_month")
+    daily_base = _first_value(direct_values, "events_per_day", "items_per_day", "records_per_day", "transactions_per_day", "requests_per_day")
     if not monthly_base and annual_base:
         monthly_base = annual_base / 12
     if not monthly_base and daily_base:
@@ -501,7 +516,7 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
         direct_annual_events / 12 if direct_annual_events else 0,
         monthly_base,
     )
-    monthly_events = max(telemetry_monthly, direct_event_monthly)
+    monthly_events = max(telemetry_monthly, direct_event_monthly, derived_monthly_events)
 
     media_base = asset_count or monthly_base
     if media_per_base_item and base_items_per_asset_month and asset_count:
@@ -605,6 +620,21 @@ def _looks_like_asset_count(name: str, unit: str, source: str) -> bool:
     return bool(unit_tokens) and not unit_tokens.intersection(_PEOPLE_UNITS)
 
 
+def _compose_asset_count(candidates: list[tuple[float, str]]) -> float:
+    if not candidates:
+        return 0.0
+    largest = max(value for value, _text in candidates)
+    other_sum = sum(value for value, _text in candidates if value != largest)
+    aggregate_markers = ("total", "overall", "monitored", "sources", "assets", "devices")
+    has_aggregate = any(
+        value == largest and any(marker in text for marker in aggregate_markers)
+        for value, text in candidates
+    )
+    if has_aggregate:
+        return largest
+    return sum(value for value, _text in candidates)
+
+
 def _looks_like_cadence_seconds(name: str, unit: str, source: str) -> bool:
     text = f"{name} {unit} {source}".lower()
     return ("second" in text or re.search(r"\bevery\s+\d+(?:\.\d+)?\s*s\b", text)) and not any(term in text for term in ("retention", "retain"))
@@ -687,13 +717,25 @@ def _retention_class(text: str) -> str | None:
     return "all"
 
 
-def _retention_months(value: float, text: str) -> float:
-    if "year" in text:
-        return value * 12
-    if "day" in text:
+def _retention_months(value: float, *, name: str, unit: str, source: str) -> float:
+    unit_text = f"{name} {unit}".lower()
+    text = f"{unit_text} {source}".lower()
+    if "day" in unit_text:
         return max(1, value / 30)
-    if "week" in text:
+    if "week" in unit_text:
         return max(1, value / 4)
+    if "month" in unit_text:
+        return value
+    if "year" in unit_text:
+        return value * 12
+    if re.search(rf"\b{re.escape(str(int(value)) if value.is_integer() else str(value))}\s+days?\b", text):
+        return max(1, value / 30)
+    if re.search(rf"\b{re.escape(str(int(value)) if value.is_integer() else str(value))}\s+weeks?\b", text):
+        return max(1, value / 4)
+    if re.search(rf"\b{re.escape(str(int(value)) if value.is_integer() else str(value))}\s+months?\b", text):
+        return value
+    if re.search(rf"\b{re.escape(str(int(value)) if value.is_integer() else str(value))}\s+years?\b", text):
+        return value * 12
     return value
 
 

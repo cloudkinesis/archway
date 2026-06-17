@@ -212,6 +212,30 @@ def test_generic_quantity_context_keeps_asset_cadence_and_per_asset_media_stream
     assert not [item for item in context["plausibility_findings"] if item["severity"] == "critical"]
 
 
+def test_generic_quantity_context_does_not_reuse_derived_event_totals_as_media_items():
+    ledger = CanonicalFactsLedger(facts=[
+        CanonicalFact(name="explicit_quantity_plants_1", value=180, unit="plants", source="user_input", source_text="180 plants", confidence="high", used_by=["pricing"], validation_status="confirmed"),
+        CanonicalFact(name="explicit_quantity_trucks_2", value=2400, unit="trucks", source="user_input", source_text="2,400 trucks", confidence="high", used_by=["pricing"], validation_status="confirmed"),
+        CanonicalFact(name="explicit_quantity_monitored_temperature_sources_3", value=2580, unit="monitored_temperature_sources", source="user_input", source_text="2,580 monitored temperature sources", confidence="high", used_by=["pricing"], validation_status="confirmed"),
+        CanonicalFact(name="telemetry_frequency_seconds", value=20, unit="seconds", source="user_input", source_text="readings every 20 seconds", confidence="high", used_by=["pricing"], validation_status="confirmed"),
+        CanonicalFact(name="explicit_quantity_kb_readings_3", value=0.8, unit="kb_readings", source="user_input", source_text="0.8 KB readings", confidence="high", used_by=["pricing"], validation_status="confirmed"),
+        CanonicalFact(name="explicit_quantity_mb_files_4", value=2, unit="mb_result_files", source="user_input", source_text="2 MB result files", confidence="high", used_by=["pricing"], validation_status="confirmed"),
+        CanonicalFact(name="explicit_quantity_times_per_day_5", value=600, unit="times_per_day", source="user_input", source_text="600 times per day", confidence="high", used_by=["pricing"], validation_status="confirmed"),
+        CanonicalFact(name="explicit_quantity_mb_images_6", value=5, unit="mb_images", source="user_input", source_text="5 MB images", confidence="high", used_by=["pricing"], validation_status="confirmed"),
+        CanonicalFact(name="explicit_quantity_times_per_day_per_site_7", value=12, unit="times_per_day_per_site", source="user_input", source_text="12 times per day per site", confidence="high", used_by=["pricing"], validation_status="confirmed"),
+        CanonicalFact(name="retention_days", value=120, unit="days", source="user_input", source_text="Retain telemetry for 18 months, swab result files for 7 years, camera evidence for 120 days", confidence="high", used_by=["pricing"], validation_status="confirmed"),
+        CanonicalFact(name="monthly_event_volume", value=334_368_000, unit="events/month", source="derived", source_text=None, confidence="medium", used_by=["pricing"], validation_status="assumed"),
+    ])
+
+    context = _generic_quantity_context(ledger)
+
+    assert context["asset_count"] == 2580
+    assert round(context["monthly_events"]) == 334_368_000
+    assert context["monthly_media_items"] < 25_000
+    assert context["storage_gb_month"] < 10_000
+    assert not [item for item in context["plausibility_findings"] if item["severity"] == "critical"]
+
+
 def test_generic_quantity_context_composes_per_batch_media_without_treating_payload_as_count():
     ledger = CanonicalFactsLedger(facts=[
         CanonicalFact(name="explicit_quantity_sorting_lines_1", value=14, unit="sorting_lines", source="user_input", source_text="14 sorting lines", confidence="high", used_by=["pricing"], validation_status="confirmed"),

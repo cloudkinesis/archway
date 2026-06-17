@@ -2119,6 +2119,8 @@ function ClaimCard({ title, claims }: { title: string; claims: Array<{ id: strin
 
 function ArchitectureEditorCard({ architecture, draft, onChange }: { architecture: ArchitectureSpec; draft: ArchitectureDraft; onChange: (draft: ArchitectureDraft) => void }) {
   const update = (field: keyof ArchitectureDraft, value: string) => onChange({ ...draft, [field]: value });
+  const securityControls = parseControls(draft.security_controls_text);
+  const observabilityControls = parseControls(draft.observability_controls_text);
   return (
     <div className="border border-awsBorder bg-surface p-4">
       <div className="mb-3 flex items-start justify-between">
@@ -2128,15 +2130,42 @@ function ArchitectureEditorCard({ architecture, draft, onChange }: { architectur
         </div>
         <span className="border border-awsOrange/50 px-2 py-1 text-xs uppercase text-awsOrange">{architecture.mode}</span>
       </div>
-      <div className="grid gap-3 xl:grid-cols-2">
-        <TextArea label="Summary" value={draft.summary} onChange={(value) => update("summary", value)} />
-        <TextArea label="Security controls" value={draft.security_controls_text} onChange={(value) => update("security_controls_text", value)} hint="One control per line: name: rationale" />
-        <TextArea label="Observability controls" value={draft.observability_controls_text} onChange={(value) => update("observability_controls_text", value)} hint="One control per line: name: rationale" />
-        <TextArea label="Scaling strategy" value={draft.scaling_strategy} onChange={(value) => update("scaling_strategy", value)} />
-        <TextArea label="Resilience strategy" value={draft.resilience_strategy} onChange={(value) => update("resilience_strategy", value)} />
-        <TextArea label="Cost optimization" value={draft.cost_optimization_strategy} onChange={(value) => update("cost_optimization_strategy", value)} />
+      <div className="mb-4 grid gap-3 xl:grid-cols-3">
+        <ArchitectureReadCard title="Summary" lines={[draft.summary]} />
+        <ArchitectureReadCard title="Security controls" lines={securityControls.map((item) => `${item.name}: ${item.rationale}`)} />
+        <ArchitectureReadCard title="Observability controls" lines={observabilityControls.map((item) => `${item.name}: ${item.rationale}`)} />
+        <ArchitectureReadCard title="Scaling" lines={[draft.scaling_strategy]} />
+        <ArchitectureReadCard title="Resilience" lines={[draft.resilience_strategy]} />
+        <ArchitectureReadCard title="Cost posture" lines={[draft.cost_optimization_strategy]} />
       </div>
+      <details className="border border-awsBorder bg-white p-3">
+        <summary className="cursor-pointer text-sm font-semibold">Edit architecture fields</summary>
+        <div className="mt-3 grid gap-3 xl:grid-cols-2">
+          <TextArea label="Summary" value={draft.summary} onChange={(value) => update("summary", value)} />
+          <TextArea label="Security controls" value={draft.security_controls_text} onChange={(value) => update("security_controls_text", value)} hint="One control per line: name: rationale" />
+          <TextArea label="Observability controls" value={draft.observability_controls_text} onChange={(value) => update("observability_controls_text", value)} hint="One control per line: name: rationale" />
+          <TextArea label="Scaling strategy" value={draft.scaling_strategy} onChange={(value) => update("scaling_strategy", value)} />
+          <TextArea label="Resilience strategy" value={draft.resilience_strategy} onChange={(value) => update("resilience_strategy", value)} />
+          <TextArea label="Cost optimization" value={draft.cost_optimization_strategy} onChange={(value) => update("cost_optimization_strategy", value)} />
+        </div>
+      </details>
     </div>
+  );
+}
+
+function ArchitectureReadCard({ title, lines }: { title: string; lines: string[] }) {
+  const clean = lines.map((line) => presentationText(line)).filter(Boolean).slice(0, 4);
+  return (
+    <section className="border border-awsBorder bg-white p-3">
+      <h4 className="text-sm font-semibold">{title}</h4>
+      {clean.length ? (
+        <ul className="mt-2 space-y-2 text-sm leading-6 text-awsTextSecondary">
+          {clean.map((line) => <li key={line}>{line}</li>)}
+        </ul>
+      ) : (
+        <p className="mt-2 text-sm text-awsTextMuted">No generated narrative is available for this section yet.</p>
+      )}
+    </section>
   );
 }
 
