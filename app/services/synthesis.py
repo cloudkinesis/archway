@@ -228,8 +228,15 @@ class SynthesisEngine:
 
 def _problem_statement(profile, raw_use_case: str) -> str:
     families = ", ".join(display_label(family, capitalize=False) for family in profile.workload_families)
-    domain = profile.domain or "the target industry"
-    return f"Design an AWS architecture for a {domain} workload classified as {families}: {raw_use_case.strip()}"
+    domain = (profile.domain or "").strip()
+    if not domain:
+        subject = "the target workload"
+    elif domain.lower().startswith(("the ", "this ", "that ")):
+        subject = f"{domain} workload"
+    else:
+        article = "an" if domain[:1].lower() in {"a", "e", "i", "o", "u"} else "a"
+        subject = f"{article} {domain} workload"
+    return f"Design an AWS architecture for {subject} classified as {families}: {raw_use_case.strip()}"
 
 
 def opening_interview_message(brief: UseCaseBrief) -> str:
@@ -273,7 +280,8 @@ def _record_interview_answer(brief: UseCaseBrief, question: SynthesisQuestion, a
             user_confirmed=True,
         ))
     brief.open_questions = [item for item in brief.open_questions if question.prompt[:40].lower() not in item.text.lower()]
-    brief.refined_problem_statement = f"{brief.refined_problem_statement}\n\nSynthesis interview note: {question.prompt} Answer: {text}"
+    # Keep interview detail structured in assumptions/raw metadata; client prose
+    # should summarize it instead of carrying verbatim transcript scaffolding.
 
 
 _COMPLETION_CLARIFICATION_MESSAGE = (
@@ -528,9 +536,26 @@ def _data_sources(text: str, sensitive: bool | None, profile=None) -> list[DataS
         sources.append(DataSource(name="Historical time-series data", sensitivity=sensitivity))
     if profile and "document_retrieval" in profile.capabilities:
         sources.append(DataSource(name="Business knowledge base", sensitivity=sensitivity))
-    if "order" in text.lower():
+    if _has_commerce_order_context(text.lower()):
         sources.append(DataSource(name="Order management system", sensitivity="confidential"))
     return sources or [DataSource(name="Business data sources", sensitivity=sensitivity)]
+
+
+def _has_commerce_order_context(lower: str) -> bool:
+    if "work order" in lower or "maintenance order" in lower:
+        return False
+    commerce_markers = ("retail", "commerce", "customer order", "online order", "order fulfillment", "delivery order", "refund")
+    return any(_affirmed_marker(lower, marker) for marker in commerce_markers)
+
+
+def _affirmed_marker(lower: str, marker: str) -> bool:
+    start = lower.find(marker)
+    while start >= 0:
+        prefix = lower[max(0, start - 32):start]
+        if not re.search(r"(?:\bnot\b|\bno\b|\bwithout\b|\bexclude[sd]?\b|\bnon[-\s])\W*$", prefix):
+            return True
+        start = lower.find(marker, start + len(marker))
+    return False
 
 
 def _planner_questions(profile) -> list[OpenQuestion]:
@@ -609,15 +634,22 @@ def _detect_industry(text: str) -> str | None:
     lower = text.lower()
     mapping = {
         "healthcare": ("patient", "clinical", "hospital", "health", "phi"),
-        "retail": ("retail", "order", "delivery", "inventory", "refund"),
+        "retail": ("retail", "customer order", "online order", "order fulfillment", "delivery order", "refund"),
         "manufacturing": ("manufacturing", "machine", "sensor", "downtime", "iot"),
         "automotive": ("dealer", "vehicle", "warranty", "automotive"),
         "banking/financial": ("bank", "fraud", "payment", "financial", "pci"),
     }
     for industry, markers in mapping.items():
-        if any(marker in lower for marker in markers):
+        normalized = lower.replace("-", " ")
+        if any(marker in lower and not _is_text_marker_negated(normalized, marker) for marker in markers):
             return industry
     return None
+
+
+def _is_text_marker_negated(normalized_lower: str, marker: str) -> bool:
+    marker_pattern = re.escape(marker.replace("-", " ")).replace(r"\ ", r"\s+")
+    prefix = r"(?:not|no|without|exclude|excluding|avoid|avoiding|not\s+a|not\s+an|not\s+the)"
+    return re.search(rf"\b{prefix}\b(?:\W+\w+){{0,6}}\W+{marker_pattern}\b", normalized_lower) is not None
 
 
 def _looks_sensitive(text: str, industry: str | None) -> bool | None:
@@ -692,4 +724,7 @@ def _is_telecom_hbase_profile(profile) -> bool:
 def _is_document_workflow_profile(profile) -> bool:
     families = set(getattr(profile, "workload_families", []) or [])
     capabilities = set(getattr(profile, "capabilities", []) or []) | set(getattr(profile, "capability_model", []) or [])
+    excluded = set(getattr(profile, "excluded_families", []) or []) | set(getattr(profile, "excluded_patterns", []) or [])
+    if {"document_intelligence", "rag_assistant"} & excluded:
+        return False
     return bool({"document_intelligence", "rag_assistant"} & families or {"document_retrieval", "rag_retrieval", "document_ingestion"} & capabilities)

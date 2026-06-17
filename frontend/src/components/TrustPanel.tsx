@@ -36,6 +36,11 @@ type PilotTrace = {
   not_estimated?: string[];
 };
 
+type SourceTruthPricingTrace = {
+  mode?: string;
+  status?: string;
+};
+
 function shortHash(value?: string): string {
   if (!value) return "—";
   return value.replace("sha256:", "").slice(0, 12);
@@ -68,6 +73,15 @@ export function TrustPanel({
 }) {
   const metadata = pricing.metadata ?? {};
   const headlineSafe = metadata.pricing_can_be_displayed_as_headline !== false;
+  const sourceTruth = (metadata.source_truth_pricing_compiler as SourceTruthPricingTrace | undefined) ?? undefined;
+  const pricingMaturity = String(metadata.pricing_maturity ?? "").toLowerCase();
+  const pricingStatus = String(metadata.status ?? metadata.pricing_status ?? "").toLowerCase();
+  const headlineBlocked =
+    !headlineSafe ||
+    sourceTruth?.mode === "generic_not_estimated" ||
+    sourceTruth?.status === "generic_not_estimated" ||
+    pricingMaturity.includes("not_estimated") ||
+    pricingStatus.includes("invalid");
   const pilot = (metadata.sku_pricing_pilot as PilotTrace | undefined) ?? undefined;
 
   const artifacts = exportBundle?.included_artifacts ?? [];
@@ -118,12 +132,18 @@ export function TrustPanel({
         {/* Legacy estimate */}
         <div className="border border-awsBorder bg-white p-3 text-sm">
           <div className="font-semibold">Legacy estimate</div>
-          <div className="mt-2 text-awsTextSecondary">
-            Range ${String(pricing.low_monthly_usd ?? "—")}–${String(pricing.high_monthly_usd ?? "—")} · Expected ${String(pricing.expected_monthly_usd ?? "—")}
-          </div>
+          {headlineBlocked ? (
+            <div className="mt-2 border border-awsWarning/50 bg-[#fff8e5] p-2 text-awsTextSecondary">
+              Budget-grade pricing is not available yet. Numeric placeholders are held from headline display until pricing drivers and quantity bindings are safe.
+            </div>
+          ) : (
+            <div className="mt-2 text-awsTextSecondary">
+              Range ${String(pricing.low_monthly_usd ?? "—")}–${String(pricing.high_monthly_usd ?? "—")} · Expected ${String(pricing.expected_monthly_usd ?? "—")}
+            </div>
+          )}
           <div className="mt-1 text-xs text-awsTextMuted">Headline-safe: {headlineSafe ? "yes" : "no"}</div>
           <div className="mt-1 text-xs text-awsTextMuted">
-            {headlineSafe ? "Directional unless AWS pricing evidence is bound." : "Directional placeholder only — not headline-safe."}
+            {headlineBlocked ? "Top-line range is hidden from this panel until pricing is safe to present." : "Directional unless AWS pricing evidence is bound."}
           </div>
         </div>
 

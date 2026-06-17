@@ -12,6 +12,7 @@ NEGATED_PATTERN_CONSTRAINTS: dict[str, dict[str, tuple[str, ...]]] = {
             "document assistant",
             "document intelligence",
             "document qa",
+            "document search",
             "knowledge base",
             "contract review",
             "ocr",

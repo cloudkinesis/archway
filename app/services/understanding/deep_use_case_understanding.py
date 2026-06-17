@@ -106,6 +106,21 @@ def deterministic_understanding(raw_use_case: str, profile: UseCaseProfile | Non
                 derivation=value.raw if value.derived else None,
                 pricing_relevance="high",
             ))
+    existing_metric_names = {metric.name for metric in extracted}
+    for metric in profile.metrics:
+        if metric.label in existing_metric_names:
+            continue
+        extracted.append(UnderstandingMetric(
+            name=metric.label,
+            value=metric.value,
+            unit=metric.unit,
+            source_text=metric.raw,
+            confidence="high",
+            derived=False,
+            derivation=None,
+            pricing_relevance="high" if metric.kind in {"asset_count", "business_target"} else "medium",
+        ))
+        existing_metric_names.add(metric.label)
     latency_constraints = []
     if profile.latency_target:
         latency_constraints.append(LatencyConstraint(

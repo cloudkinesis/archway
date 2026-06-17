@@ -15,7 +15,7 @@ from app.services.dossier_manifest import stable_json_hash
 from app.services.llm.base import LLMMessage, LLMTaskType
 from app.services.metric_extractor import extract_metrics
 from app.services.pricing_filter_mapper import _SERVICE_CODE_ALIASES, pricing_filter_plan_for_service
-from app.services.use_case_profile import ExtractedMetric, UseCaseProfile
+from app.services.use_case_profile import ExtractedMetric, UseCaseProfile, reconcile_profile_constraints
 
 
 SCHEMA_VERSION = "open_world_understanding_v1"
@@ -552,11 +552,12 @@ def adapt_to_profile(
             "canonical_fact_snapshot_hash": trace.canonical_fact_snapshot_hash,
             "service_validations": [item.model_dump(mode="json") for item in trace.service_validations],
             "validation_issue_count": len(trace.validation_issues),
+            "live_call": trace.live_call.model_dump(mode="json") if trace.live_call else None,
             "reproducibility_posture": trace.reproducibility_posture,
             "understanding": understanding.model_dump(mode="json"),
         },
     )
-    return profile
+    return reconcile_profile_constraints(profile)
 
 
 def generated_open_questions(understanding: CanonicalWorkloadUnderstanding) -> list[OpenQuestion]:

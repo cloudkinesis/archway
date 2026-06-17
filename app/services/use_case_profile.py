@@ -42,6 +42,38 @@ class UseCaseProfile:
         return self.workload_families[0] if self.workload_families else "general_cloud_application"
 
 
+_EXCLUDED_FAMILY_CAPABILITY_BLOCKS = {
+    "rag_assistant": {"document_retrieval", "rag_retrieval", "document_ingestion", "document_rag_assistant"},
+    "document_intelligence": {"document_retrieval", "rag_retrieval", "document_ingestion", "document_rag_assistant"},
+    "field_service_automation": {"field_service_dispatch", "dispatch_optimization", "inventory_optimization"},
+    "supply_chain_optimization": {"inventory_optimization", "route_optimization"},
+}
+
+
+def reconcile_profile_constraints(profile: UseCaseProfile) -> UseCaseProfile:
+    """Apply generic profile invariants after deterministic or model-derived extraction."""
+    excluded = set(profile.excluded_families or []) | set(profile.excluded_patterns or [])
+    removed_families = [family for family in profile.workload_families if family in excluded]
+    profile.workload_families = [family for family in profile.workload_families if family not in excluded] or ["web_api_application"]
+
+    blocked_capabilities: set[str] = set()
+    for family in excluded:
+        blocked_capabilities.update(_EXCLUDED_FAMILY_CAPABILITY_BLOCKS.get(family, set()))
+    if blocked_capabilities:
+        profile.capabilities = [item for item in profile.capabilities if item not in blocked_capabilities]
+        profile.capability_model = [item for item in profile.capability_model if item not in blocked_capabilities]
+
+    if removed_families or blocked_capabilities:
+        plan = dict(profile.discovery_plan or {})
+        plan["profile_reconciliation"] = {
+            "rule": "exclusion_wins",
+            "removed_workload_families": removed_families,
+            "removed_capabilities": sorted(blocked_capabilities),
+        }
+        profile.discovery_plan = plan
+    return profile
+
+
 def profile_use_case(text: str) -> UseCaseProfile:
     lower = text.lower()
     structured_metrics = extract_metrics(text)
@@ -76,7 +108,7 @@ def profile_use_case(text: str) -> UseCaseProfile:
         business_targets=_detect_business_targets(text),
         confidence="high" if workload_families and domain and capability_result.confidence == "high" else "medium",
     )
-    return refine_profile_with_context(profile, text)
+    return reconcile_profile_constraints(refine_profile_with_context(profile, text))
 
 
 def profile_to_metadata(profile: UseCaseProfile) -> dict:
@@ -131,7 +163,7 @@ def profile_from_metadata(metadata: dict | None, raw_use_case: str) -> UseCasePr
         profile_source=values.get("profile_source") or "deterministic",
         open_world_understanding=dict(values.get("open_world_understanding") or {}),
     )
-    return refine_profile_with_context(profile, raw_use_case)
+    return reconcile_profile_constraints(refine_profile_with_context(profile, raw_use_case))
 
 
 def refine_profile_with_context(profile: UseCaseProfile, context_text: str) -> UseCaseProfile:
@@ -153,7 +185,7 @@ def refine_profile_with_context(profile: UseCaseProfile, context_text: str) -> U
         profile.latency_target = latency_target
     if not profile.latency_class and capability_result.latency_class:
         profile.latency_class = capability_result.latency_class.value
-    return _apply_explicit_negative_constraints(profile, lower)
+    return reconcile_profile_constraints(_apply_explicit_negative_constraints(profile, lower))
 
 
 def _merge_structured_metrics(existing: dict | None, incoming: dict) -> dict:
@@ -185,7 +217,7 @@ def _detect_domain(lower: str) -> str | None:
         ("healthcare", ("patient", "clinical", "hospital", "health", "medical", "phi", "protected health information")),
         ("legal", ("legal", "contract", "contracts", "clause", "obligation", "obligations", "agreement", "agreements")),
         ("financial_services", ("bank", "fraud", "payment", "trading", "loan", "financial", "pci")),
-        ("retail", ("retail", "order", "delivery", "inventory", "refund", "store", "commerce")),
+        ("retail", ("retail", "customer order", "online order", "order fulfillment", "delivery order", "refund", "store", "commerce")),
         ("retail_banking", ("aml", "financial crime", "sar", "bsa")),
         ("insurance", ("catastrophe", "reinsurance", "policies", "solvency")),
         ("government", ("national identity", "citizen", "biometric", "sovereign")),
@@ -199,8 +231,9 @@ def _detect_domain(lower: str) -> str | None:
         ("education", ("student", "learning", "campus", "course")),
         ("logistics", ("fleet", "route", "warehouse", "shipment", "last mile")),
     ]
+    normalized = lower.replace("-", " ")
     for domain, markers in domain_markers:
-        if any(_contains_marker(lower, marker) for marker in markers):
+        if any(_contains_marker(lower, marker) and not _is_marker_negated(normalized, marker) for marker in markers):
             return domain
     return None
 
@@ -580,6 +613,12 @@ def _contains_marker(lower: str, marker: str) -> bool:
     if len(marker) <= 4 and marker.replace(" ", "").isalnum():
         return re.search(rf"\b{re.escape(marker)}\b", lower) is not None
     return marker in lower
+
+
+def _is_marker_negated(normalized_lower: str, marker: str) -> bool:
+    marker_pattern = re.escape(marker.replace("-", " ")).replace(r"\ ", r"\s+")
+    prefix = r"(?:not|no|without|exclude|excluding|avoid|avoiding|not\s+a|not\s+an|not\s+the)"
+    return re.search(rf"\b{prefix}\b(?:\W+\w+){{0,6}}\W+{marker_pattern}\b", normalized_lower) is not None
 
 
 def _detect_business_targets(text: str) -> list[str]:

@@ -271,9 +271,20 @@ def _pricing_findings(pricing: dict | None) -> list[QualityFinding]:
     metadata = pricing.get("metadata") or {}
     status = metadata.get("status") or metadata.get("pricing_sanity_review_status")
     maturity = metadata.get("pricing_maturity")
+    source_truth = metadata.get("source_truth_pricing_compiler") or {}
+    generic_not_estimated = source_truth.get("mode") == "generic_not_estimated"
+    has_derived_dimensions = any(
+        isinstance(item, dict)
+        and item.get("quantity") not in (None, "", 0)
+        and str(item.get("formula") or "").lower() != "not_estimated"
+        for item in metadata.get("service_usage_dimensions") or []
+    )
     findings: list[QualityFinding] = []
     if status in {"invalid_extracted_scale_not_applied", "invalid_placeholder"}:
-        findings.append(finding(code="pricing.fallback_driver_ignored_explicit_metrics", severity="critical", category="pricing", title="Pricing not headline-safe", description=metadata.get("reason") or "Pricing sanity found an invalid placeholder or ignored explicit metrics.", evidence=[status], auto_repairable=True, repair_strategy="Invalidate headline pricing and cap customer readiness.", customer_readiness_impact="cap_to_internal_only"))
+        if generic_not_estimated and has_derived_dimensions and metadata.get("pricing_can_be_displayed_as_headline") is False:
+            findings.append(finding(code="pricing.not_estimated_with_derived_dimensions", severity="warning", category="pricing", title="Pricing remains non-headline", description="Pricing is honestly withheld from headline totals while derived usage quantities are preserved for review.", evidence=[status, "source_truth_pricing_compiler.mode=generic_not_estimated"], auto_repairable=False, repair_strategy="Bind exact AWS usage/rate dimensions before showing a customer-facing total.", customer_readiness_impact="cap_to_directional"))
+        else:
+            findings.append(finding(code="pricing.fallback_driver_ignored_explicit_metrics", severity="critical", category="pricing", title="Pricing not headline-safe", description=metadata.get("reason") or "Pricing sanity found an invalid placeholder or ignored explicit metrics.", evidence=[status], auto_repairable=True, repair_strategy="Invalidate headline pricing and cap customer readiness.", customer_readiness_impact="cap_to_internal_only"))
     if status == "directional_only_missing_core_compute_drivers":
         findings.append(finding(code="pricing.directional_only_missing_core_compute_drivers", severity="critical", category="pricing", title="Core pricing drivers missing", description=metadata.get("reason") or "Core compute/SKU drivers are missing for this workload.", evidence=[status], auto_repairable=True, repair_strategy="Mark pricing as directional only and hide headline estimate.", customer_readiness_impact="cap_to_directional"))
     if metadata.get("pricing_can_be_displayed_as_headline") is False and maturity == "pricing_placeholder_only":
@@ -290,12 +301,44 @@ def _diagram_findings(diagrams: list | None) -> list[QualityFinding]:
     if not diagrams:
         return findings
     for gallery in diagrams:
+        broader_rendered = _broader_supported_view_ids(gallery)
         for missing in gallery.get("missing_requested_views") or []:
-            findings.append(finding(code="diagram.requested_view_suppressed", severity="warning", category="diagram", title="Requested view not rendered", description=str(missing.get("reason") or "Compiler did not render requested view."), evidence=[str(missing.get("view_id"))], affected_sections=[str(gallery.get("mode"))], auto_repairable=True, repair_strategy="Record explicit suppression reason and readiness impact.", customer_readiness_impact="cap_to_customer_demo"))
+            view_id = str(missing.get("view_id") or "")
+            if view_id in broader_rendered:
+                findings.append(finding(code="diagram.requested_view_represented", severity="info", category="diagram", title="Requested view represented by supported diagram", description=str(missing.get("reason") or "Compiler represented this semantic request through a broader supported view."), evidence=[view_id], affected_sections=[str(gallery.get("mode"))], auto_repairable=False, repair_strategy="Keep the mapping in the audit record; no client dead-end is required.", customer_readiness_impact="none"))
+            else:
+                findings.append(finding(code="diagram.requested_view_suppressed", severity="warning", category="diagram", title="Requested view not rendered", description=str(missing.get("reason") or "Compiler did not render requested view."), evidence=[view_id], affected_sections=[str(gallery.get("mode"))], auto_repairable=True, repair_strategy="Record explicit suppression reason and readiness impact.", customer_readiness_impact="cap_to_customer_demo"))
         for qa in gallery.get("qa_reports") or []:
             if not qa.get("passed", False):
-                findings.append(finding(code="diagram.qa_failed", severity="critical", category="diagram", title="Diagram QA failed", description=f"Diagram QA failed for {qa.get('view_id')}.", evidence=[str(qa.get("diagnostics") or [])], affected_sections=[str(gallery.get("mode"))], auto_repairable=False, customer_readiness_impact="fail"))
+                if _qa_failure_is_view_coverage_only(qa, broader_rendered):
+                    findings.append(finding(code="diagram.qa_view_coverage_only", severity="info", category="diagram", title="Diagram QA covered by broader view", description=f"Requested view {qa.get('view_id')} was represented through a broader supported diagram.", evidence=[str(qa.get("diagnostics") or [])], affected_sections=[str(gallery.get("mode"))], auto_repairable=False, customer_readiness_impact="none"))
+                else:
+                    findings.append(finding(code="diagram.qa_failed", severity="critical", category="diagram", title="Diagram QA failed", description=f"Diagram QA failed for {qa.get('view_id')}.", evidence=[str(qa.get("diagnostics") or [])], affected_sections=[str(gallery.get("mode"))], auto_repairable=False, customer_readiness_impact="fail"))
     return findings
+
+
+def _broader_supported_view_ids(gallery: dict) -> set[str]:
+    ids: set[str] = set()
+    for item in gallery.get("view_rendering_ledger") or gallery.get("rendering_ledger") or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("rendered_via_broader_supported_view") or item.get("fallback_kind") == "broader_supported_view":
+            for key in ("view_id", "semantic_view_id", "requested_view_id"):
+                if item.get(key):
+                    ids.add(str(item[key]))
+    return ids
+
+
+def _qa_failure_is_view_coverage_only(qa: dict, broader_rendered: set[str]) -> bool:
+    view_id = str(qa.get("view_id") or "")
+    diagnostics = " ".join(str(item) for item in qa.get("diagnostics") or []).lower()
+    if view_id and view_id in broader_rendered:
+        return True
+    if not diagnostics:
+        return False
+    view_gap_terms = ("missing requested", "requested view", "not rendered", "did not emit", "semantic view", "broader supported")
+    render_failure_terms = ("blank", "empty svg", "compile", "syntax", "renderer", "png", "svg failed")
+    return any(term in diagnostics for term in view_gap_terms) and not any(term in diagnostics for term in render_failure_terms)
 
 
 def _dossier_findings(consistency: dict | None) -> list[QualityFinding]:

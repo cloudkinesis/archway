@@ -177,7 +177,7 @@ def _open_world_components(profile, components: list[ArchitectureComponent]) -> 
             logical_group="Open-world inference",
             metadata={"role": "image_video_inference", "source": "open_world_requirement", "alternatives": ["Amazon Rekognition", "Amazon Bedrock multimodal model"]},
         ))
-    if _requires_documents(profile, profile_text):
+    if _requires_documents(profile, profile_text) and not _excludes_document_processing(profile):
         add(ArchitectureComponent(
             id="text_document_processing",
             name="Document and Notes Processing Path",
@@ -280,6 +280,15 @@ def _requires_documents(profile, profile_text: str) -> bool:
     )
 
 
+def _excludes_document_processing(profile) -> bool:
+    excluded = set(getattr(profile, "excluded_families", []) or []) | set(getattr(profile, "excluded_patterns", []) or [])
+    return bool({
+        "document_intelligence",
+        "ocr_document_pipeline",
+        "contract_review",
+    } & excluded)
+
+
 def _requires_intermitent_connectivity(profile, profile_text: str) -> bool:
     return "intermittent_connectivity" in set(profile.capabilities or []) or any(
         term in profile_text for term in ("intermittent", "offline", "store and forward", "store-and-forward", "sync later", "edge")
@@ -322,7 +331,9 @@ def _requirement_coverage(profile, components, flows, production: bool) -> dict[
             "covered" if covered else "unmet",
             "Architecture carries an imagery/video inference path." if covered else "Computer-vision requirement was extracted but no imagery/video inference path is explicit.",
         )
-    document_required = "document_retrieval" in capabilities or any(term in profile_text for term in ("document", "pdf", "docx", "note", "contract", "text", "ocr"))
+    document_required = not _excludes_document_processing(profile) and (
+        "document_retrieval" in capabilities or any(term in profile_text for term in ("document", "pdf", "docx", "note", "contract", "text", "ocr"))
+    )
     if document_required:
         covered = any(term in body for term in ("document", "pdf", "docx", "text", "ocr", "textract", "knowledge base", "opensearch", "bedrock"))
         add(

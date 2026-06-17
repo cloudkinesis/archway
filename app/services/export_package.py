@@ -14,7 +14,7 @@ from app.models.domain import ExportBundle
 from app.services.artifacts import ArtifactStore
 from app.services.build_status import BuildStatusService
 from app.services.convergence.golden_convergence_orchestrator import GoldenConvergenceOrchestrator, quality_summary_markdown
-from app.services.client_pack import audit_pack_files, client_pack_files, front_door_readme
+from app.services.client_pack import audit_pack_files, clean_presentation_text, client_pack_files, front_door_readme
 from app.services.deep_dossier import DeepDossierService
 from app.services.display_labels import display_label, format_usd, status_display
 from app.models.domain import ArchitectureSpec, ArchitectureValidationIssue
@@ -650,6 +650,14 @@ class ExportPackageService:
             encoding="utf-8",
         )
         included_artifacts.append(f"exports/{export_name}/raw/agent_evaluation_battery.json")
+        session_root = _session_root_for_export(export_dir)
+        for audit in _prior_live_call_audits(
+            _read_json_quiet(session_root, "raw/open_world_understanding.json"),
+            _read_json_quiet(session_root, "brief/current.json"),
+            brief,
+            report,
+        ):
+            _add_live_audit_once(live_run_context, audit)
         live_agent_calls = [audit.model_dump(mode="json") for audit in live_run_context.audits]
         (raw_dir / "live_agent_calls.json").write_text(
             json.dumps(live_agent_calls, indent=2, sort_keys=True, default=str),
@@ -871,17 +879,20 @@ class ExportPackageService:
             "",
             f"## {brief.get('title', 'Untitled')}",
             "",
-            brief.get("refined_problem_statement", ""),
+            clean_presentation_text(brief.get("refined_problem_statement", "")),
             "",
             f"- Industry: {brief.get('industry') or 'Worth confirming'}",
             f"- POC scope: {brief.get('poc_scope', '')}",
             f"- Production scope: {brief.get('production_scope', '')}",
             "",
             "## Assumptions",
-            *[f"- {item.get('text')} ({item.get('impact')}, {item.get('confidence')})" for item in brief.get("assumptions", [])],
+            *[
+                f"- {clean_presentation_text(item.get('text'))} ({item.get('impact')}, {item.get('confidence')})"
+                for item in brief.get("assumptions", [])
+            ],
             "",
             "## Open Questions",
-            *[f"- {item.get('text')}" for item in brief.get("open_questions", [])],
+            *[f"- {clean_presentation_text(item.get('text'))}" for item in brief.get("open_questions", [])],
             "",
         ])
 
@@ -958,12 +969,19 @@ class ExportPackageService:
                 f"Expected monthly estimate: {format_usd(pricing.get('expected_monthly_usd'))}",
             ]
         elif closure.get("directional_scenario_allowed"):
-            headline_lines = [
-                "Directional scenario estimate, not procurement-ready.",
-                f"Estimated monthly range: {format_usd(pricing.get('low_monthly_usd'))}–{format_usd(pricing.get('high_monthly_usd'))}",
-                f"Expected monthly scenario estimate: {format_usd(pricing.get('expected_monthly_usd'))}",
-                "This pricing is scenario-based and not procurement-ready.",
-            ]
+            headline_lines = ["Directional scenario estimate, not procurement-ready."]
+            if metadata.get("pricing_can_be_displayed_as_headline") is False:
+                headline_lines.extend([
+                    "Headline-safe pricing: No",
+                    "No polished monthly range is displayed while headline pricing is blocked.",
+                    "This pricing is scenario-based and not procurement-ready.",
+                ])
+            else:
+                headline_lines.extend([
+                    f"Estimated monthly range: {format_usd(pricing.get('low_monthly_usd'))}–{format_usd(pricing.get('high_monthly_usd'))}",
+                    f"Expected monthly scenario estimate: {format_usd(pricing.get('expected_monthly_usd'))}",
+                    "This pricing is scenario-based and not procurement-ready.",
+                ])
         else:
             headline_lines = [
                 "Headline-safe pricing: No",
@@ -1370,6 +1388,60 @@ def _read_json_quiet(root: Path, relative: str):
         except Exception:
             return None
     return None
+
+
+def _session_root_for_export(export_dir: Path) -> Path:
+    if export_dir.parent.name == "exports":
+        return export_dir.parent.parent
+    return export_dir
+
+
+def _prior_live_call_audits(*payloads) -> list[LiveCallAudit]:
+    audits: list[LiveCallAudit] = []
+    seen: set[tuple] = set()
+    for payload in payloads:
+        for candidate in _iter_live_call_payloads(payload):
+            try:
+                audit = LiveCallAudit.model_validate(candidate)
+            except Exception:
+                continue
+            key = _live_audit_key(audit)
+            if key in seen:
+                continue
+            seen.add(key)
+            audits.append(audit)
+    return audits
+
+
+def _iter_live_call_payloads(payload):
+    if isinstance(payload, dict):
+        live_call = payload.get("live_call")
+        if isinstance(live_call, dict):
+            yield live_call
+        for nested in payload.values():
+            if isinstance(nested, (dict, list)):
+                yield from _iter_live_call_payloads(nested)
+    elif isinstance(payload, list):
+        for nested in payload:
+            if isinstance(nested, (dict, list)):
+                yield from _iter_live_call_payloads(nested)
+
+
+def _add_live_audit_once(context: LiveRunContext, audit: LiveCallAudit) -> None:
+    key = _live_audit_key(audit)
+    if any(_live_audit_key(existing) == key for existing in context.audits):
+        return
+    context.add(audit)
+
+
+def _live_audit_key(audit: LiveCallAudit) -> tuple:
+    return (
+        audit.lane,
+        audit.task_type,
+        audit.prompt_hash,
+        audit.response_hash,
+        audit.status,
+    )
 
 
 def _diagram_qa_status(diagrams) -> dict:
