@@ -3,12 +3,13 @@ from types import SimpleNamespace
 import pytest
 
 from app.models.domain import AWSServiceSelection, Assumption
-from app.services.architecture import _requirement_coverage
+from app.services.architecture import ArchitecturePlanner, _requirement_coverage
 from app.services.canonical_facts import build_canonical_fact_snapshot
 from app.services.client_pack import client_pack_files
+from app.services.metric_extractor import explicit_numeric_phrases
 from app.services.pricing import PricingEngine
 from app.services.synthesis import SynthesisEngine
-from app.services.use_case_profile import profile_use_case
+from app.services.use_case_profile import profile_to_metadata, profile_use_case
 
 
 def _brief_with_answer():
@@ -20,7 +21,8 @@ def _brief_with_answer():
         Assumption(
             text=(
                 "Pilot covers 18 facilities, 4,500 material bins, 12 image angles per bale, "
-                "9 MB per image, readings every 7 minutes, and supervisor review within 20 minutes."
+                "2,000 bales per month, 9 MB per image, readings every 7 minutes, "
+                "and supervisor review within 20 minutes."
             ),
             reason="Captured during customer discovery.",
             impact="pricing",
@@ -42,6 +44,21 @@ def test_interview_quantities_flow_into_canonical_fact_snapshot():
     assert any("9 mb per image" in text.lower() for text in source_texts)
     assert any("7 minutes" in text for text in source_texts)
     assert any("20 minutes" in text for text in source_texts)
+    assert not any("for initial aws pricing estimates" in text.lower() for text in source_texts)
+
+
+def test_open_world_numeric_extraction_trims_noise_without_domain_rules():
+    metrics = explicit_numeric_phrases(
+        "Use us-east-1 for initial AWS pricing estimates. "
+        "Each case has 4 thermal images per parcel at about 6 MB each and 12 scan events per parcel."
+    )
+    raw = {item.raw for item in metrics}
+
+    assert "1 for initial aws pricing estimates" not in raw
+    assert "4 thermal images per parcel" in raw
+    assert "4 thermal images per parcel at" not in raw
+    assert "6 mb each" in raw
+    assert "12 scan events per parcel" in raw
 
 
 @pytest.mark.asyncio
@@ -63,8 +80,39 @@ async def test_unsupported_pricing_family_exports_complete_not_estimated_trace()
     assert metadata["aws_rate_bindings"]
     assert metadata["pricing_ledger"]["line_items"]
     assert all(item["evidence_class"] == "not_estimated" for item in metadata["pricing_ledger"]["line_items"])
+    assert any(item["quantity"] is not None for item in metadata["service_usage_dimensions"])
     assert metadata["pricing_ledger"]["summary"]["headline_safe"] is False
     assert estimate.metadata["pricing_can_be_displayed_as_headline"] is False
+
+
+def test_open_world_architecture_adds_generic_modality_and_offline_components():
+    profile = profile_use_case(
+        "A specialty returns network inspects parcel images, logger streams, and courier notes, "
+        "keeps identifiers private, requires pharmacist approval, and works through intermittent connectivity."
+    )
+    profile.capabilities = list(dict.fromkeys([*profile.capabilities, "computer_vision", "intermittent_connectivity"]))
+    profile.actions = list(dict.fromkeys([*profile.actions, "pharmacist_approval"]))
+    report = SimpleNamespace(
+        session_id="sess_test",
+        metadata={"use_case_profile": profile_to_metadata(profile)},
+        use_case_interpretation="Returns network with image, text, approval, evidence, and offline sync requirements.",
+        recommended_poc="Run a bounded POC.",
+        recommended_production_direction="Use governed AWS-native processing with explicit validation gates.",
+        aws_service_recommendations=[],
+        assumptions=[],
+        risks=[],
+    )
+
+    specs = ArchitecturePlanner().generate(report)
+    production = next(spec for spec in specs if spec.mode == "production")
+    component_ids = {component.id for component in production.components}
+    coverage = {item["id"]: item for item in production.metadata["requirement_coverage"]["requirements"]}
+
+    assert {"image_ingest", "vision_inference", "text_document_processing", "edge_offline_sync", "evidence_archive"} <= component_ids
+    assert coverage["computer_vision_hot_path"]["status"] == "covered"
+    assert coverage["document_processing_path"]["status"] == "covered"
+    assert coverage["intermittent_connectivity"]["status"] == "covered"
+    assert coverage["governed_action_path"]["status"] == "covered"
 
 
 def test_architecture_coverage_requires_explicit_imagery_path_not_generic_ml_only():

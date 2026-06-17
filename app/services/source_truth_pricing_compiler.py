@@ -150,7 +150,10 @@ def _compile_generic_not_estimated(
         )
         for fact in facts.facts
     ]
-    usage_dimensions = [_generic_usage_dimension(line.service, line.unit_basis, pricing.region) for line in pricing.line_items]
+    usage_dimensions = [
+        _generic_usage_dimension(line.service, line.unit_basis, pricing.region, facts=facts, bindings=driver_bindings)
+        for line in pricing.line_items
+    ]
     rate_bindings = [
         AwsRateBinding(
             service_name=dimension.service_name,
@@ -252,20 +255,151 @@ def _compile_generic_not_estimated(
     return pricing
 
 
-def _generic_usage_dimension(service_name: str, unit_basis: str | None, region_code: str | None) -> ServiceUsageDimension:
+def _generic_usage_dimension(
+    service_name: str,
+    unit_basis: str | None,
+    region_code: str | None,
+    *,
+    facts: CanonicalFactsLedger | None = None,
+    bindings: list[PricingDriverBinding] | None = None,
+) -> ServiceUsageDimension:
     plan = pricing_filter_plan_for_service(service_name, region_code=region_code or "us-east-1")
     service_code = plan.service_code if plan else "unknown"
+    generic = _generic_quantity_context(facts or CanonicalFactsLedger())
+    binding_ids = _generic_binding_ids(generic["driver_names"], bindings or [])
+    key = _normalized_service(service_name)
+    quantity = None
+    unit = unit_basis or "usage unit to confirm"
+    usage_name = "workload-specific usage not yet bound"
+    formula = "No exact quantity formula is bound; confirm workload driver, AWS usage unit, SKU/tier, and region."
+
+    if any(term in key for term in ("kinesis", "eventbridge", "sqs", "iot", "flink", "msk")) and generic["monthly_events"]:
+        quantity = Decimal(str(round(generic["monthly_events"], 4)))
+        unit = "events/month"
+        usage_name = "derived workload events"
+        formula = generic["event_formula"]
+    elif any(term in key for term in ("rekognition", "textract", "sagemaker", "bedrock", "comprehend")) and generic["monthly_inferences"]:
+        quantity = Decimal(str(round(generic["monthly_inferences"], 4)))
+        unit = "inferences/month"
+        usage_name = "derived model or extraction requests"
+        formula = generic["inference_formula"]
+    elif any(term in key for term in ("step_functions", "lambda", "api_gateway")) and generic["monthly_actions"]:
+        quantity = Decimal(str(round(generic["monthly_actions"], 4)))
+        unit = "requests/month"
+        usage_name = "derived workflow/API executions"
+        formula = generic["action_formula"]
+    elif any(term in key for term in ("s3", "cloudwatch", "cloudtrail", "opensearch", "dynamodb")):
+        if generic["storage_gb_month"]:
+            quantity = Decimal(str(round(generic["storage_gb_month"], 4)))
+            unit = "GB-month"
+            usage_name = "derived evidence/data retention"
+            formula = generic["storage_formula"]
+        elif generic["monthly_events"]:
+            quantity = Decimal(str(round(generic["monthly_events"], 4)))
+            unit = "records/month"
+            usage_name = "derived retained records"
+            formula = generic["event_formula"]
     return ServiceUsageDimension(
         service_name=service_name,
-        usage_name="workload-specific usage not yet bound",
+        usage_name=usage_name,
         aws_service_code=service_code,
-        quantity=None,
-        unit=unit_basis or "usage unit to confirm",
-        formula="No exact quantity formula is bound; confirm workload driver, AWS usage unit, SKU/tier, and region.",
-        driver_binding_ids=[],
+        quantity=quantity,
+        unit=unit,
+        formula=formula,
+        driver_binding_ids=binding_ids,
         assumption_ids=[],
         required_rate_dimensions={},
     )
+
+
+def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
+    values: dict[str, float] = {}
+    names_by_key: dict[str, str] = {}
+    for fact in facts.facts:
+        try:
+            value = float(fact.value)
+        except (TypeError, ValueError):
+            continue
+        if value <= 0:
+            continue
+        name = str(fact.name)
+        unit = str(fact.unit or "").lower()
+        source = str(fact.source_text or "").lower()
+        text = f"{name} {unit} {source}"
+        if "aws pricing estimate" in text or "for_initial_aws_pricing_estimates" in text:
+            continue
+        key = _generic_fact_key(name, unit, source)
+        values[key] = max(values.get(key, 0), value)
+        names_by_key[key] = name
+
+    monthly_base = _first_value(values, "monthly_base", "items_per_month", "records_per_month", "transactions_per_month", "requests_per_month")
+    daily_base = _first_value(values, "events_per_day", "items_per_day", "records_per_day", "transactions_per_day", "requests_per_day")
+    if not monthly_base and daily_base:
+        monthly_base = daily_base * 30
+    per_item = sum(value for key, value in values.items() if key.endswith("_per_item"))
+    monthly_direct = sum(value for key, value in values.items() if key.endswith("_per_month"))
+    monthly_events = monthly_direct
+    if monthly_base:
+        monthly_events += monthly_base
+        if per_item:
+            monthly_events += monthly_base * per_item
+
+    image_per_item = values.get("images_per_item", 0)
+    mb_per_image = values.get("mb_per_image", 0)
+    monthly_images = (monthly_base or 0) * image_per_item if image_per_item else values.get("images_per_month", 0)
+    monthly_notes = values.get("notes_per_month", 0)
+    monthly_inferences = monthly_images + monthly_notes or monthly_events
+    monthly_actions = monthly_base or monthly_events
+    retention_years = values.get("retention_years", 1)
+    storage_gb_month = 0.0
+    if monthly_images and mb_per_image:
+        storage_gb_month = monthly_images * mb_per_image / 1024 * max(1, retention_years * 12)
+
+    driver_names = [names_by_key[key] for key in values if key in names_by_key]
+    return {
+        "monthly_events": monthly_events,
+        "monthly_inferences": monthly_inferences,
+        "monthly_actions": monthly_actions,
+        "storage_gb_month": storage_gb_month,
+        "driver_names": driver_names,
+        "event_formula": "Derived from user-confirmed monthly volume and per-item event/image/reading counts; keep non-headline until service rate binding is exact.",
+        "inference_formula": "Derived from user-confirmed image/document/note quantities; keep non-headline until model/service unit and rate binding are exact.",
+        "action_formula": "Derived from user-confirmed workload volume; keep non-headline until workflow/API unit and rate binding are exact.",
+        "storage_formula": "monthly_base_volume * images_per_item * mb_per_image / 1024 * retention_months",
+    }
+
+
+def _generic_fact_key(name: str, unit: str, source: str) -> str:
+    text = f"{name} {unit} {source}".lower()
+    if any(term in text for term in ("retention", "retain", "years")) and "year" in text:
+        return "retention_years"
+    if any(term in text for term in ("mb per image", "mb_each", "mb each", "mb_per_image")):
+        return "mb_per_image"
+    if any(term in text for term in ("image", "photo", "video", "scan")) and any(term in text for term in ("per parcel", "per item", "per case", "per record", "per bale", "_per_parcel", "_per_item", "_per_bale")):
+        return "images_per_item"
+    if any(term in text for term in ("reading", "event", "scan")) and any(term in text for term in ("per parcel", "per item", "per case", "per record", "per transaction", "_per_parcel", "_per_item")):
+        return f"{name}_per_item"
+    if any(term in text for term in ("note", "document", "text")) and any(term in text for term in ("per month", "_per_month", "monthly")):
+        return "notes_per_month"
+    if any(term in text for term in ("image", "photo", "video")) and any(term in text for term in ("per month", "_per_month", "monthly")):
+        return "images_per_month"
+    if any(term in text for term in ("per day", "_per_day", "daily")):
+        return "events_per_day"
+    if any(term in text for term in ("per month", "_per_month", "monthly")):
+        return "monthly_base"
+    return name
+
+
+def _first_value(values: dict[str, float], *keys: str) -> float:
+    for key in keys:
+        if values.get(key):
+            return values[key]
+    return 0.0
+
+
+def _generic_binding_ids(driver_names: list[str], bindings: list[PricingDriverBinding]) -> list[str]:
+    names = set(driver_names)
+    return [binding.id for binding in bindings if binding.driver_name in names]
 
 
 def _fact_from_metric(metric: ExtractedMetric) -> CanonicalFact:

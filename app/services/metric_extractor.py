@@ -228,8 +228,15 @@ def explicit_numeric_phrases(text: str) -> list[MetricValue]:
         "which",
         "who",
         "from",
+        "for",
         "into",
         "onto",
+        "at",
+        "about",
+        "approximately",
+        "around",
+        "after",
+        "before",
         "plus",
         "future",
     }
@@ -247,6 +254,8 @@ def explicit_numeric_phrases(text: str) -> list[MetricValue]:
                 break
             unit_tokens.append(cleaned)
         if not unit_tokens:
+            continue
+        if any(token in {"aws", "pricing", "estimate", "estimates"} for token in unit_tokens):
             continue
         if unit_tokens[0] in {"am", "pm"}:
             continue

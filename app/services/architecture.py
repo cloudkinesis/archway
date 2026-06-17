@@ -1,4 +1,4 @@
-from app.models.domain import ArchitectureSpec, ResearchReport
+from app.models.domain import ArchitectureComponent, ArchitectureFlow, ArchitectureSpec, ResearchReport
 from app.services.pattern_catalog import (
     expected_views,
     observability_controls,
@@ -19,7 +19,9 @@ class ArchitecturePlanner:
         profile_metadata = (report.metadata or {}).get("use_case_profile")
         profile = profile_from_metadata(profile_metadata, report.use_case_interpretation)
         components = pattern_components(profile, production=production)
+        components = _open_world_components(profile, components)
         flows = pattern_flows(profile, production=production, components=components)
+        flows = _open_world_flows(profile, components, flows)
         mode = "production" if production else "poc"
         workload = _workload_title(profile)
         semantic = semantic_views(profile, production=production)
@@ -142,17 +144,115 @@ def _network_view_status(semantic: list[str], compiler: list[str]) -> dict[str, 
     }
 
 
-def _requirement_coverage(profile, components, flows, production: bool) -> dict[str, list[dict[str, str]]]:
-    """Audit how hard profile requirements map into the generated pattern.
+def _open_world_components(profile, components: list[ArchitectureComponent]) -> list[ArchitectureComponent]:
+    """Add generic modality components for model-understood use cases.
 
-    This is intentionally deterministic and advisory. It gives validators and
-    export readers a concrete place to see whether important extracted facts were
-    carried into the architecture, without letting model-proposed claims alter
-    compiler truth.
+    This deliberately keys off modality/capability signals instead of named
+    domains. Deterministic validation still decides whether the additions cover
+    the requirement, and pricing/readiness remain separately gated.
     """
-    capabilities = set(profile.capabilities or [])
-    posture = set(profile.deployment_posture or [])
-    profile_text = " ".join(
+    output = list(components)
+    seen = {component.id for component in output}
+    profile_text = _profile_requirement_text(profile)
+
+    def add(component: ArchitectureComponent) -> None:
+        if component.id not in seen:
+            output.append(component)
+            seen.add(component.id)
+
+    if _requires_imagery(profile, profile_text):
+        add(ArchitectureComponent(
+            id="image_ingest",
+            name="Image and Video Evidence Ingestion",
+            service="amazon_s3",
+            scope="regional_managed_data",
+            logical_group="Open-world evidence ingestion",
+            metadata={"role": "image_video_ingestion", "source": "open_world_requirement"},
+        ))
+        add(ArchitectureComponent(
+            id="vision_inference",
+            name="Computer Vision Inference Path",
+            service="amazon_sagemaker",
+            scope="regional_managed_ai",
+            logical_group="Open-world inference",
+            metadata={"role": "image_video_inference", "source": "open_world_requirement", "alternatives": ["Amazon Rekognition", "Amazon Bedrock multimodal model"]},
+        ))
+    if _requires_documents(profile, profile_text):
+        add(ArchitectureComponent(
+            id="text_document_processing",
+            name="Document and Notes Processing Path",
+            service="amazon_textract_bedrock",
+            scope="regional_managed_ai",
+            logical_group="Open-world evidence processing",
+            metadata={"role": "document_text_processing", "source": "open_world_requirement", "alternatives": ["Amazon Textract", "Amazon Bedrock", "Amazon Comprehend"]},
+        ))
+    if _requires_intermitent_connectivity(profile, profile_text):
+        add(ArchitectureComponent(
+            id="edge_offline_sync",
+            name="Offline Edge Capture and Sync",
+            service="aws_iot_greengrass",
+            scope="edge_or_regional_control",
+            logical_group="Open-world edge and sync",
+            metadata={"role": "offline_store_and_forward", "source": "open_world_requirement"},
+        ))
+    if profile.actions and "workflow" not in seen and "policy" not in seen:
+        add(ArchitectureComponent(
+            id="human_review_workflow",
+            name="Human Review and Disposition Workflow",
+            service="aws_step_functions",
+            scope="regional_orchestration",
+            logical_group="Governed action path",
+            metadata={"role": "human_approval_workflow", "source": "open_world_requirement"},
+        ))
+    if any(term in profile_text for term in ("evidence", "audit", "regulator", "compliance", "retention")):
+        add(ArchitectureComponent(
+            id="evidence_archive",
+            name="Immutable Evidence Archive",
+            service="amazon_s3_object_lock",
+            scope="regional_managed_data",
+            logical_group="Audit and compliance evidence",
+            metadata={"role": "immutable_evidence_archive", "source": "open_world_requirement"},
+        ))
+    return output
+
+
+def _open_world_flows(profile, components: list[ArchitectureComponent], flows: list[ArchitectureFlow]) -> list[ArchitectureFlow]:
+    output = list(flows)
+    ids = {component.id for component in components}
+    index = len(output) + 1
+
+    def add(source: str, target: str, label: str, protocol: str = "managed AWS service integration") -> None:
+        nonlocal index
+        if source in ids and target in ids:
+            output.append(ArchitectureFlow(
+                id=f"ow{index}",
+                source=source,
+                target=target,
+                label=label,
+                protocol=protocol,
+                metadata={"classification": "open_world_requirement_flow"},
+            ))
+            index += 1
+
+    source_id = "edge_offline_sync" if "edge_offline_sync" in ids else "devices" if "devices" in ids else "user" if "user" in ids else ""
+    if source_id:
+        add(source_id, "image_ingest", "Capture and persist image/video evidence with workload metadata", "HTTPS/MQTT/TLS")
+        add(source_id, "text_document_processing", "Submit notes, documents, or OCR text for extraction", "HTTPS/TLS")
+    add("image_ingest", "vision_inference", "Run image/video preprocessing and model inference")
+    add("text_document_processing", "vision_inference", "Join extracted text with visual and event features")
+    if "vision_inference" in ids:
+        target = "human_review_workflow" if "human_review_workflow" in ids else "workflow" if "workflow" in ids else ""
+        if target:
+            add("vision_inference", target, "Route recommendations to governed human review")
+    if "human_review_workflow" in ids:
+        add("human_review_workflow", "evidence_archive", "Write approved decision, evidence bundle, and audit trail")
+    elif "evidence_archive" in ids and "vision_inference" in ids:
+        add("vision_inference", "evidence_archive", "Store inference evidence and trace records")
+    return output
+
+
+def _profile_requirement_text(profile) -> str:
+    return " ".join(
         str(item)
         for item in [
             profile.domain,
@@ -165,6 +265,38 @@ def _requirement_coverage(profile, components, flows, production: bool) -> dict[
         ]
         if item
     ).lower()
+
+
+def _requires_imagery(profile, profile_text: str) -> bool:
+    return "computer_vision" in set(profile.capabilities or []) or any(
+        term in profile_text
+        for term in ("image", "imagery", "photo", "video", "camera", "vision", "multispectral", "ocr", "scan")
+    )
+
+
+def _requires_documents(profile, profile_text: str) -> bool:
+    return "document_retrieval" in set(profile.capabilities or []) or any(
+        term in profile_text for term in ("document", "pdf", "docx", "note", "contract", "text", "ocr")
+    )
+
+
+def _requires_intermitent_connectivity(profile, profile_text: str) -> bool:
+    return "intermittent_connectivity" in set(profile.capabilities or []) or any(
+        term in profile_text for term in ("intermittent", "offline", "store and forward", "store-and-forward", "sync later", "edge")
+    )
+
+
+def _requirement_coverage(profile, components, flows, production: bool) -> dict[str, list[dict[str, str]]]:
+    """Audit how hard profile requirements map into the generated pattern.
+
+    This is intentionally deterministic and advisory. It gives validators and
+    export readers a concrete place to see whether important extracted facts were
+    carried into the architecture, without letting model-proposed claims alter
+    compiler truth.
+    """
+    capabilities = set(profile.capabilities or [])
+    posture = set(profile.deployment_posture or [])
+    profile_text = _profile_requirement_text(profile)
     component_text = " ".join([*(getattr(component, "name", "") for component in components), *(getattr(component, "purpose", "") for component in components)]).lower()
     flow_text = " ".join([*(getattr(flow, "label", "") or "" for flow in flows), *(" ".join(str(value) for value in getattr(flow, "metadata", {}).values()) for flow in flows)]).lower()
     body = f"{component_text} {flow_text}"
@@ -207,7 +339,7 @@ def _requirement_coverage(profile, components, flows, production: bool) -> dict[
             "covered" if covered else "unmet",
             "Architecture carries a streaming/event ingestion path." if covered else "Real-time ingestion was extracted but no streaming/event path is explicit.",
         )
-    if "intermittent_connectivity" in capabilities or {"edge_processing", "hybrid_edge"} & posture:
+    if "intermittent_connectivity" in capabilities or {"edge_processing", "hybrid_edge"} & posture or _requires_intermitent_connectivity(profile, profile_text):
         covered = any(term in body for term in ("edge", "buffer", "offline", "store-and-forward", "iot greengrass"))
         add(
             "intermittent_connectivity",
