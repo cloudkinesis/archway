@@ -8,7 +8,7 @@ from app.services.use_case_profile import UseCaseProfile, profile_from_metadata
 
 
 def build_canonical_fact_snapshot(brief: UseCaseBrief) -> dict[str, Any]:
-    profile = profile_from_metadata(brief.use_case_profile, brief.raw_use_case)
+    profile = profile_from_metadata(brief.use_case_profile, _brief_context(brief))
     snapshot = {
         "schema": "canonical_fact_snapshot_v1",
         "domain": profile.domain,
@@ -35,6 +35,20 @@ def build_canonical_fact_snapshot(brief: UseCaseBrief) -> dict[str, Any]:
 def canonical_hash_from_report(report: dict | None) -> str | None:
     snapshot = ((report or {}).get("metadata") or {}).get("canonical_fact_snapshot")
     return snapshot.get("hash") if isinstance(snapshot, dict) else None
+
+
+def _brief_context(brief: UseCaseBrief) -> str:
+    return "\n".join(
+        item
+        for item in [
+            brief.raw_use_case,
+            brief.refined_problem_statement,
+            *[assumption.text for assumption in brief.assumptions],
+            *brief.business_goals,
+            *[question.text for question in brief.open_questions],
+        ]
+        if item
+    )
 
 
 def _explicit_user_corrections(brief: UseCaseBrief) -> list[str]:

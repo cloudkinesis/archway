@@ -174,6 +174,13 @@ def compute_readiness_tier(*, report: dict | None, pricing: dict | None, archite
         cap_reasons.append("Evidence/citation gate incomplete (no authoritative AWS documentation or pricing evidence present); capped at Demo ready.")
     if authority in _WEAK_EVIDENCE_AUTHORITY:
         cap_reasons.append(f"Evidence authority is {authority}; capped at Demo ready until authoritative sources are refreshed.")
+    unmet_requirements = _unmet_architecture_requirements(architectures or [])
+    if unmet_requirements:
+        cap_reasons.append(
+            "Architecture coverage has unmet extracted requirements: "
+            + ", ".join(unmet_requirements[:4])
+            + "."
+        )
     if cap_reasons:
         return _tier_result("demo_ready", pricing_metadata, closure, ledger_summary, cap_reasons)
     reasons: list[str] = []
@@ -193,6 +200,21 @@ def compute_readiness_tier(*, report: dict | None, pricing: dict | None, archite
         return _tier_result("workshop_ready", pricing_metadata, closure, ledger_summary, reasons)
 
     return _tier_result("procurement_ready", pricing_metadata, closure, ledger_summary, [])
+
+
+def _unmet_architecture_requirements(architectures: list) -> list[str]:
+    unmet: list[str] = []
+    for spec in architectures:
+        if not isinstance(spec, dict):
+            spec = spec.model_dump(mode="json") if hasattr(spec, "model_dump") else {}
+        coverage = ((spec.get("metadata") or {}).get("requirement_coverage") or {})
+        for item in coverage.get("requirements") or []:
+            if not isinstance(item, dict) or item.get("status") != "unmet":
+                continue
+            label = str(item.get("label") or item.get("id") or "architecture requirement")
+            if label not in unmet:
+                unmet.append(label)
+    return unmet
 
 
 def _tier_result(tier: str, pricing_metadata: dict, closure: dict, ledger_summary: dict, reasons: list[str]) -> dict:

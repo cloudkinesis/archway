@@ -129,6 +129,7 @@ def extract_metrics(text: str) -> ExtractedMetrics:
             value *= 1_000_000
         result.business_targets["transactions_per_day"] = MetricValue(value, transactions.unit, transactions.raw)
         result.business_targets["average_tps"] = MetricValue(round(value / 86400, 2), "transactions_per_second", "transactions_per_day / 86400", derived=True)
+    _add_explicit_quantity_phrases(result, text)
     if "events_per_day" in result.business_targets:
         events = result.business_targets["events_per_day"]
         lower_raw = events.raw.lower()
@@ -196,6 +197,92 @@ def extract_metrics(text: str) -> ExtractedMetrics:
         else:
             result.assumptions.append("Telemetry payload size was not provided; use a named assumption profile until confirmed.")
     return result
+
+
+def explicit_numeric_phrases(text: str) -> list[MetricValue]:
+    """Extract user-stated quantities without a domain-specific vocabulary.
+
+    The named regexes above remain the structured source for well-known pricing
+    drivers. This helper preserves the open-world facts users provide during
+    interview turns so downstream artifacts can carry them forward even when
+    Archway has no named driver for the domain yet.
+    """
+    output: list[MetricValue] = []
+    seen: set[str] = set()
+    pattern = re.compile(
+        r"\b(?P<value>\d[\d,]*(?:\.\d+)?)\b"
+        r"(?P<tail>(?:[\s/-]+[A-Za-z][A-Za-z0-9+/-]*){1,5})",
+        flags=re.I,
+    )
+    stopwords = {
+        "and",
+        "or",
+        "but",
+        "with",
+        "while",
+        "where",
+        "when",
+        "if",
+        "then",
+        "that",
+        "which",
+        "who",
+        "from",
+        "for",
+        "into",
+        "onto",
+        "at",
+        "about",
+        "approximately",
+        "around",
+        "after",
+        "before",
+        "plus",
+        "future",
+    }
+    for match in pattern.finditer(text):
+        raw_value = match.group("value")
+        tail = re.sub(r"[\s/-]+", " ", match.group("tail").strip()).strip()
+        if not tail:
+            continue
+        unit_tokens: list[str] = []
+        for token in tail.split():
+            cleaned = token.strip(".,;:()[]{}").lower()
+            if not cleaned:
+                continue
+            if cleaned in stopwords:
+                break
+            unit_tokens.append(cleaned)
+        if not unit_tokens:
+            continue
+        if any(token in {"aws", "pricing", "estimate", "estimates"} for token in unit_tokens):
+            continue
+        if unit_tokens[0] in {"am", "pm"}:
+            continue
+        unit = "_".join(unit_tokens[:5])
+        raw = f"{raw_value} {' '.join(unit_tokens[:5])}"
+        key = raw.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(MetricValue(_number(raw_value), unit, raw))
+    return output
+
+
+def _add_explicit_quantity_phrases(result: ExtractedMetrics, text: str) -> None:
+    existing_raw = {
+        str(item.raw).lower()
+        for item in [*result.asset_counts.values(), *result.business_targets.values()]
+    }
+    for index, metric in enumerate(explicit_numeric_phrases(text), start=1):
+        if metric.raw.lower() in existing_raw:
+            continue
+        slug = re.sub(r"[^a-z0-9]+", "_", metric.unit.lower()).strip("_") or "quantity"
+        key = f"explicit_quantity_{slug}_{index}"
+        while key in result.business_targets:
+            index += 1
+            key = f"explicit_quantity_{slug}_{index}"
+        result.business_targets[key] = metric
 
 
 def _put_match(target: dict[str, MetricValue], key: str, unit: str, text: str, pattern: str) -> None:
