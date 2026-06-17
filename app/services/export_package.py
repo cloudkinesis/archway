@@ -673,6 +673,13 @@ class ExportPackageService:
                 diagrams=diagrams,
                 deep_dossier=deep_dossier,
                 decision_records=decision_records,
+                candidate_traces={
+                    "architecture": architecture_candidate_trace.model_dump(mode="json"),
+                    "pricing": pricing_dimension_trace.model_dump(mode="json"),
+                    "diagram": diagram_plan_trace.model_dump(mode="json"),
+                    "narrative": narrative_trace.model_dump(mode="json"),
+                    "reviewer": agentic_reviewer_trace.model_dump(mode="json"),
+                },
             ).items():
                 (client_dir / relative).write_text(content, encoding="utf-8")
                 included_artifacts.append(f"exports/{export_name}/client_pack/{relative}")
