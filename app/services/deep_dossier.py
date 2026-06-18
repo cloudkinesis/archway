@@ -963,9 +963,33 @@ def _production_gallery(diagrams: list[dict]) -> dict:
 def _diagram_qa_failed(diagrams: list[dict]) -> bool:
     for gallery in diagrams:
         for qa in gallery.get("qa_reports", []):
-            if not qa.get("passed", False):
+            if not qa.get("passed", False) and _diagram_qa_is_render_blocking(qa):
                 return True
     return False
+
+
+def _diagram_qa_is_render_blocking(qa: dict) -> bool:
+    diagnostics = qa.get("diagnostics") or []
+    if not diagnostics:
+        return True
+    text = " ".join(str(item) for item in diagnostics).lower()
+    render_failure_terms = (
+        "blank",
+        "empty svg",
+        "compile",
+        "syntax",
+        "renderer failed",
+        "png failed",
+        "svg failed",
+        "missing artifact",
+        "file not found",
+    )
+    if any(term in text for term in render_failure_terms):
+        return True
+    return any(
+        str(item.get("severity") if isinstance(item, dict) else "").lower() in {"critical", "error", "fatal"}
+        for item in diagnostics
+    )
 
 
 def _diagram_requested_views_missing(diagrams: list[dict]) -> bool:

@@ -34,6 +34,7 @@ class HealthService:
             await self._cached_remote_check("aws_price_list_query", self._aws_price_list_query_check, force_remote),
             await self._cached_remote_check("aws_labs_pricing_mcp", self._aws_labs_pricing_mcp_check, force_remote),
             await self._cached_remote_check("bedrock_sonnet", self._bedrock_sonnet_check, force_remote),
+            self._open_world_live_mode_check(),
             DiagramCompilerAdapter().get_compiler_health(),
         ]
         checks.extend(self._tool_checks())
@@ -222,6 +223,33 @@ class HealthService:
             required=False,
             reason=reason,
             details={**details, "provider": settings.llm_provider, "configured": True},
+        )
+
+    def _open_world_live_mode_check(self) -> HealthCheckResult:
+        settings = get_settings()
+        ready = (
+            settings.enable_open_world_understanding
+            and settings.agentic_mode == "live_demo"
+            and settings.llm_provider == "bedrock"
+            and bool(settings.bedrock_model_id)
+        )
+        reason = (
+            "Live Bedrock open-world intake is enabled for use-case classification."
+            if ready
+            else "Open-world LLM intake is not active; Archway will use the deterministic/audit intake floor."
+        )
+        return HealthCheckResult(
+            id="open_world_live_mode",
+            label="Open-world LLM intake",
+            status=HealthStatus.ready if ready else HealthStatus.degraded,
+            required=False,
+            reason=reason,
+            details={
+                "enable_open_world_understanding": settings.enable_open_world_understanding,
+                "agentic_mode": settings.agentic_mode,
+                "llm_provider": settings.llm_provider,
+                "bedrock_model_id": settings.bedrock_model_id,
+            },
         )
 
     def _tool_checks(self) -> list[HealthCheckResult]:

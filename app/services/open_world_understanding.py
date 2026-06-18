@@ -234,7 +234,8 @@ def build_result_from_understanding(
     })
     understanding, fact_repair_issues = repair_missing_source_facts(source_facts, understanding)
     understanding, term_repair_issues = repair_missing_source_terms(raw_use_case, source_facts, understanding)
-    issues = fact_repair_issues + term_repair_issues + validate_fact_preservation(source_facts, understanding)
+    understanding, domain_repair_issues = repair_missing_domain_candidate(raw_use_case, understanding)
+    issues = fact_repair_issues + term_repair_issues + domain_repair_issues + validate_fact_preservation(source_facts, understanding)
     issues.extend(validate_exclusions(source_facts, understanding))
     issues.extend(validate_placeholder_content(understanding))
     service_validations = [classify_aws_service(item.label) for item in understanding.candidate_aws_services]
@@ -387,6 +388,31 @@ def repair_missing_source_terms(
             target=bucket,
         ))
     return repaired, issues
+
+
+def repair_missing_domain_candidate(
+    raw_use_case: str,
+    understanding: CanonicalWorkloadUnderstanding,
+) -> tuple[CanonicalWorkloadUnderstanding, list[UnderstandingValidationIssue]]:
+    if understanding.domain_candidates:
+        return understanding, []
+    deterministic_domain = _source_grounded_domain(raw_use_case)
+    if not deterministic_domain:
+        return understanding, []
+    repaired = understanding.model_copy(deep=True)
+    repaired.domain_candidates.append(CanonicalCandidate(
+        label=deterministic_domain,
+        source_text="source-grounded deterministic domain backstop",
+        confidence="medium",
+        reason="The live model omitted domain_candidates; deterministic source evidence supplied the domain without changing user facts.",
+        provenance="derived",
+    ))
+    return repaired, [UnderstandingValidationIssue(
+        severity="info",
+        code="open_world_understanding.domain_repaired",
+        message=f"Deterministically supplied missing domain candidate: {deterministic_domain}",
+        target="domain_candidates",
+    )]
 
 
 def validate_exclusions(
@@ -613,6 +639,7 @@ def _messages(raw_use_case: str, source_facts: list[CanonicalSourceFact]) -> lis
             "Use specific actors and source systems; avoid generic users/operators unless the input is generic.",
             "Ask missing questions that would materially affect architecture, pricing, security, performance, or compliance.",
             "Candidate AWS services are proposals only; deterministic validation will label them.",
+            "Always emit at least one domain_candidates item. Use the source text's business domain, not a generic technical category.",
         ],
     }
     return [
@@ -750,6 +777,14 @@ def _explicit_numeric_phrase_facts(text: str) -> list[tuple[float, str, str]]:
 def _normalize_exclusion(exclusion: str) -> str:
     value = re.sub(r"(?i)^not\s+(?:a\s+|an\s+)?", "", exclusion).strip()
     return _slug(value)
+
+
+def _source_grounded_domain(raw_use_case: str) -> str | None:
+    # Local import avoids a module-level cycle: use_case_profile imports this
+    # module's output shape indirectly through synthesis.
+    from app.services.use_case_profile import profile_use_case
+
+    return profile_use_case(raw_use_case).domain
 
 
 def _fact_preserved(fact: CanonicalSourceFact, proposed: list[CanonicalSourceFact]) -> bool:

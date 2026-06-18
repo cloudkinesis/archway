@@ -281,6 +281,12 @@ class ExportPackageService:
             warnings, included_artifacts,
             deep_dossier=deep_dossier,
         )
+        raw_dir = export_dir / "raw"
+        live_calls_path = raw_dir / "live_agent_calls.json"
+        if not live_calls_path.exists():
+            live_calls_path.write_text("[]", encoding="utf-8")
+            included_artifacts.append(f"exports/{export_name}/raw/live_agent_calls.json")
+            warnings.append("No live agent call records were available when the export was finalized.")
 
         progress(88, "Building ZIP package.")
         zip_path = root / "exports" / f"{export_name}.zip"
@@ -288,6 +294,8 @@ class ExportPackageService:
             for path in sorted(export_dir.rglob("*")):
                 if path.is_file():
                     archive.write(path, arcname=str(path.relative_to(export_dir)))
+        if not zip_path.is_file() or zip_path.stat().st_size == 0:
+            raise RuntimeError(f"Export ZIP was not created: {zip_path}")
 
         artifact_id = self.artifacts.to_artifact_id(session_id, zip_path)
         manifest_artifact_id = self.artifacts.to_artifact_id(session_id, manifest_path)

@@ -211,9 +211,9 @@ def _detect_domain(lower: str) -> str | None:
         ("aviation_operations", ("airport", "airline", "baggage", "bag scan", "bag scans", "flight schedule", "baggage belt", "airport terminal")),
         ("semiconductor_manufacturing", ("semiconductor", "fab", "fabs", "wafer", "metrology", "tool", "tools")),
         ("investment_banking", ("derivatives", "portfolio greeks", "capital markets", "margin rules", "monte carlo var")),
-        ("telecommunications", ("telecom", "network outage", "cell tower", "subscriber", "5g", "cdr", "trai")),
-        ("energy_utility", ("utility", "grid", "smart meter", "transformer", "feeder", "outage", "substation", "distribution")),
-        ("manufacturing", ("manufacturing", "factory", "production line", "machine", "equipment", "downtime", "quality inspection")),
+        ("telecommunications", ("telecom", "cell tower", "subscriber", "5g", "cdr", "trai", "oss/bss", "oss bss")),
+        ("energy_utility", ("utility", "grid", "smart meter", "transformer", "feeder", "substation", "distribution")),
+        ("manufacturing", ("manufacturing", "manufacturer", "factory", "plant", "plants", "production line", "machine", "equipment", "downtime", "quality inspection", "batch", "reactor", "historian", "mes", "lims", "off-spec")),
         ("healthcare", ("patient", "clinical", "hospital", "health", "medical", "phi", "protected health information")),
         ("legal", ("legal", "contract", "contracts", "clause", "obligation", "obligations", "agreement", "agreements")),
         ("financial_services", ("bank", "fraud", "payment", "trading", "loan", "financial", "pci")),
@@ -341,7 +341,7 @@ def _rank_workload_families(lower: str, capabilities: list[str]) -> list[str]:
         "account takeover",
         "claim fraud",
     )
-    industrial_terms = ("sensor", "telemetry", "smart meter", "transformer", "industrial", "equipment", "fab", "semiconductor", "camera feeds", "camera streams", "imagery refresh")
+    industrial_terms = ("sensor", "telemetry", "smart meter", "transformer", "industrial", "equipment", "fab", "semiconductor", "camera feeds", "camera streams", "imagery refresh", "manufacturer", "factory", "plant", "production line", "batch", "reactor", "historian", "mes", "lims", "spectroscopy", "off-spec")
     explicit_financial_fraud = any(term in lower for term in financial_fraud_terms)
     if explicit_financial_fraud:
         scores["financial_fraud_detection"] += 10

@@ -312,6 +312,8 @@ def _diagram_findings(diagrams: list | None) -> list[QualityFinding]:
             if not qa.get("passed", False):
                 if _qa_failure_is_view_coverage_only(qa, broader_rendered):
                     findings.append(finding(code="diagram.qa_view_coverage_only", severity="info", category="diagram", title="Diagram QA covered by broader view", description=f"Requested view {qa.get('view_id')} was represented through a broader supported diagram.", evidence=[str(qa.get("diagnostics") or [])], affected_sections=[str(gallery.get("mode"))], auto_repairable=False, customer_readiness_impact="none"))
+                elif _qa_failure_is_non_blocking(qa):
+                    findings.append(finding(code="diagram.qa_warning_only", severity="warning", category="diagram", title="Diagram QA recorded non-blocking warnings", description=f"Diagram QA for {qa.get('view_id')} reported warning/info diagnostics, but no render-blocking failure.", evidence=[str(qa.get("diagnostics") or [])], affected_sections=[str(gallery.get("mode"))], auto_repairable=False, customer_readiness_impact="cap_to_customer_demo"))
                 else:
                     findings.append(finding(code="diagram.qa_failed", severity="critical", category="diagram", title="Diagram QA failed", description=f"Diagram QA failed for {qa.get('view_id')}.", evidence=[str(qa.get("diagnostics") or [])], affected_sections=[str(gallery.get("mode"))], auto_repairable=False, customer_readiness_impact="fail"))
     return findings
@@ -339,6 +341,31 @@ def _qa_failure_is_view_coverage_only(qa: dict, broader_rendered: set[str]) -> b
     view_gap_terms = ("missing requested", "requested view", "not rendered", "did not emit", "semantic view", "broader supported")
     render_failure_terms = ("blank", "empty svg", "compile", "syntax", "renderer", "png", "svg failed")
     return any(term in diagnostics for term in view_gap_terms) and not any(term in diagnostics for term in render_failure_terms)
+
+
+def _qa_failure_is_non_blocking(qa: dict) -> bool:
+    diagnostics = qa.get("diagnostics") or []
+    if not diagnostics:
+        return False
+    text = " ".join(str(item) for item in diagnostics).lower()
+    render_failure_terms = (
+        "blank",
+        "empty svg",
+        "compile",
+        "syntax",
+        "renderer failed",
+        "png failed",
+        "svg failed",
+        "missing artifact",
+        "file not found",
+    )
+    if any(term in text for term in render_failure_terms):
+        return False
+    for item in diagnostics:
+        severity = str(item.get("severity") if isinstance(item, dict) else "").lower()
+        if severity in {"critical", "error", "fatal"}:
+            return False
+    return True
 
 
 def _dossier_findings(consistency: dict | None) -> list[QualityFinding]:
