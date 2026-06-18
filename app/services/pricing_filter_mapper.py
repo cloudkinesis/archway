@@ -15,7 +15,7 @@ _SERVICE_CODE_ALIASES: tuple[tuple[str, str, dict[str, str]], ...] = (
     ("lambda@edge", "AmazonCloudFront", {}),
     ("cloudfront functions", "AmazonCloudFront", {}),
     ("cloudfront function", "AmazonCloudFront", {}),
-    ("kinesis data streams", "AmazonKinesis", {"productFamily": "Amazon Kinesis Data Streams"}),
+    ("kinesis data streams", "AmazonKinesis", {"productFamily": "Kinesis Streams"}),
     ("managed service for apache flink", "AmazonKinesisAnalytics", {}),
     ("kinesis data analytics", "AmazonKinesisAnalytics", {}),
     ("sagemaker", "AmazonSageMaker", {}),

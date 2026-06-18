@@ -180,6 +180,17 @@ export function App() {
           onCreated={(session, nextReadiness) => {
             setActiveSession(session);
             setReadiness(nextReadiness);
+            setReport(null);
+            setResearchNarrative(null);
+            setResearchDigest(null);
+            setResearchViewModel(null);
+            setArchitectures([]);
+            setArchitectureValidationIssues([]);
+            setArchitectureRevisions([]);
+            setGalleries([]);
+            setLatestExport(null);
+            setLatestJobs({});
+            hydratedSessionRef.current = null;
             setView("synthesis");
             queryClient.invalidateQueries({ queryKey: ["sessions"] });
           }}
@@ -214,6 +225,7 @@ export function App() {
               latestExport={latestExport}
               setLatestExport={setLatestExport}
               latestJobs={latestJobs}
+              setLatestJobs={setLatestJobs}
               hydrationLoading={hydration.isFetching}
               hydrationError={hydration.error as Error | null}
             />
@@ -396,6 +408,7 @@ function Workspace(props: {
   latestExport: ExportBundle | null;
   setLatestExport: (bundle: ExportBundle | null) => void;
   latestJobs: LatestJobs;
+  setLatestJobs: (jobs: LatestJobs) => void;
   hydrationLoading: boolean;
   hydrationError: Error | null;
 }) {
@@ -534,7 +547,7 @@ function SynthesisView({ session, setSession, readiness, setReadiness, setView }
   );
 }
 
-function ResearchView({ session, report, setReport, researchNarrative, setResearchNarrative, researchDigest, setResearchDigest, researchViewModel, setResearchViewModel, setView, latestExport, setLatestExport, latestJobs }: Parameters<typeof Workspace>[0]) {
+function ResearchView({ session, setSession, report, setReport, researchNarrative, setResearchNarrative, researchDigest, setResearchDigest, researchViewModel, setResearchViewModel, setView, latestExport, setLatestExport, latestJobs, setLatestJobs }: Parameters<typeof Workspace>[0]) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [researchDepth, setResearchDepth] = useState("deep_dossier");
   useEffect(() => {
@@ -545,10 +558,12 @@ function ResearchView({ session, report, setReport, researchNarrative, setResear
   }, [jobId, latestJobs.research, report]);
   const job = useJobPolling(session.id, jobId, async () => {
     const result = await api.hydrateSession(session.id);
+    setSession(result.session);
     setReport(result.research ?? null);
     setResearchNarrative(result.research_narrative ?? null);
     setResearchDigest(result.research_digest ?? null);
     setResearchViewModel(result.research_view_model ?? null);
+    setLatestJobs(result.jobs ?? {});
   });
   const run = useMutation({ mutationFn: () => api.runResearch(session.id), onSuccess: (result) => setJobId(result.job.id) });
   return (
@@ -600,6 +615,7 @@ function ResearchView({ session, report, setReport, researchNarrative, setResear
 
 function ArchitectureView({
   session,
+  setSession,
   architectures,
   setArchitectures,
   architectureValidationIssues,
@@ -608,7 +624,8 @@ function ArchitectureView({
   setArchitectureRevisions,
   setGalleries,
   setView,
-  latestJobs
+  latestJobs,
+  setLatestJobs
 }: Parameters<typeof Workspace>[0]) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, ArchitectureDraft>>({});
@@ -619,10 +636,12 @@ function ArchitectureView({
     }
   }, [architectures.length, jobId, latestJobs.architecture]);
   const job = useJobPolling(session.id, jobId, async () => {
-    const result = await api.getArchitecture(session.id);
-    setArchitectures(result.architectures);
-    setArchitectureValidationIssues(result.validation_issues ?? []);
-    setArchitectureRevisions(result.revisions ?? []);
+    const result = await api.hydrateSession(session.id);
+    setSession(result.session);
+    setArchitectures(result.architecture?.architectures ?? []);
+    setArchitectureValidationIssues(result.architecture?.validation_issues ?? []);
+    setArchitectureRevisions(result.architecture?.revisions ?? []);
+    setLatestJobs(result.jobs ?? {});
   });
   const generate = useMutation({ mutationFn: () => api.generateArchitecture(session.id), onSuccess: (result) => setJobId(result.job.id) });
   const save = useMutation({
@@ -706,7 +725,7 @@ function ArchitectureView({
   );
 }
 
-function DiagramView({ session, galleries, setGalleries, latestExport, setLatestExport, latestJobs }: Parameters<typeof Workspace>[0]) {
+function DiagramView({ session, setSession, galleries, setGalleries, latestExport, setLatestExport, latestJobs, setLatestJobs }: Parameters<typeof Workspace>[0]) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [exportJobId, setExportJobId] = useState<string | null>(null);
   const [diagramRefreshError, setDiagramRefreshError] = useState<string | null>(null);
@@ -721,9 +740,11 @@ function DiagramView({ session, galleries, setGalleries, latestExport, setLatest
     setDiagramRefreshError(null);
     setDiagramRefreshPending(true);
     try {
-      const result = await retryArtifactRead(() => api.getDiagrams(session.id));
-      setGalleries(result.galleries);
-      if (!result.galleries.length) {
+      const result = await retryArtifactRead(() => api.hydrateSession(session.id));
+      setSession(result.session);
+      setGalleries(result.diagrams ?? []);
+      setLatestJobs(result.jobs ?? {});
+      if (!(result.diagrams ?? []).length) {
         setDiagramRefreshError("Diagram generation completed, but no diagram artifacts were returned. Export remains available and diagnostics were recorded.");
       }
     } catch (error) {
@@ -731,7 +752,7 @@ function DiagramView({ session, galleries, setGalleries, latestExport, setLatest
     } finally {
       setDiagramRefreshPending(false);
     }
-  }, [session.id, setGalleries]);
+  }, [session.id, setGalleries, setLatestJobs, setSession]);
   useEffect(() => {
     autoRefreshAttemptRef.current = null;
   }, [session.id]);
@@ -773,10 +794,14 @@ function DiagramView({ session, galleries, setGalleries, latestExport, setLatest
     }
   });
   const exportJob = useJobPolling(session.id, exportJobId, async () => {
-    const result = await api.getExport(session.id);
-    setLatestExport(result.export);
+    const result = await api.hydrateSession(session.id);
+    setSession(result.session);
+    setLatestExport(result.diagnostics?.latest_export ?? null);
+    setLatestJobs(result.jobs ?? {});
   });
   const exportRun = useMutation({ mutationFn: () => api.generateExport(session.id), onSuccess: (result) => setExportJobId(result.job.id) });
+  const diagramsReady = galleries.length > 0 || latestJobs.diagrams?.status === "succeeded";
+  const exportDisabled = exportRun.isPending || exportJob.isActive || !diagramsReady;
   return (
     <Panel title="Diagram Gallery" icon={Image}>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border border-awsBorder bg-surface p-3">
@@ -785,8 +810,8 @@ function DiagramView({ session, galleries, setGalleries, latestExport, setLatest
           <p className="mt-1 text-sm text-awsTextSecondary">Export the final package from here after diagrams are generated.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button icon={exportRun.isPending || exportJob.isActive ? Loader2 : Download} variant="secondary" disabled={exportRun.isPending || exportJob.isActive} onClick={() => exportRun.mutate()}>
-            {exportRun.isPending || exportJob.isActive ? "Exporting" : "Export package"}
+          <Button icon={exportRun.isPending || exportJob.isActive ? Loader2 : Download} variant="secondary" disabled={exportDisabled} onClick={() => exportRun.mutate()}>
+            {exportRun.isPending || exportJob.isActive ? "Exporting" : diagramsReady ? "Export package" : "Export after diagrams"}
           </Button>
           {latestExport ? (
             <a href={artifactUrl(session.id, latestExport.artifact_id)} className="inline-flex min-h-10 items-center justify-center gap-2 border border-awsBorder bg-awsPanelSoft px-3 py-2 text-sm font-semibold text-awsTextPrimary hover:border-awsOrange">
@@ -801,6 +826,7 @@ function DiagramView({ session, galleries, setGalleries, latestExport, setLatest
         </div>
       </div>
       {exportJob.job ? <JobProgress job={exportJob.job} onCancel={() => exportJob.cancel.mutate()} /> : null}
+      {!diagramsReady ? <Banner tone="info" text="Generate diagrams before exporting so the stakeholder package includes the gallery and diagram index." /> : null}
       {exportRun.error ? <Banner tone="danger" text={(exportRun.error as Error).message} /> : null}
       {exportJob.refreshError ? <Banner tone="warning" text={`Export completed, but the browser could not load the package link yet: ${exportJob.refreshError}`} /> : null}
       {galleries.length === 0 ? (
@@ -830,9 +856,9 @@ function DiagramView({ session, galleries, setGalleries, latestExport, setLatest
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <h3 className="font-semibold">{diagram.title}</h3>
-                  <p className="text-sm text-awsTextMuted">{gallery.mode} · {diagram.view_id}{diagram.rendered_as_native_view === false ? " · mapped through compiler support" : ""}</p>
+                  <p className="text-sm text-awsTextMuted">{gallery.mode} · {diagram.view_id}</p>
                   {diagram.user_description ? <p className="mt-1 text-sm text-awsTextSecondary">{diagram.user_description}</p> : null}
-                  {diagram.fallback_reason ? <p className="mt-1 text-xs text-awsTextMuted">{diagram.fallback_reason}</p> : null}
+                  {diagram.fallback_reason ? <p className="mt-1 text-xs text-awsTextMuted">{presentationText(diagram.fallback_reason)}</p> : null}
                 </div>
                 <StatusPill status={status} />
               </div>

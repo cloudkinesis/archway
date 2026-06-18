@@ -4,6 +4,7 @@ from decimal import Decimal
 import re
 from typing import Any
 
+from app.core.config import get_settings
 from app.domain.quality_findings import finding
 from app.domain.source_of_truth import (
     AssumptionLedger,
@@ -164,21 +165,7 @@ def _compile_generic_not_estimated(
         _generic_usage_dimension(line.service, line.unit_basis, pricing.region, facts=facts, bindings=driver_bindings)
         for line in pricing.line_items
     ]
-    rate_bindings = [
-        AwsRateBinding(
-            service_name=dimension.service_name,
-            aws_service_code=dimension.aws_service_code,
-            unit=dimension.unit,
-            source="unbound",
-            confidence="none",
-            binding_status="unsupported",
-            notes=[
-                "No workload-specific usage formula is bound for this pricing family yet.",
-                "Confirm exact service SKU/tier, unit, and quantity before using this line for budget or procurement.",
-            ],
-        )
-        for dimension in usage_dimensions
-    ]
+    rate_bindings = [_generic_rate_binding(dimension, region_code=pricing.region) for dimension in usage_dimensions]
     ledger = PricingLedger(
         line_items=[
             PricingLedgerLineItem(
@@ -288,6 +275,10 @@ def _generic_usage_dimension(
 ) -> ServiceUsageDimension:
     plan = pricing_filter_plan_for_service(service_name, region_code=region_code or "us-east-1")
     service_code = plan.service_code if plan else "unknown"
+    required_rate_dimensions = {
+        key: value for key, value in ((plan.filters if plan else {}) or {}).items()
+        if key != "regionCode"
+    }
     generic = _generic_quantity_context(facts or CanonicalFactsLedger())
     binding_ids = _generic_binding_ids(generic["driver_names"], bindings or [])
     key = _normalized_service(service_name)
@@ -296,7 +287,15 @@ def _generic_usage_dimension(
     usage_name = "workload-specific usage not yet bound"
     formula = "No exact quantity formula is bound; confirm workload driver, AWS usage unit, SKU/tier, and region."
 
-    if any(term in key for term in ("kinesis", "eventbridge", "sqs", "iot", "flink", "msk")) and generic["monthly_events"]:
+    if "kinesis" in key and generic["monthly_events"]:
+        quantity = Decimal(str(round(generic["monthly_events"], 4)))
+        unit = "requests"
+        usage_name = "PUT request payload units for telemetry events"
+        formula = (
+            generic["event_formula"]
+            + " Kinesis Data Streams binding uses PutRequest payload units; confirm payload chunking before procurement."
+        )
+    elif any(term in key for term in ("eventbridge", "sqs", "iot", "flink", "msk")) and generic["monthly_events"]:
         quantity = Decimal(str(round(generic["monthly_events"], 4)))
         unit = "events/month"
         usage_name = "derived telemetry or workload events"
@@ -348,7 +347,30 @@ def _generic_usage_dimension(
         formula=formula,
         driver_binding_ids=binding_ids,
         assumption_ids=[],
-        required_rate_dimensions={},
+        required_rate_dimensions=required_rate_dimensions,
+    )
+
+
+def _generic_rate_binding(dimension: ServiceUsageDimension, *, region_code: str) -> AwsRateBinding:
+    settings = get_settings()
+    live_authority_enabled = bool(
+        settings.enable_aws_pricing_mcp
+        or settings.aws_pricing_mcp_command
+        or settings.aws_pricing_mcp_url
+    )
+    if live_authority_enabled:
+        return AwsRateBindingEngine().bind(dimension, region_code=region_code)
+    return AwsRateBinding(
+        service_name=dimension.service_name,
+        aws_service_code=dimension.aws_service_code,
+        unit=dimension.unit,
+        source="unbound",
+        confidence="none",
+        binding_status="unsupported",
+        notes=[
+            "Live pricing authority is disabled for this run, so generic open-world usage dimensions were not bound to AWS SKU/rate data.",
+            "Enable the AWS Pricing MCP or live pricing authority path before using this line for budget or procurement.",
+        ],
     )
 
 

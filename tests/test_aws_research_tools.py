@@ -44,7 +44,7 @@ async def _fake_stdio_calls(self, calls):
     arguments = calls[0][1]
     assert arguments["service_code"] == "AmazonKinesis"
     assert arguments["region"] == "us-east-1"
-    assert {"Field": "productFamily", "Type": "EQUALS", "Value": "Amazon Kinesis Data Streams"} in arguments["filters"]
+    assert {"Field": "productFamily", "Type": "EQUALS", "Value": "Kinesis Streams"} in arguments["filters"]
     return [{"content": [{"type": "text", "text": "Live pricing rows for Amazon Kinesis Data Streams."}]}]
 
 

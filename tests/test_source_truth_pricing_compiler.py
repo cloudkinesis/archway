@@ -1,7 +1,9 @@
 import pytest
 
+from app.core.config import get_settings
 from app.domain.source_of_truth import AwsRateBinding
 from app.models.domain import AWSServiceSelection, PricingAnalysis
+from app.services.architecture import _architecture_summary
 from app.services.deep_dossier import _cost_range, _dossier_readiness
 from app.models.domain import DossierConsistencyCheck, DossierReadinessStatus
 from app.services.pricing import PricingEngine
@@ -310,3 +312,88 @@ def test_pass1c_dossier_readiness_respects_internal_only_status():
     )
 
     assert status == DossierReadinessStatus.internal_only
+
+
+@pytest.mark.asyncio
+async def test_generic_open_world_pricing_uses_authority_resolver_when_live_enabled(monkeypatch):
+    monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "true")
+    get_settings.cache_clear()
+    calls = []
+
+    def fake_bind(self, dimension, *, region_code):
+        calls.append((dimension.service_name, dimension.required_rate_dimensions))
+        return AwsRateBinding(
+            service_name=dimension.service_name,
+            aws_service_code=dimension.aws_service_code,
+            sku="SKU-KINESIS",
+            usage_type="USE1-PUT-Units",
+            operation="PutRecords",
+            product_family="Amazon Kinesis Data Streams",
+            rate_code="RATE-KINESIS",
+            unit="requests",
+            price_per_unit="0.01",
+            source="price_list_query_api",
+            confidence="high",
+            binding_status="bound",
+            notes=["test authoritative rate"],
+        )
+
+    monkeypatch.setattr("app.services.aws_rate_binding_engine.AwsRateBindingEngine.bind", fake_bind)
+    brief = SynthesisEngine().create_initial_brief(
+        "Monitor industrial telemetry with 1,000,000 events per month and retain audit evidence for 3 years."
+    )
+
+    estimate = await PricingEngine().estimate(
+        brief,
+        [AWSServiceSelection(service="Amazon Kinesis Data Streams", purpose="stream telemetry", rationale="managed stream")],
+    )
+
+    assert calls
+    assert calls[0][0] == "Amazon Kinesis Data Streams"
+    assert calls[0][1]["productFamily"] == "Kinesis Streams"
+    binding = estimate.metadata["aws_rate_bindings"][0]
+    assert binding["binding_status"] == "bound"
+    assert binding["source"] == "price_list_query_api"
+    assert estimate.metadata["service_usage_dimensions"][0]["required_rate_dimensions"]["productFamily"] == "Kinesis Streams"
+
+
+@pytest.mark.asyncio
+async def test_generic_open_world_pricing_stays_offline_without_live_authority(monkeypatch):
+    monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
+    monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_URL", raising=False)
+    get_settings.cache_clear()
+
+    def fail_bind(self, dimension, *, region_code):
+        raise AssertionError("generic pricing must not call live authority when pricing authority is disabled")
+
+    monkeypatch.setattr("app.services.aws_rate_binding_engine.AwsRateBindingEngine.bind", fail_bind)
+    brief = SynthesisEngine().create_initial_brief(
+        "Monitor 1,000 industrial machines with telemetry every 30 seconds and retain audit evidence for 3 years."
+    )
+
+    estimate = await PricingEngine().estimate(
+        brief,
+        [AWSServiceSelection(service="Amazon Kinesis Data Streams", purpose="stream telemetry", rationale="managed stream")],
+    )
+
+    binding = estimate.metadata["aws_rate_bindings"][0]
+    assert binding["binding_status"] == "unsupported"
+    assert binding["source"] == "unbound"
+    assert "Live pricing authority is disabled" in " ".join(binding["notes"])
+
+
+def test_architecture_summary_drops_low_signal_latency_fragments():
+    summary = _architecture_summary(
+        "Validate bounded workflow",
+        context={
+            "latency_slos": [{"target": "within 2 minutes, seconds, unknown"}],
+            "quantities": ["18,500 assets", "10 seconds", "seconds", "unknown", "10 seconds"],
+        },
+        production=False,
+    )
+
+    assert "within 2 minutes, seconds, unknown" not in summary
+    assert "within 2 minutes" in summary
+    assert "seconds, unknown" not in summary
+    assert "18,500 assets" in summary

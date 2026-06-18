@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import select
 import subprocess
 from decimal import Decimal
@@ -404,11 +405,22 @@ def _usage_text_matches(usage_terms: set[str], item: PriceDimensionEvidence) -> 
 
 
 def _tokens(value: str) -> set[str]:
+    spaced = _split_compound_pricing_tokens(value)
     return {
         token
-        for token in "".join(char.lower() if char.isalnum() else " " for char in value).split()
+        for token in "".join(char.lower() if char.isalnum() else " " for char in spaced).split()
         if len(token) > 2 and token not in _STOPWORDS
     }
+
+
+def _split_compound_pricing_tokens(value: str) -> str:
+    # AWS Price List fields often use compact/camel-case labels such as
+    # PutRequestPayloadUnits. Split them for matching without introducing
+    # service-specific vocabulary.
+    value = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(value or ""))
+    value = re.sub(r"([A-Za-z])(\d)", r"\1 \2", value)
+    value = re.sub(r"(\d)([A-Za-z])", r"\1 \2", value)
+    return value
 
 
 def _meaningful_pricing_terms(tokens: set[str]) -> set[str]:
@@ -428,6 +440,8 @@ def _canonical_unit(unit: str | None) -> str:
     if value in {"tb", "tbs", "terabyte", "terabytes", "tb-month", "tb-months", "tb month", "tb months"}:
         return "tb"
     if value in {"request", "requests", "invocation", "invocations", "events", "event", "runs", "executions"}:
+        return "requests"
+    if value.replace(" ", "").replace("-", "").lower() in {"putrequest", "putrequests", "putrequestpayloadunit", "putrequestpayloadunits"}:
         return "requests"
     if value in {"hour", "hours", "hrs", "channel-hours", "channel hours", "node-hours", "node hours"}:
         return "hours"

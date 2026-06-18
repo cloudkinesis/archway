@@ -113,6 +113,33 @@ def test_pricing_authority_resolver_does_not_choose_ambiguous_rates(monkeypatch)
     assert any("did not silently choose" in note for note in binding.notes)
 
 
+def test_pricing_authority_resolver_matches_compact_price_list_request_units(monkeypatch):
+    monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
+    monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    get_settings.cache_clear()
+    payload = _price_list(sku="SKU-PUT", price="0.000000014", unit="PutRequest", product_family="Kinesis Streams")
+    product = payload["PriceList"][0]["product"]
+    product["attributes"]["usagetype"] = "PutRequestPayloadUnits"
+    product["attributes"]["operation"] = "PutRequest"
+    monkeypatch.setattr("app.services.pricing_authority_resolver._get_products", lambda dimension, region_code: payload)
+
+    binding = PricingAuthorityResolver().resolve(
+        _dimension(
+            service_name="Amazon Kinesis Data Streams",
+            usage_name="PUT request payload units for telemetry events",
+            aws_service_code="AmazonKinesis",
+            unit="requests",
+            required_rate_dimensions={"productFamily": "Kinesis Streams"},
+        ),
+        region_code="us-east-1",
+    )
+
+    assert binding.binding_status == "bound"
+    assert binding.source == "price_list_query_api"
+    assert binding.usage_type == "PutRequestPayloadUnits"
+    assert binding.unit == "PutRequest"
+
+
 def test_bound_rate_with_assumed_quantity_is_not_procurement_ready():
     dimension = _dimension(assumption_ids=["asmp_1"])
     rate = AwsRateBinding(
