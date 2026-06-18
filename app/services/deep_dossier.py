@@ -933,7 +933,7 @@ def _dossier_readiness(readiness: dict, consistency: DossierConsistencyCheck, pr
         return DossierReadinessStatus.failed_validation
     if status == "directional_only":
         return DossierReadinessStatus.directional_only
-    if status in {"customer_demo_ready_with_caveats", "demo_ready_with_caveats"}:
+    if status in {"workshop_ready", "customer_demo_ready_with_caveats", "demo_ready_with_caveats"}:
         return DossierReadinessStatus.customer_demo_ready_with_caveats
     if readiness.get("status") == "customer_ready" and pricing_score >= 8 and architecture_score >= 8:
         return DossierReadinessStatus.customer_ready

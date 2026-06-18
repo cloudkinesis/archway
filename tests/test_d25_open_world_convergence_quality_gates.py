@@ -22,7 +22,7 @@ from app.services.architecture_critique import (
 )
 from app.services.architecture_revisions import ArchitectureRevisionService
 from app.services.client_pack import client_pack_files
-from app.services.convergence.golden_convergence_orchestrator import _diagram_findings, _pricing_findings
+from app.services.convergence.golden_convergence_orchestrator import _diagram_findings, _final_status, _pricing_findings
 from app.services.diagram_compiler_adapter import DiagramCompilerAdapter
 from app.services.export_package import ExportPackageService, _diagram_qa_status, _llm_telemetry_live_audits, _prior_live_call_audits
 from app.services.llm.base import LLMTaskType
@@ -735,8 +735,40 @@ def test_diagram_layout_only_warnings_do_not_fail_convergence_or_export_status()
 
     findings = _diagram_findings([gallery])
     assert [item.code for item in findings] == ["diagram.qa_warning_only"]
-    assert findings[0].customer_readiness_impact == "cap_to_customer_demo"
+    assert findings[0].customer_readiness_impact == "cap_to_workshop"
     assert _diagram_qa_status([gallery]) == {"status": "present", "passed": True}
+
+
+def test_non_headline_pricing_caps_to_workshop_not_directional_when_coherent():
+    pricing = {
+        "metadata": {
+            "status": "invalid_placeholder",
+            "pricing_can_be_displayed_as_headline": False,
+            "source_truth_pricing_compiler": {"mode": "generic_not_estimated"},
+            "service_usage_dimensions": [
+                {"service_name": "Amazon S3", "quantity": 1200, "formula": "events * payload"}
+            ],
+        }
+    }
+
+    findings = _pricing_findings(pricing)
+
+    assert [item.customer_readiness_impact for item in findings] == ["cap_to_workshop", "cap_to_workshop"]
+    assert _final_status(findings, {}) == "workshop_ready"
+
+
+def test_missing_core_pricing_drivers_still_caps_to_directional():
+    pricing = {
+        "metadata": {
+            "status": "directional_only_missing_core_compute_drivers",
+            "pricing_can_be_displayed_as_headline": False,
+        }
+    }
+
+    findings = _pricing_findings(pricing)
+
+    assert any(item.customer_readiness_impact == "cap_to_directional" for item in findings)
+    assert _final_status(findings, {}) == "directional_only"
 
 
 def test_export_reruns_convergence_after_current_dossier_consistency_is_written():
