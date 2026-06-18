@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -30,15 +31,24 @@ class ArchitectureCritique(BaseModel):
 class ArchitectureCritiqueService:
     async def critique(self, raw_use_case: str, understanding: DeepUseCaseUnderstanding, spec: ArchitectureSpec, pricing: PricingAnalysis | None = None, session_id: str | None = None) -> ArchitectureCritique:
         deterministic = deterministic_architecture_critique(raw_use_case, understanding, spec, pricing)
-        result = await ModelRouter().complete(
-            LLMTask(task_type=LLMTaskType.architecture_critique, session_id=session_id),
-            [
-                LLMMessage(role="system", content="Critique the AWS architecture against the use case. Return JSON only. Do not invent AWS facts or prices."),
-                LLMMessage(role="user", content=f"Use case:\n{raw_use_case}\n\nUnderstanding:\n{understanding.model_dump(mode='json')}\n\nArchitecture:\n{spec.model_dump(mode='json')}\n\nPricing:\n{pricing.model_dump(mode='json') if pricing else {}}"),
-            ],
-            response_schema=ArchitectureCritique,
-            temperature=0.1,
-        )
+        try:
+            result = await asyncio.wait_for(
+                ModelRouter().complete(
+                    LLMTask(task_type=LLMTaskType.architecture_critique, session_id=session_id),
+                    [
+                        LLMMessage(role="system", content="Critique the AWS architecture against the use case. Return JSON only. Do not invent AWS facts or prices."),
+                        LLMMessage(role="user", content=f"Use case:\n{raw_use_case}\n\nUnderstanding:\n{understanding.model_dump(mode='json')}\n\nArchitecture:\n{spec.model_dump(mode='json')}\n\nPricing:\n{pricing.model_dump(mode='json') if pricing else {}}"),
+                    ],
+                    response_schema=ArchitectureCritique,
+                    temperature=0.1,
+                    max_tokens=2048,
+                    timeout_seconds=30,
+                ),
+                timeout=35,
+            )
+        except Exception as exc:
+            deterministic.enhancement_status = f"deterministic_fallback:{exc.__class__.__name__}"
+            return deterministic
         if result.validated and isinstance(result.parsed, ArchitectureCritique):
             parsed = result.parsed
             deterministic_findings = list(deterministic.findings)
