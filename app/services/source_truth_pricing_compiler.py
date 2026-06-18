@@ -1068,7 +1068,7 @@ def _pricing_ledger(pricing: PricingAnalysis, usage_dimensions: list[ServiceUsag
         procurement_ready = False
         if rate and rate.binding_status == "bound":
             evidence_class = "sku_tier_backed"
-            procurement_ready = True
+            procurement_ready = not bool(dimension and dimension.assumption_ids)
             if dimension and dimension.quantity is not None and rate.price_per_unit is not None:
                 monthly = (Decimal(dimension.quantity) * Decimal(rate.price_per_unit)).quantize(Decimal("0.01"))
         elif rate and rate.binding_status == "ambiguous":
@@ -1239,6 +1239,8 @@ def _ledger_limitations(dimension: ServiceUsageDimension | None, rate: AwsRateBi
         return []
     if evidence_class == "not_estimated":
         return ["No concrete usage quantity and formula were available, so this line is not estimated."]
+    if rate and rate.binding_status == "bound" and dimension and dimension.assumption_ids:
+        return ["AWS SKU/tier rate is bound, but one or more usage quantities are assumed; customer-confirm quantities before procurement use."]
     if rate and rate.binding_status == "ambiguous":
         return ["Multiple plausible AWS Price List rates matched; candidate rate is shown for traceability but is not used for monthly_total because binding_status=ambiguous."]
     if rate and rate.binding_status == "not_found":

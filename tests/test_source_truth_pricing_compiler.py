@@ -143,7 +143,8 @@ async def test_pass1b_binds_cloudfront_rate_and_keeps_unquantified_media_not_est
     cloudfront = next(item for item in ledger["line_items"] if item["service_name"] == "Amazon CloudFront")
     s3 = next(item for item in ledger["line_items"] if item["service_name"] == "Amazon S3")
     assert cloudfront["evidence_class"] == "sku_tier_backed"
-    assert cloudfront["procurement_ready"] is True
+    assert cloudfront["procurement_ready"] is False
+    assert "usage quantities are assumed" in " ".join(cloudfront["limitations"])
     assert cloudfront["unit_price"] == "0.01"
     assert s3["evidence_class"] == "not_estimated"
     assert s3["monthly_total"] is None

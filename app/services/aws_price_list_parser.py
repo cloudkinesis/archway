@@ -65,6 +65,7 @@ def parse_price_list_query_response(
     service_code: str,
     source_reference: str,
     filters: dict[str, str] | None = None,
+    source: str = "price_list_query_api",
 ) -> PriceListParseResult:
     import json
 
@@ -96,7 +97,7 @@ def parse_price_list_query_response(
         payload,
         service_code=service_code,
         source_reference=source_reference,
-        source="price_list_query_api",
+        source=source,
         filters=filters,
     )
     result.failures.extend(failures)
