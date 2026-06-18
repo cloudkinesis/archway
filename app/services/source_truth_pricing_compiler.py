@@ -636,7 +636,7 @@ def _looks_like_asset_count(name: str, unit: str, source: str) -> bool:
         return False
     if any(term in text for term in _PEOPLE_UNITS):
         return False
-    if any(term in text for term in ("asset", "assets", "device", "devices", "site", "sites", "facility", "facilities")):
+    if any(term in text for term in ("asset", "assets", "artifact", "artifacts", "object", "objects", "item", "items", "device", "devices", "site", "sites", "facility", "facilities")):
         return True
     unit_tokens = set(re.findall(r"[a-z]+", unit))
     return bool(unit_tokens) and not unit_tokens.intersection(_PEOPLE_UNITS)
@@ -653,6 +653,8 @@ def _compose_asset_count(candidates: list[tuple[float, str]]) -> float:
         for value, text in candidates
     )
     if has_aggregate:
+        return largest
+    if other_sum and largest >= other_sum * 10:
         return largest
     return sum(value for value, _text in candidates)
 

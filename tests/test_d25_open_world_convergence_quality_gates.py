@@ -30,6 +30,7 @@ from app.services.pricing import derive_industrial_iot_pricing_model, derive_pri
 from app.services.pricing_driver_selector import PricingDriverFamily, select_pricing_driver_family
 from app.services.source_truth_pricing_compiler import _generic_quantity_context
 from app.services.synthesis import _data_sources, _detect_industry, _problem_statement
+from app.services.metric_extractor import explicit_numeric_phrases
 from app.services.understanding.deep_use_case_understanding import deterministic_understanding
 from app.services.use_case_profile import UseCaseProfile, profile_use_case, reconcile_profile_constraints
 
@@ -113,6 +114,45 @@ def test_generic_quantity_context_derives_annual_monthly_and_retained_usage_with
     assert context["monthly_inferences"] == 236_000
     assert context["storage_gb_month"] > 600_000
     assert "typed workload streams" in context["event_formula"]
+
+
+def test_explicit_numeric_phrases_scale_large_open_world_counts_without_domain_words():
+    metrics = explicit_numeric_phrases(
+        "Digitize 2.4 million fragile artifacts across 40 museums and retain evidence for 30 years."
+    )
+
+    by_unit = {metric.unit: metric.value for metric in metrics}
+    assert by_unit["fragile_artifacts"] == 2_400_000
+    assert by_unit["museums"] == 40
+
+
+def test_generic_quantity_context_prefers_large_item_population_over_container_count():
+    ledger = CanonicalFactsLedger(facts=[
+        CanonicalFact(
+            name="explicit_quantity_fragile_artifacts_1",
+            value=2_400_000,
+            unit="fragile_artifacts",
+            source="user_input",
+            source_text="2.4 million fragile artifacts",
+            confidence="high",
+            used_by=["pricing"],
+            validation_status="confirmed",
+        ),
+        CanonicalFact(
+            name="explicit_quantity_museums_2",
+            value=40,
+            unit="museums",
+            source="user_input",
+            source_text="40 museums",
+            confidence="high",
+            used_by=["pricing"],
+            validation_status="confirmed",
+        ),
+    ])
+
+    context = _generic_quantity_context(ledger)
+
+    assert context["asset_count"] == 2_400_000
 
 
 def test_generic_quantity_context_treats_new_per_noun_units_as_per_item_without_vocabulary_lists():

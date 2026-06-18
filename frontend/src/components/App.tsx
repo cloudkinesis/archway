@@ -364,19 +364,22 @@ function SessionSidebar({ sessions, activeSession, onSelect, onCreated }: { sess
         </div>
       </div>
       <div className="archway-scroll max-h-[calc(100vh-330px)] space-y-2 overflow-y-auto">
-        {sessions.map((session) => (
+        {sessions.map((session) => {
+          const displaySession = activeSession?.id === session.id ? activeSession : session;
+          return (
           <button
             key={session.id}
             onClick={() => onSelect(session)}
             className={`w-full border p-3 text-left transition ${activeSession?.id === session.id ? "border-awsOrange bg-awsPanelSoft" : "border-awsBorder bg-surface hover:border-awsTextMuted"}`}
           >
-            <div className="line-clamp-2 text-sm font-medium">{session.name}</div>
+            <div className="line-clamp-2 text-sm font-medium">{displaySession.name}</div>
             <div className="mt-2 flex items-center justify-between text-xs text-awsTextMuted">
-              <span>{session.active_phase}</span>
-              <span className="rounded-sm border border-awsBorder px-2 py-0.5">{session.status}</span>
+              <span>{displaySession.active_phase}</span>
+              <span className="rounded-sm border border-awsBorder px-2 py-0.5">{displaySession.status}</span>
             </div>
           </button>
-        ))}
+        );
+        })}
       </div>
     </aside>
   );
@@ -758,9 +761,7 @@ function DiagramView({ session, setSession, galleries, setGalleries, latestExpor
   }, [session.id]);
   useEffect(() => {
     const latest = latestJobs.diagrams;
-    const sessionLooksDiagramComplete =
-      session.active_phase === "diagrams" &&
-      (session.status === "complete" || session.status === "diagrams" || latest?.status === "succeeded");
+    const sessionLooksDiagramComplete = latest?.status === "succeeded";
     const refreshKey = `${session.id}:${latest?.id ?? "session"}`;
     if (
       galleries.length === 0 &&
@@ -858,7 +859,7 @@ function DiagramView({ session, setSession, galleries, setGalleries, latestExpor
                   <h3 className="font-semibold">{diagram.title}</h3>
                   <p className="text-sm text-awsTextMuted">{gallery.mode} · {diagram.view_id}</p>
                   {diagram.user_description ? <p className="mt-1 text-sm text-awsTextSecondary">{diagram.user_description}</p> : null}
-                  {diagram.fallback_reason ? <p className="mt-1 text-xs text-awsTextMuted">{presentationText(diagram.fallback_reason)}</p> : null}
+                  {diagram.fallback_reason ? <p className="mt-1 text-xs text-awsTextMuted">Represented through a supported compiler view; details are in the audit pack.</p> : null}
                 </div>
                 <StatusPill status={status} />
               </div>
@@ -940,7 +941,7 @@ function DiagramInspector({
             <p className="mt-1 text-sm text-awsTextMuted">
               {selection.gallery.mode} · view {diagram.view_id}{diagram.compiler_view_id ? ` · compiler ${diagram.compiler_view_id}` : ""}
             </p>
-            {diagram.fallback_reason ? <p className="mt-1 text-sm text-awsTextSecondary">Degraded reason: {diagram.fallback_reason}</p> : null}
+            {diagram.fallback_reason ? <p className="mt-1 text-sm text-awsTextSecondary">Represented through a supported compiler view; trace details are preserved in the audit pack.</p> : null}
             {selection.qa?.diagnostics?.length ? <p className="mt-1 text-sm text-awsTextSecondary">QA diagnostics: {JSON.stringify(selection.qa.diagnostics)}</p> : null}
           </div>
           <div className="flex flex-wrap gap-2">
