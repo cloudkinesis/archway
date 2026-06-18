@@ -14,7 +14,7 @@ from app.models.domain import ExportBundle
 from app.services.artifacts import ArtifactStore
 from app.services.build_status import BuildStatusService
 from app.services.convergence.golden_convergence_orchestrator import GoldenConvergenceOrchestrator, quality_summary_markdown
-from app.services.client_pack import audit_pack_files, client_pack_files, front_door_readme
+from app.services.client_pack import audit_pack_files, clean_presentation_text, client_pack_files, front_door_readme
 from app.services.deep_dossier import DeepDossierService
 from app.services.display_labels import display_label, format_usd, status_display
 from app.models.domain import ArchitectureSpec, ArchitectureValidationIssue
@@ -650,6 +650,16 @@ class ExportPackageService:
             encoding="utf-8",
         )
         included_artifacts.append(f"exports/{export_name}/raw/agent_evaluation_battery.json")
+        session_root = _session_root_for_export(export_dir)
+        for audit in _prior_live_call_audits(
+            _read_json_quiet(session_root, "raw/open_world_understanding.json"),
+            _read_json_quiet(session_root, "brief/current.json"),
+            brief,
+            report,
+        ):
+            _add_live_audit_once(live_run_context, audit)
+        for audit in _llm_telemetry_live_audits(llm_telemetry_store.list(session.id)):
+            _add_live_audit_once(live_run_context, audit)
         live_agent_calls = [audit.model_dump(mode="json") for audit in live_run_context.audits]
         (raw_dir / "live_agent_calls.json").write_text(
             json.dumps(live_agent_calls, indent=2, sort_keys=True, default=str),
@@ -871,17 +881,20 @@ class ExportPackageService:
             "",
             f"## {brief.get('title', 'Untitled')}",
             "",
-            brief.get("refined_problem_statement", ""),
+            clean_presentation_text(brief.get("refined_problem_statement", "")),
             "",
             f"- Industry: {brief.get('industry') or 'Worth confirming'}",
             f"- POC scope: {brief.get('poc_scope', '')}",
             f"- Production scope: {brief.get('production_scope', '')}",
             "",
             "## Assumptions",
-            *[f"- {item.get('text')} ({item.get('impact')}, {item.get('confidence')})" for item in brief.get("assumptions", [])],
+            *[
+                f"- {clean_presentation_text(item.get('text'))} ({item.get('impact')}, {item.get('confidence')})"
+                for item in brief.get("assumptions", [])
+            ],
             "",
             "## Open Questions",
-            *[f"- {item.get('text')}" for item in brief.get("open_questions", [])],
+            *[f"- {clean_presentation_text(item.get('text'))}" for item in brief.get("open_questions", [])],
             "",
         ])
 
@@ -896,45 +909,45 @@ class ExportPackageService:
         lines = [
             "# Research Report",
             "",
-            f"Executive verdict: {report.get('executive_verdict', '')}",
+            f"Executive verdict: {clean_presentation_text(report.get('executive_verdict', ''))}",
             "",
             f"Research quality: {research_quality.get('label', 'Unknown')}",
             "",
-            research_quality.get("reason", ""),
+            clean_presentation_text(research_quality.get("reason", "")),
             "",
             f"Citation coverage: {coverage.get('coverage_percent', 0)}%",
             f"Evidence authority: {str(evidence_quality.get('evidence_authority', 'unknown')).title()}",
             f"Customer readiness: {str(customer_readiness.get('status', 'unknown')).replace('_', ' ').title()}",
             "",
-            *[f"- Blocker: {item}" for item in customer_readiness.get("blockers", [])],
-            *[f"- Warning: {item}" for item in customer_readiness.get("warnings", [])],
+            *[f"- Blocker: {clean_presentation_text(item)}" for item in customer_readiness.get("blockers", [])],
+            *[f"- Warning: {clean_presentation_text(item)}" for item in customer_readiness.get("warnings", [])],
             "",
             "## Service Validation Notes",
-            *_bullets([f"{item}" for item in metadata.get("service_validation_notes", [])]),
+            *_bullets([clean_presentation_text(item) for item in metadata.get("service_validation_notes", [])]),
             "",
             "## Service Decision Records",
             *_bullets([
-                f"{item.get('decision_id')}: {item.get('selected_service')} for {item.get('capability')} ({item.get('selection_reason')})"
+                clean_presentation_text(f"{item.get('decision_id')}: {item.get('selected_service')} for {item.get('capability')} ({item.get('selection_reason')})")
                 for item in metadata.get("service_decision_records", [])
             ]),
             "",
             "## Facts",
-            *[f"- {claim.get('text')} [{', '.join(claim.get('evidence_ids', []))}]" for claim in report.get("facts", [])],
+            *[f"- {clean_presentation_text(claim.get('text'))} [{', '.join(claim.get('evidence_ids', []))}]" for claim in report.get("facts", [])],
             "",
             "## Recommendations",
-            *[f"- {claim.get('text')} [{', '.join(claim.get('evidence_ids', []))}]" for claim in report.get("recommendations", [])],
+            *[f"- {clean_presentation_text(claim.get('text'))} [{', '.join(claim.get('evidence_ids', []))}]" for claim in report.get("recommendations", [])],
             "",
             "## Uncertainty",
-            *[f"- {claim.get('text')} ({claim.get('citation_status')})" for claim in report.get("uncertainties", [])],
+            *[f"- {clean_presentation_text(claim.get('text'))} ({claim.get('citation_status')})" for claim in report.get("uncertainties", [])],
             "",
             "## Feasibility",
-            report.get("feasibility_analysis", ""),
+            clean_presentation_text(report.get("feasibility_analysis", "")),
             "",
             "## Viability",
-            report.get("viability_analysis", ""),
+            clean_presentation_text(report.get("viability_analysis", "")),
             "",
             "## Competitor Scan",
-            report.get("competitor_analysis", ""),
+            clean_presentation_text(report.get("competitor_analysis", "")),
             "",
         ]
         return "\n".join(lines)
@@ -958,12 +971,19 @@ class ExportPackageService:
                 f"Expected monthly estimate: {format_usd(pricing.get('expected_monthly_usd'))}",
             ]
         elif closure.get("directional_scenario_allowed"):
-            headline_lines = [
-                "Directional scenario estimate, not procurement-ready.",
-                f"Estimated monthly range: {format_usd(pricing.get('low_monthly_usd'))}–{format_usd(pricing.get('high_monthly_usd'))}",
-                f"Expected monthly scenario estimate: {format_usd(pricing.get('expected_monthly_usd'))}",
-                "This pricing is scenario-based and not procurement-ready.",
-            ]
+            headline_lines = ["Directional scenario estimate, not procurement-ready."]
+            if metadata.get("pricing_can_be_displayed_as_headline") is False:
+                headline_lines.extend([
+                    "Headline-safe pricing: No",
+                    "No polished monthly range is displayed while headline pricing is blocked.",
+                    "This pricing is scenario-based and not procurement-ready.",
+                ])
+            else:
+                headline_lines.extend([
+                    f"Estimated monthly range: {format_usd(pricing.get('low_monthly_usd'))}–{format_usd(pricing.get('high_monthly_usd'))}",
+                    f"Expected monthly scenario estimate: {format_usd(pricing.get('expected_monthly_usd'))}",
+                    "This pricing is scenario-based and not procurement-ready.",
+                ])
         else:
             headline_lines = [
                 "Headline-safe pricing: No",
@@ -1370,6 +1390,121 @@ def _read_json_quiet(root: Path, relative: str):
         except Exception:
             return None
     return None
+
+
+def _session_root_for_export(export_dir: Path) -> Path:
+    if export_dir.parent.name == "exports":
+        return export_dir.parent.parent
+    return export_dir
+
+
+def _prior_live_call_audits(*payloads) -> list[LiveCallAudit]:
+    audits: list[LiveCallAudit] = []
+    seen: set[tuple] = set()
+    for payload in payloads:
+        for candidate in _iter_live_call_payloads(payload):
+            try:
+                audit = LiveCallAudit.model_validate(candidate)
+            except Exception:
+                continue
+            key = _live_audit_key(audit)
+            if key in seen:
+                continue
+            seen.add(key)
+            audits.append(audit)
+    return audits
+
+
+def _llm_telemetry_live_audits(items) -> list[LiveCallAudit]:
+    audits: list[LiveCallAudit] = []
+    for item in items or []:
+        payload = item.model_dump(mode="json") if hasattr(item, "model_dump") else dict(item or {})
+        provider = str(payload.get("provider") or "")
+        if provider != "bedrock":
+            continue
+        status = "accepted" if payload.get("status") == "succeeded" else "failed"
+        token_usage = {}
+        if payload.get("input_tokens") is not None:
+            token_usage["input_tokens"] = payload.get("input_tokens")
+        if payload.get("output_tokens") is not None:
+            token_usage["output_tokens"] = payload.get("output_tokens")
+        response_hash = "sha256:" + hash_payload({
+            "call_id": payload.get("call_id"),
+            "task_type": payload.get("task_type"),
+            "status": payload.get("status"),
+            "completed_at": payload.get("completed_at"),
+            "schema_name": payload.get("schema_name"),
+        })
+        warnings = list(payload.get("warnings") or [])
+        warnings.append("Derived from raw/llm_call_telemetry.json; raw model response text is not stored in telemetry.")
+        try:
+            audits.append(LiveCallAudit(
+                provider=provider,
+                model_id=payload.get("model_id"),
+                task_type=payload.get("task_type"),
+                lane=_live_lane_for_task(payload.get("task_type")),
+                session_id=payload.get("session_id"),
+                duration_ms=payload.get("duration_ms"),
+                token_usage=token_usage or None,
+                retry_count=int(payload.get("retry_count") or 0),
+                validated=bool(payload.get("schema_validated")),
+                prompt_hash=payload.get("prompt_hash"),
+                response_hash=response_hash,
+                status=status,
+                warnings=warnings,
+                created_at=str(payload.get("started_at") or ""),
+            ))
+        except Exception:
+            continue
+    return audits
+
+
+def _live_lane_for_task(task_type: str | None) -> str:
+    task = str(task_type or "llm")
+    if "understanding" in task:
+        return "understanding"
+    if "research" in task or "dossier" in task or "summary" in task:
+        return "research"
+    if "pricing" in task:
+        return "pricing"
+    if "architecture" in task:
+        return "architecture"
+    if "diagram" in task:
+        return "diagram"
+    if "review" in task or "critique" in task:
+        return "reviewer"
+    return "llm"
+
+
+def _iter_live_call_payloads(payload):
+    if isinstance(payload, dict):
+        live_call = payload.get("live_call")
+        if isinstance(live_call, dict):
+            yield live_call
+        for nested in payload.values():
+            if isinstance(nested, (dict, list)):
+                yield from _iter_live_call_payloads(nested)
+    elif isinstance(payload, list):
+        for nested in payload:
+            if isinstance(nested, (dict, list)):
+                yield from _iter_live_call_payloads(nested)
+
+
+def _add_live_audit_once(context: LiveRunContext, audit: LiveCallAudit) -> None:
+    key = _live_audit_key(audit)
+    if any(_live_audit_key(existing) == key for existing in context.audits):
+        return
+    context.add(audit)
+
+
+def _live_audit_key(audit: LiveCallAudit) -> tuple:
+    return (
+        audit.lane,
+        audit.task_type,
+        audit.prompt_hash,
+        audit.response_hash,
+        audit.status,
+    )
 
 
 def _diagram_qa_status(diagrams) -> dict:

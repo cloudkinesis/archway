@@ -55,6 +55,7 @@ AWS_SERVICE_ALIASES: Dict[str, str] = {
     "amazon eventbridge": "eventbridge",
     "step functions": "step_functions",
     "aws step functions": "step_functions",
+    "aws_step_functions": "step_functions",
     "secrets manager": "secrets_manager",
     "aws secrets manager": "secrets_manager",
     "kms": "kms",

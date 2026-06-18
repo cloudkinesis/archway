@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import re
 from typing import Any
 
 from app.domain.quality_findings import finding
@@ -30,6 +31,14 @@ SUPPORTED_FAMILIES = {
     PricingDriverFamily.PAYMENT_FRAUD_SCORING.value,
     PricingDriverFamily.CAPITAL_MARKETS_RISK_ENGINE.value,
     PricingDriverFamily.LIVE_MEDIA_STREAMING.value,
+}
+
+_PER_ITEM_UNIT_PATTERN = re.compile(r"(?:\bper\s+|_per_)(?!year\b|month\b|week\b|day\b|hour\b|minute\b|second\b)[a-z][a-z0-9_-]*")
+_SECONDS_PER_MONTH = 30 * 24 * 60 * 60
+_PEOPLE_UNITS = {
+    "resident", "residents", "user", "users", "people", "person", "persons",
+    "customer", "customers", "patient", "patients", "viewer", "viewers",
+    "employee", "employees", "operator", "operators",
 }
 
 
@@ -139,6 +148,7 @@ def _compile_generic_not_estimated(
     family: str,
 ) -> PricingAnalysis:
     facts = _canonical_facts(profile, drivers)
+    generic_context = _generic_quantity_context(facts)
     assumptions = AssumptionLedger(assumptions=[])
     driver_bindings: list[PricingDriverBinding] = [
         PricingDriverBinding(
@@ -215,6 +225,18 @@ def _compile_generic_not_estimated(
             customer_readiness_impact="cap_to_directional",
         )
     ]
+    for item in generic_context.get("plausibility_findings") or []:
+        sanity.append(finding(
+            code=str(item.get("code") or "pricing.quantity_implausible"),
+            severity="critical" if item.get("severity") == "critical" else "warning",
+            category="pricing",
+            title="Derived Quantity Needs Review",
+            description=str(item.get("message") or "A derived generic pricing quantity failed the plausibility gate."),
+            evidence=["pricing.metadata.generic_quantity_context"],
+            auto_repairable=True,
+            repair_strategy="Drop the affected dimension to not_estimated or collect a more specific typed driver before client presentation.",
+            customer_readiness_impact="cap_to_internal_only" if item.get("severity") == "critical" else "cap_to_directional",
+        ))
     pricing.metadata = {
         **pricing.metadata,
         "source_truth_pricing_compiler": {
@@ -232,6 +254,7 @@ def _compile_generic_not_estimated(
         "aws_rate_bindings": [item.model_dump(mode="json") for item in rate_bindings],
         "pricing_ledger": ledger.model_dump(mode="json"),
         "pricing_sanity_findings": [item.model_dump(mode="json") for item in sanity],
+        "generic_quantity_context": _export_quantity_context(generic_context),
         "pricing_can_be_displayed_as_headline": False,
         "headline_display": "Pricing withheld from executive headline because exact usage and AWS rate bindings are not available for this workload family.",
     }
@@ -276,9 +299,14 @@ def _generic_usage_dimension(
     if any(term in key for term in ("kinesis", "eventbridge", "sqs", "iot", "flink", "msk")) and generic["monthly_events"]:
         quantity = Decimal(str(round(generic["monthly_events"], 4)))
         unit = "events/month"
-        usage_name = "derived workload events"
+        usage_name = "derived telemetry or workload events"
         formula = generic["event_formula"]
-    elif any(term in key for term in ("rekognition", "textract", "sagemaker", "bedrock", "comprehend")) and generic["monthly_inferences"]:
+    elif "sagemaker" in key and (generic["ml_inferences"] or generic["monthly_events"]):
+        quantity = Decimal(str(round(generic["ml_inferences"] or generic["monthly_events"], 4)))
+        unit = "inferences/month"
+        usage_name = "derived model scoring requests"
+        formula = generic["ml_inference_formula"]
+    elif any(term in key for term in ("rekognition", "textract", "bedrock", "comprehend")) and generic["monthly_inferences"]:
         quantity = Decimal(str(round(generic["monthly_inferences"], 4)))
         unit = "inferences/month"
         usage_name = "derived model or extraction requests"
@@ -288,16 +316,28 @@ def _generic_usage_dimension(
         unit = "requests/month"
         usage_name = "derived workflow/API executions"
         formula = generic["action_formula"]
-    elif any(term in key for term in ("s3", "cloudwatch", "cloudtrail", "opensearch", "dynamodb")):
+    elif "s3" in key:
         if generic["storage_gb_month"]:
             quantity = Decimal(str(round(generic["storage_gb_month"], 4)))
             unit = "GB-month"
-            usage_name = "derived evidence/data retention"
+            usage_name = "derived object/evidence retention"
             formula = generic["storage_formula"]
         elif generic["monthly_events"]:
             quantity = Decimal(str(round(generic["monthly_events"], 4)))
             unit = "records/month"
             usage_name = "derived retained records"
+            formula = generic["event_formula"]
+    elif "dynamodb" in key:
+        if generic["monthly_actions"] or generic["monthly_events"]:
+            quantity = Decimal(str(round(generic["monthly_actions"] or generic["monthly_events"], 4)))
+            unit = "state records/month"
+            usage_name = "derived workflow/state records"
+            formula = generic["action_formula"]
+    elif any(term in key for term in ("cloudwatch", "cloudtrail", "opensearch")):
+        if generic["monthly_events"]:
+            quantity = Decimal(str(round(generic["monthly_events"], 4)))
+            unit = "records/month"
+            usage_name = "derived logs/indexed records"
             formula = generic["event_formula"]
     return ServiceUsageDimension(
         service_name=service_name,
@@ -314,6 +354,7 @@ def _generic_usage_dimension(
 
 def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
     values: dict[str, float] = {}
+    direct_values: dict[str, float] = {}
     names_by_key: dict[str, str] = {}
     for fact in facts.facts:
         try:
@@ -332,23 +373,30 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
         values[key] = max(values.get(key, 0), value)
         names_by_key[key] = name
 
+    annual_base = _first_value(values, "annual_base", "items_per_year", "records_per_year", "transactions_per_year", "requests_per_year")
     monthly_base = _first_value(values, "monthly_base", "items_per_month", "records_per_month", "transactions_per_month", "requests_per_month")
     daily_base = _first_value(values, "events_per_day", "items_per_day", "records_per_day", "transactions_per_day", "requests_per_day")
+    if not monthly_base and annual_base:
+        monthly_base = annual_base / 12
     if not monthly_base and daily_base:
         monthly_base = daily_base * 30
     per_item = sum(value for key, value in values.items() if key.endswith("_per_item"))
     monthly_direct = sum(value for key, value in values.items() if key.endswith("_per_month"))
+    hourly_direct = sum(value for key, value in values.items() if key.endswith("_per_hour"))
     monthly_events = monthly_direct
     if monthly_base:
         monthly_events += monthly_base
         if per_item:
             monthly_events += monthly_base * per_item
+    if hourly_direct:
+        monthly_events += hourly_direct * 24 * 30
 
     image_per_item = values.get("images_per_item", 0)
     mb_per_image = values.get("mb_per_image", 0)
     monthly_images = (monthly_base or 0) * image_per_item if image_per_item else values.get("images_per_month", 0)
+    monthly_documents = values.get("documents_per_month", 0)
     monthly_notes = values.get("notes_per_month", 0)
-    monthly_inferences = monthly_images + monthly_notes or monthly_events
+    monthly_inferences = monthly_images + monthly_documents + monthly_notes or monthly_events
     monthly_actions = monthly_base or monthly_events
     retention_years = values.get("retention_years", 1)
     storage_gb_month = 0.0
@@ -362,10 +410,173 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
         "monthly_actions": monthly_actions,
         "storage_gb_month": storage_gb_month,
         "driver_names": driver_names,
-        "event_formula": "Derived from user-confirmed monthly volume and per-item event/image/reading counts; keep non-headline until service rate binding is exact.",
-        "inference_formula": "Derived from user-confirmed image/document/note quantities; keep non-headline until model/service unit and rate binding are exact.",
+        "event_formula": "Derived from user-confirmed annual/monthly/daily volume plus per-item and hourly event counts; keep non-headline until service rate binding is exact.",
+        "inference_formula": "Derived from user-confirmed image/document/note quantities and annual/monthly workload volume; keep non-headline until model/service unit and rate binding are exact.",
         "action_formula": "Derived from user-confirmed workload volume; keep non-headline until workflow/API unit and rate binding are exact.",
         "storage_formula": "monthly_base_volume * images_per_item * mb_per_image / 1024 * retention_months",
+    }
+
+
+def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
+    values: dict[str, float] = {}
+    direct_values: dict[str, float] = {}
+    names_by_key: dict[str, str] = {}
+    asset_count = 0.0
+    asset_count_candidates: list[tuple[float, str]] = []
+    cadence_seconds = 0.0
+    telemetry_payload_kb = 0.0
+    media_payload_mb = 0.0
+    media_per_asset = 0.0
+    media_per_base_item = 0.0
+    base_items_per_asset_month = 0.0
+    media_period_months = 1.0
+    retention_months_by_class: dict[str, float] = {}
+    text_items_monthly = 0.0
+    direct_monthly_events = 0.0
+    direct_daily_events = 0.0
+    direct_hourly_events = 0.0
+    direct_annual_events = 0.0
+    derived_monthly_events = 0.0
+
+    for fact in facts.facts:
+        try:
+            value = float(fact.value)
+        except (TypeError, ValueError):
+            continue
+        if value <= 0:
+            continue
+        name = str(fact.name)
+        unit = str(fact.unit or "").lower()
+        source = str(fact.source_text or "").lower()
+        text = f"{name} {unit} {source}"
+        if "aws pricing estimate" in text or "for_initial_aws_pricing_estimates" in text:
+            continue
+        key = _generic_fact_key(name, unit, source)
+        values[key] = max(values.get(key, 0), value)
+        names_by_key[key] = name
+        if fact.source != "derived":
+            direct_values[key] = max(direct_values.get(key, 0), value)
+
+        if _looks_like_asset_count(name, unit, source):
+            asset_count_candidates.append((value, f"{name} {unit} {source}"))
+        if _looks_like_cadence_seconds(name, unit, source):
+            cadence_seconds = min(cadence_seconds or value, value)
+        if _looks_like_payload_kb(name, unit, source):
+            telemetry_payload_kb = max(telemetry_payload_kb, value)
+        if _looks_like_media_payload_mb(name, unit, source):
+            media_payload_mb = max(media_payload_mb, value)
+        if _looks_like_base_item_rate_per_asset(name, unit, source):
+            base_items_per_asset_month = max(base_items_per_asset_month, _quantity_per_month(value, text))
+        if _looks_like_media_per_base_item(name, unit, source):
+            media_per_base_item = max(media_per_base_item, value)
+        if _looks_like_media_per_asset(name, unit, source):
+            media_per_asset = max(media_per_asset, value)
+            media_period_months = max(media_period_months, _period_months(text))
+        retention_class = _retention_class(text)
+        if retention_class:
+            retention_months_by_class[retention_class] = max(
+                retention_months_by_class.get(retention_class, 0),
+                _retention_months(value, name=name, unit=unit, source=source),
+            )
+        if _looks_like_text_items_per_month(name, unit, source):
+            text_items_monthly += value
+        if fact.source == "derived":
+            if key == "monthly_base":
+                derived_monthly_events = max(derived_monthly_events, value)
+            elif key == "events_per_day":
+                derived_monthly_events = max(derived_monthly_events, value * 30)
+            elif key == "annual_base":
+                derived_monthly_events = max(derived_monthly_events, value / 12)
+        else:
+            if key == "annual_base":
+                direct_annual_events = max(direct_annual_events, value)
+            elif key == "monthly_base":
+                direct_monthly_events += value
+            elif key == "events_per_day":
+                direct_daily_events += value
+            elif key.endswith("_per_hour"):
+                direct_hourly_events += value
+
+    asset_count = _compose_asset_count(asset_count_candidates)
+    annual_base = _first_value(direct_values, "annual_base", "items_per_year", "records_per_year", "transactions_per_year", "requests_per_year")
+    monthly_base = _first_value(direct_values, "monthly_base", "items_per_month", "records_per_month", "transactions_per_month", "requests_per_month")
+    daily_base = _first_value(direct_values, "events_per_day", "items_per_day", "records_per_day", "transactions_per_day", "requests_per_day")
+    if not monthly_base and annual_base:
+        monthly_base = annual_base / 12
+    if not monthly_base and daily_base:
+        monthly_base = daily_base * 30
+    if media_per_asset and not media_payload_mb:
+        media_payload_mb = values.get("mb_per_image", 0)
+
+    telemetry_monthly = asset_count * (_SECONDS_PER_MONTH / cadence_seconds) if asset_count and cadence_seconds else 0.0
+    direct_event_monthly = max(
+        direct_monthly_events,
+        direct_daily_events * 30,
+        direct_hourly_events * 24 * 30,
+        direct_annual_events / 12 if direct_annual_events else 0,
+        monthly_base,
+    )
+    monthly_events = max(telemetry_monthly, direct_event_monthly, derived_monthly_events)
+
+    media_base = asset_count or monthly_base
+    if media_per_base_item and base_items_per_asset_month and asset_count:
+        monthly_media_items = asset_count * base_items_per_asset_month * media_per_base_item
+    elif media_per_asset and media_base:
+        monthly_media_items = media_base * media_per_asset / max(1, media_period_months)
+    elif media_payload_mb and direct_event_monthly:
+        monthly_media_items = direct_event_monthly
+    else:
+        monthly_media_items = values.get("images_per_month", 0)
+    monthly_documents = values.get("documents_per_month", 0)
+    monthly_notes = values.get("notes_per_month", 0) + text_items_monthly
+    monthly_inferences = monthly_media_items + monthly_documents + monthly_notes
+    ml_inferences = monthly_events or monthly_inferences
+    monthly_actions = monthly_events or monthly_base or monthly_inferences
+
+    retention_default = max(retention_months_by_class.values() or [12])
+    telemetry_retention = retention_months_by_class.get("telemetry", retention_default)
+    media_retention = retention_months_by_class.get("media", retention_default)
+    evidence_retention = retention_months_by_class.get("evidence", retention_default)
+    storage_by_class: dict[str, float] = {}
+    if monthly_events and telemetry_payload_kb:
+        storage_by_class["telemetry"] = monthly_events * telemetry_payload_kb / (1024 * 1024) * max(1, telemetry_retention)
+    if monthly_media_items and media_payload_mb:
+        storage_by_class["media"] = monthly_media_items * media_payload_mb / 1024 * max(1, media_retention)
+    if monthly_documents or monthly_notes:
+        storage_by_class["evidence"] = (monthly_documents + monthly_notes) * 0.05 / 1024 * max(1, evidence_retention)
+    storage_gb_month = sum(storage_by_class.values())
+    plausibility_findings = _quantity_plausibility_findings(
+        asset_count=asset_count,
+        cadence_seconds=cadence_seconds,
+        monthly_events=monthly_events,
+        monthly_media_items=monthly_media_items,
+        storage_gb_month=storage_gb_month,
+    )
+
+    driver_names = [names_by_key[key] for key in values if key in names_by_key]
+    return {
+        "monthly_events": monthly_events,
+        "monthly_inferences": monthly_inferences,
+        "ml_inferences": ml_inferences,
+        "monthly_actions": monthly_actions,
+        "monthly_media_items": monthly_media_items,
+        "asset_count": asset_count,
+        "cadence_seconds": cadence_seconds,
+        "telemetry_payload_kb": telemetry_payload_kb,
+        "media_payload_mb": media_payload_mb,
+        "media_per_asset": media_per_asset,
+        "media_per_base_item": media_per_base_item,
+        "base_items_per_asset_month": base_items_per_asset_month,
+        "media_period_months": media_period_months,
+        "storage_gb_month_by_class": storage_by_class,
+        "storage_gb_month": storage_gb_month,
+        "plausibility_findings": plausibility_findings,
+        "driver_names": driver_names,
+        "event_formula": "Derived from typed workload streams; telemetry uses asset_count * seconds_per_month / cadence_seconds, while direct annual/monthly/daily volumes stay separate.",
+        "inference_formula": "Derived from typed media/document/note streams; per-asset media uses asset_count * per_asset_multiplier / period_in_months.",
+        "ml_inference_formula": "Derived from the selected scoring stream; telemetry scoring uses monthly telemetry events unless a narrower scoring-window driver is confirmed.",
+        "action_formula": "Derived from typed workload events or workflow action counts; keep non-headline until workflow/API unit and rate binding is exact.",
+        "storage_formula": "Sum per data class: item_count * normalized_payload_size * retention_months, converted to GB-month.",
     }
 
 
@@ -375,19 +586,203 @@ def _generic_fact_key(name: str, unit: str, source: str) -> str:
         return "retention_years"
     if any(term in text for term in ("mb per image", "mb_each", "mb each", "mb_per_image")):
         return "mb_per_image"
-    if any(term in text for term in ("image", "photo", "video", "scan")) and any(term in text for term in ("per parcel", "per item", "per case", "per record", "per bale", "_per_parcel", "_per_item", "_per_bale")):
+    has_open_ended_per_item_unit = bool(_PER_ITEM_UNIT_PATTERN.search(text))
+    if any(term in text for term in ("image", "photo", "video", "scan")) and has_open_ended_per_item_unit:
         return "images_per_item"
-    if any(term in text for term in ("reading", "event", "scan")) and any(term in text for term in ("per parcel", "per item", "per case", "per record", "per transaction", "_per_parcel", "_per_item")):
+    if any(term in text for term in ("reading", "event", "scan")) and has_open_ended_per_item_unit:
         return f"{name}_per_item"
-    if any(term in text for term in ("note", "document", "text")) and any(term in text for term in ("per month", "_per_month", "monthly")):
+    if any(term in text for term in ("document", "pdf", "contract", "record")) and any(term in text for term in ("per month", "_per_month", "monthly")):
+        return "documents_per_month"
+    if any(term in text for term in ("note", "text")) and any(term in text for term in ("per month", "_per_month", "monthly")):
         return "notes_per_month"
     if any(term in text for term in ("image", "photo", "video")) and any(term in text for term in ("per month", "_per_month", "monthly")):
         return "images_per_month"
+    if any(term in text for term in ("per hour", "_per_hour", "hourly")):
+        return f"{name}_per_hour"
+    if any(term in text for term in ("per year", "_per_year", "yearly", "annual")):
+        return "annual_base"
     if any(term in text for term in ("per day", "_per_day", "daily")):
         return "events_per_day"
     if any(term in text for term in ("per month", "_per_month", "monthly")):
         return "monthly_base"
     return name
+
+
+def _looks_like_asset_count(name: str, unit: str, source: str) -> bool:
+    text = f"{name} {unit} {source}".lower()
+    if any(term in text for term in ("per_", " per ", "second", "minute", "hour", "day", "month", "year", "kb", "mb", "gb", "tb", "percent", "retention", "retain")):
+        return False
+    if any(term in text for term in _PEOPLE_UNITS):
+        return False
+    if any(term in text for term in ("asset", "assets", "device", "devices", "site", "sites", "facility", "facilities")):
+        return True
+    unit_tokens = set(re.findall(r"[a-z]+", unit))
+    return bool(unit_tokens) and not unit_tokens.intersection(_PEOPLE_UNITS)
+
+
+def _compose_asset_count(candidates: list[tuple[float, str]]) -> float:
+    if not candidates:
+        return 0.0
+    largest = max(value for value, _text in candidates)
+    other_sum = sum(value for value, _text in candidates if value != largest)
+    aggregate_markers = ("total", "overall", "monitored", "sources", "assets", "devices")
+    has_aggregate = any(
+        value == largest and any(marker in text for marker in aggregate_markers)
+        for value, text in candidates
+    )
+    if has_aggregate:
+        return largest
+    return sum(value for value, _text in candidates)
+
+
+def _looks_like_cadence_seconds(name: str, unit: str, source: str) -> bool:
+    text = f"{name} {unit} {source}".lower()
+    return ("second" in text or re.search(r"\bevery\s+\d+(?:\.\d+)?\s*s\b", text)) and not any(term in text for term in ("retention", "retain"))
+
+
+def _looks_like_payload_kb(name: str, unit: str, source: str) -> bool:
+    text = f"{name} {unit} {source}".lower()
+    return ("kb" in text and any(term in text for term in ("event", "reading", "sensor", "telemetry", "payload", "message", "update", "record"))) or "payload_kb" in text
+
+
+def _looks_like_media_payload_mb(name: str, unit: str, source: str) -> bool:
+    text = f"{name} {unit} {source}".lower()
+    return "mb" in text and (
+        any(term in text for term in ("image", "photo", "video", "scan", "clip", "media", "thermal"))
+        or "mb_each" in text
+        or "mb each" in text
+    )
+
+
+def _looks_like_media_per_asset(name: str, unit: str, source: str) -> bool:
+    text = f"{name} {unit} {source}".lower()
+    if any(term in text for term in ("kb", "mb", "gb", "tb", "payload", "size", "each")):
+        return False
+    if _looks_like_media_per_base_item(name, unit, source):
+        return False
+    return bool(_PER_ITEM_UNIT_PATTERN.search(text)) and any(term in text for term in ("image", "photo", "video", "scan", "clip", "media", "thermal"))
+
+
+def _looks_like_media_per_base_item(name: str, unit: str, source: str) -> bool:
+    text = f"{name} {unit} {source}".lower()
+    if any(term in text for term in ("kb", "mb", "gb", "tb", "payload", "size", "each")):
+        return False
+    return bool(_PER_ITEM_UNIT_PATTERN.search(text)) and any(term in text for term in ("image", "photo", "video", "scan", "clip", "media", "thermal")) and "batch" in text
+
+
+def _looks_like_base_item_rate_per_asset(name: str, unit: str, source: str) -> bool:
+    text = f"{name} {unit} {source}".lower()
+    if any(term in text for term in ("kb", "mb", "gb", "tb", "payload", "size")):
+        return False
+    return bool(_PER_ITEM_UNIT_PATTERN.search(text)) and any(term in text for term in ("batch", "batches"))
+
+
+def _looks_like_text_items_per_month(name: str, unit: str, source: str) -> bool:
+    text = f"{name} {unit} {source}".lower()
+    return any(term in text for term in ("note", "notes", "summary", "summaries")) and any(term in text for term in ("per month", "_per_month", "monthly"))
+
+
+def _period_months(text: str) -> float:
+    if any(term in text for term in ("quarter", "quarterly", "per_qtr", "per_quarter")):
+        return 3.0
+    if any(term in text for term in ("year", "annual", "yearly")):
+        return 12.0
+    if any(term in text for term in ("week", "weekly")):
+        return 0.25
+    if any(term in text for term in ("day", "daily")):
+        return 1 / 30
+    return 1.0
+
+
+def _quantity_per_month(value: float, text: str) -> float:
+    period = _period_months(text)
+    if period < 1:
+        return value * 30
+    if period > 1:
+        return value / period
+    if text.rstrip().endswith(("_per", " per")):
+        return value * 30
+    return value
+
+
+def _retention_class(text: str) -> str | None:
+    if not any(term in text for term in ("retain", "retention", "hot for", "archive", "stored")):
+        return None
+    if any(term in text for term in ("image", "photo", "video", "scan", "clip", "media", "thermal")):
+        return "media"
+    if any(term in text for term in ("evidence", "summary", "summaries", "note", "document")):
+        return "evidence"
+    if any(term in text for term in ("raw", "sensor", "telemetry", "event", "reading")):
+        return "telemetry"
+    return "all"
+
+
+def _retention_months(value: float, *, name: str, unit: str, source: str) -> float:
+    unit_text = f"{name} {unit}".lower()
+    text = f"{unit_text} {source}".lower()
+    if "day" in unit_text:
+        return max(1, value / 30)
+    if "week" in unit_text:
+        return max(1, value / 4)
+    if "month" in unit_text:
+        return value
+    if "year" in unit_text:
+        return value * 12
+    if re.search(rf"\b{re.escape(str(int(value)) if value.is_integer() else str(value))}\s+days?\b", text):
+        return max(1, value / 30)
+    if re.search(rf"\b{re.escape(str(int(value)) if value.is_integer() else str(value))}\s+weeks?\b", text):
+        return max(1, value / 4)
+    if re.search(rf"\b{re.escape(str(int(value)) if value.is_integer() else str(value))}\s+months?\b", text):
+        return value
+    if re.search(rf"\b{re.escape(str(int(value)) if value.is_integer() else str(value))}\s+years?\b", text):
+        return value * 12
+    return value
+
+
+def _quantity_plausibility_findings(
+    *,
+    asset_count: float,
+    cadence_seconds: float,
+    monthly_events: float,
+    monthly_media_items: float,
+    storage_gb_month: float,
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    if asset_count and cadence_seconds:
+        max_events = asset_count * (_SECONDS_PER_MONTH / max(cadence_seconds, 1))
+        if monthly_events > max_events * 1.05:
+            findings.append({
+                "code": "quantity.events_exceed_asset_cadence_bound",
+                "severity": "critical",
+                "message": "Derived monthly events exceed the asset-count and cadence bound.",
+            })
+    if asset_count and storage_gb_month / max(asset_count, 1) > 100_000:
+        findings.append({
+            "code": "quantity.storage_per_asset_implausible",
+            "severity": "critical",
+            "message": "Derived storage implies more than 100 TB-month per asset.",
+        })
+    elif asset_count and storage_gb_month / max(asset_count, 1) > 10_000:
+        findings.append({
+            "code": "quantity.storage_per_asset_high",
+            "severity": "warning",
+            "message": "Derived storage implies more than 10 TB-month per asset; keep non-headline until confirmed.",
+        })
+    if monthly_media_items and monthly_events and monthly_media_items > monthly_events * 10:
+        findings.append({
+            "code": "quantity.media_volume_exceeds_event_stream",
+            "severity": "warning",
+            "message": "Media item volume is unexpectedly larger than the primary event stream.",
+        })
+    return findings
+
+
+def _export_quantity_context(context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in context.items()
+        if key not in {"driver_names"}
+    }
 
 
 def _first_value(values: dict[str, float], *keys: str) -> float:

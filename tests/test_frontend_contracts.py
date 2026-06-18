@@ -7,8 +7,10 @@ def test_research_header_actions_are_wired_or_disabled():
     assert "onExport={() => exportRun.mutate()}" in source
     assert "api.generateExport(session.id)" in source
     assert "ZIP ready" in source
-    assert "Refresh evidence requires a fresh research run" in source
-    assert "Competitor scan runs during a fresh research pass" in source
+    assert "onRefreshResearch={() => refreshResearch.mutate()}" in source
+    assert "api.runResearch(session.id)" in source
+    assert "Refresh evidence" in source
+    assert "Run competitor scan" in source
 
 
 def test_pricing_ui_separates_pricing_basis_and_readiness():

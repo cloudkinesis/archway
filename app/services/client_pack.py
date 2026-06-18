@@ -27,6 +27,8 @@ from app.services.display_labels import display_label, gate_display
 
 _DRIVER_PATTERN = re.compile(r"^(assumed_)?([A-Za-z][A-Za-z0-9_]*)\s*=\s*(.+)$")
 _MACHINE_TOKEN_PATTERN = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b")
+_INTERVIEW_NOTE_PATTERN = re.compile(r"\s*Synthesis interview note:.*?(?=\s*Synthesis interview note:|$)", re.IGNORECASE | re.DOTALL)
+_NEGATION_RUN_PATTERN = re.compile(r"\s*\b(?:this is\s+)?not\s+[^.]{1,120}?(?:,\s*not\s+[^.]{1,120}?){1,}(?:\.|$)", re.IGNORECASE)
 
 
 def front_door_readme(session_name: str) -> str:
@@ -53,6 +55,10 @@ def front_door_readme(session_name: str) -> str:
         "remain unchanged for compatibility with existing tooling.",
         "",
     ])
+
+
+def clean_presentation_text(value: object) -> str:
+    return _client_text(value)
 
 
 def client_pack_files(
@@ -91,7 +97,7 @@ def client_pack_files(
     tier = _apply_candidate_cap(tier, client_plan)
     return {
         "START_HERE.md": _start_here(session_name, client_plan),
-        "01-executive-memo.md": _executive_memo(report, deep_dossier, tier, client_plan),
+        "01-executive-memo.md": _executive_memo(report, deep_dossier, tier, client_plan, pricing),
         "02-solution-brief.md": _solution_brief(brief, deep_dossier),
         "03-architecture-summary.md": _architecture_summary(architectures, decision_records, client_plan, workload_context),
         "04-pricing-summary.md": _pricing_summary(pricing, deep_dossier, tier, client_plan, workload_context),
@@ -146,7 +152,7 @@ def _start_here(session_name: str, client_plan: ClientFacingPlan | None = None) 
     return "\n".join(lines)
 
 
-def _executive_memo(report: dict, dossier, tier: dict, client_plan: ClientFacingPlan | None = None) -> str:
+def _executive_memo(report: dict, dossier, tier: dict, client_plan: ClientFacingPlan | None = None, pricing: dict | None = None) -> str:
     top_risk = dossier.risks[0].risk if dossier.risks else "Pricing and operational validation remain open."
     direction = report.get("recommended_production_direction") or (
         "an AWS-native architecture with governed operations, evidence discipline, and explicit pricing validation"
@@ -175,7 +181,7 @@ def _executive_memo(report: dict, dossier, tier: dict, client_plan: ClientFacing
         "",
         "## Cost position",
         "",
-        _sentence(dossier.estimated_monthly_cost_range),
+        _sentence(_executive_cost_position(dossier, pricing or {})),
         "",
         _sentence(f"Treat this as a {tier['estimate_display'].lower()} at the {tier['display'].lower()} tier"),
         "",
@@ -202,9 +208,22 @@ def _executive_memo(report: dict, dossier, tier: dict, client_plan: ClientFacing
     return "\n".join(lines)
 
 
+def _executive_cost_position(dossier, pricing: dict) -> str:
+    metadata = pricing.get("metadata") or {}
+    source_truth = metadata.get("source_truth_pricing_compiler") or {}
+    source_text = str(dossier.estimated_monthly_cost_range)
+    if source_truth.get("mode") == "generic_not_estimated" or (metadata.get("pricing_can_be_displayed_as_headline") is False and "$" in source_text):
+        return (
+            "Budget-grade pricing is not available yet. Archway captured workload drivers, assumptions, "
+            "and review quantities, but this client memo intentionally withholds a monthly range until "
+            "pricing driver and AWS rate bindings are safe."
+        )
+    return source_text
+
+
 def _solution_brief(brief: dict, dossier) -> str:
     assumptions = [
-        f"{item.get('text')} ({display_label(str(item.get('impact') or 'impact'), capitalize=False)} impact, "
+        f"{_client_sentence(_interview_assumption_summary(str(item.get('text') or '')))} ({display_label(str(item.get('impact') or 'impact'), capitalize=False)} impact, "
         f"{display_label(str(item.get('confidence') or 'unknown'), capitalize=False)} confidence)"
         for item in brief.get("assumptions", [])
     ]
@@ -218,15 +237,15 @@ def _solution_brief(brief: dict, dossier) -> str:
         "",
         "## The problem as understood",
         "",
-        _sentence(str(brief.get("refined_problem_statement") or "No refined problem statement was available at export time")),
+        _client_sentence(brief.get("refined_problem_statement") or "No refined problem statement was available at export time"),
         "",
         "## Proof-of-concept scope",
         "",
-        _sentence(str(brief.get("poc_scope") or "To be confirmed during discovery")),
+        _client_sentence(brief.get("poc_scope") or "To be confirmed during discovery"),
         "",
         "## Production scope",
         "",
-        _sentence(str(brief.get("production_scope") or "To be confirmed during discovery")),
+        _client_sentence(brief.get("production_scope") or "To be confirmed during discovery"),
         "",
         "## Working assumptions",
         "",
@@ -294,7 +313,7 @@ def _architecture_summary(
         lines.extend([
             f"## {mode} architecture",
             "",
-            _sentence(str(spec.get("summary") or "Summary pending")),
+            _client_sentence(spec.get("summary") or "Summary pending"),
             "",
             *(
                 [
@@ -361,6 +380,9 @@ def _pricing_summary(
     closure = metadata.get("pricing_driver_closure") or {}
     procurement_ready = bool(closure.get("procurement_ready", False))
     invalid = metadata.get("pricing_scenario_validity") == "invalid_driver_mismatch" or metadata.get("status") == "invalid_driver_mismatch"
+    source_truth = metadata.get("source_truth_pricing_compiler") or {}
+    not_estimated_source_truth = source_truth.get("mode") == "generic_not_estimated"
+    headline_blocked = metadata.get("pricing_can_be_displayed_as_headline") is False
     drivers = [_driver_display(item) for item in pricing.get("main_cost_drivers", [])]
     missing = [
         display_label(str(item.get("display_name") or ""))
@@ -379,7 +401,7 @@ def _pricing_summary(
         "",
         "## Current estimate",
         "",
-        _sentence("Pricing scenario needs repair: driver set does not match the confirmed workload. No polished monthly range is displayed for this invalid scenario." if invalid else dossier.estimated_monthly_cost_range),
+        _sentence(_pricing_current_estimate_text(dossier, invalid=invalid, not_estimated_source_truth=not_estimated_source_truth, headline_blocked=headline_blocked)),
         "",
     ]
     quantity_rows = _workload_quantity_rows(workload_context)
@@ -396,6 +418,14 @@ def _pricing_summary(
             "## Service dimensions still to bind",
             "",
             *_bullets(unbound_rows),
+            "",
+        ])
+    derived_rows = _derived_usage_rows(metadata)
+    if derived_rows:
+        lines.extend([
+            "## Derived usage quantities to review",
+            "",
+            *_bullets(derived_rows),
             "",
         ])
     if _candidate_mode(client_plan) and client_plan.pricing_candidate:
@@ -443,6 +473,19 @@ def _pricing_summary(
         "",
     ])
     return "\n".join(lines)
+
+
+def _pricing_current_estimate_text(dossier, *, invalid: bool, not_estimated_source_truth: bool, headline_blocked: bool) -> str:
+    if invalid:
+        return "Pricing scenario needs repair: driver set does not match the confirmed workload. No polished monthly range is displayed for this invalid scenario."
+    if not_estimated_source_truth:
+        return (
+            "Budget-grade pricing is not available yet. Archway captured workload drivers and derived "
+            "non-headline usage quantities, but exact AWS SKU, rate, and tier bindings are still missing."
+        )
+    if headline_blocked:
+        return dossier.estimated_monthly_cost_range
+    return dossier.estimated_monthly_cost_range
 
 
 def _risks_and_gates(dossier, tier: dict, client_plan: ClientFacingPlan | None = None) -> str:
@@ -711,6 +754,22 @@ def _unbound_usage_rows(metadata: dict) -> list[str]:
     return rows[:12]
 
 
+def _derived_usage_rows(metadata: dict) -> list[str]:
+    rows: list[str] = []
+    for item in metadata.get("service_usage_dimensions") or []:
+        if not isinstance(item, dict):
+            continue
+        quantity = item.get("quantity")
+        formula = str(item.get("formula") or "")
+        if quantity in (None, "", 0) or formula.lower() == "not_estimated":
+            continue
+        service = _client_text(item.get("service_name") or "Service")
+        usage = _client_label(item.get("usage_name") or "usage")
+        unit = _client_text(item.get("unit") or "unit")
+        rows.append(f"**{service}** — {usage}: {_client_text(quantity)} {unit}. {_client_sentence(formula)}")
+    return rows[:12]
+
+
 def _candidate_mode(client_plan: ClientFacingPlan | None) -> bool:
     return bool(client_plan and client_plan.is_candidate)
 
@@ -895,6 +954,9 @@ def _client_sentence(value: object) -> str:
 
 def _client_text(value: object) -> str:
     text = str(value or "").strip()
+    text = _INTERVIEW_NOTE_PATTERN.sub("", text)
+    text = _NEGATION_RUN_PATTERN.sub("", text)
+    text = re.sub(r"Interview answer for\s+'[^']+':\s*", "Customer clarified: ", text, flags=re.IGNORECASE)
     replacements = {
         "model_proposed": "candidate",
         "not_estimated": "not estimated",
@@ -904,7 +966,15 @@ def _client_text(value: object) -> str:
     }
     for raw, replacement in replacements.items():
         text = text.replace(raw, replacement)
+    text = re.sub(r"\s{2,}", " ", text).strip()
     return _MACHINE_TOKEN_PATTERN.sub(lambda match: display_label(match.group(0), capitalize=False), text)
+
+
+def _interview_assumption_summary(text: str) -> str:
+    match = re.match(r"Interview answer for '.*?':\s*(.+)", text, flags=re.IGNORECASE | re.DOTALL)
+    if match:
+        return f"Customer clarified: {match.group(1).strip()}"
+    return text
 
 
 def _bullets(items: list[str]) -> list[str]:

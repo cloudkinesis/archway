@@ -61,6 +61,8 @@ def extract_metrics(text: str) -> ExtractedMetrics:
     _put_match(result.business_targets, "retention_days", "days", text, r"(?:retain|retains|retained|retaining)[^.]{0,80}\s+for\s+(?P<value>\d+(?:\.\d+)?)\s+days?")
     if "retention_days" not in result.business_targets:
         _put_match(result.business_targets, "retention_days", "days", text, r"(?P<value>\d+(?:\.\d+)?)\s*[- ]?day\s+retention")
+    if "retention_days" not in result.business_targets:
+        _put_match(result.business_targets, "retention_days", "days", text, r"\bhot\s+for\s+(?P<value>\d+(?:\.\d+)?)\s+days?")
     _put_match(result.business_targets, "audit_retention_years", "years", text, r"(?P<value>\d+(?:\.\d+)?)\s*[- ]?year\s+audit\s+(?:evidence\s+)?retention")
     if "audit_retention_years" not in result.business_targets:
         _put_match(result.business_targets, "audit_retention_years", "years", text, r"retain\s+audit\s+(?:evidence\s+)?for\s+(?P<value>\d+(?:\.\d+)?)\s+years?")
@@ -93,6 +95,8 @@ def extract_metrics(text: str) -> ExtractedMetrics:
     if "refresh_cadence_minutes" not in result.business_targets:
         _put_match(result.business_targets, "refresh_cadence_minutes", "minutes", text, r"readings?\s+every\s+(?P<value>\d+(?:\.\d+)?)\s+minutes?")
     _put_match(result.business_targets, "telemetry_frequency_seconds", "seconds", text, r"(?:sensor\s+)?readings?\s+every\s+(?P<value>\d+(?:\.\d+)?)\s+seconds?")
+    if "telemetry_frequency_seconds" not in result.business_targets:
+        _put_match(result.business_targets, "telemetry_frequency_seconds", "seconds", text, r"\bevery\s+(?P<value>\d+(?:\.\d+)?)\s+seconds?")
     _put_match(result.business_targets, "imagery_windows_per_day", "windows_per_day", text, r"(?P<value>\d[\d,]*)\s+(?:satellite/)?imagery\s+refresh\s+windows?\s+per\s+day")
     _put_match(result.business_targets, "scheduled_surgeries_per_day", "surgeries_per_day", text, r"(?P<value>\d[\d,]*)\s+(?:scheduled\s+)?surgeries\s+(?:per\s+day|/day|daily)")
     _put_match(result.business_targets, "country_count", "countries", text, r"(?P<value>\d[\d,]*)\s+countries")

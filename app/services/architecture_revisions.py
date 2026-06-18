@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from app.models.domain import (
     ArchitectureRevision,
     ArchitectureSpec,
@@ -141,13 +143,13 @@ class ArchitectureRevisionService:
                 " ".join(str(flow.metadata.get("classification", "")).lower() for flow in spec.flows),
             ])
             if "rag_assistant" in excluded:
-                if any(term in text_blob for term in ("knowledge retrieval", "rag_", "rag assistant", "embedding", "vector search")):
+                if _contains_unnegated_marker(text_blob, ("knowledge retrieval", "rag_", "rag assistant", "embedding", "vector search")):
                     issues.append(ArchitectureValidationIssue(severity="critical", code="excluded_workload_family_present", message="RAG assistant components appeared even though the extracted workload excluded that family.", mode=spec.mode))
             if "document_intelligence" in excluded:
-                if any(term in text_blob for term in ("document", "contract", "ocr", "textract", "pdf ingestion", "extraction workflow")):
+                if _contains_unnegated_marker(text_blob, ("amazon textract", "textract", "ocr", "pdf ingestion", "document extraction", "contract analysis", "document analysis", "extraction workflow")):
                     issues.append(ArchitectureValidationIssue(severity="critical", code="excluded_workload_family_present", message="Document-intelligence components appeared even though the extracted workload excluded that family.", mode=spec.mode))
             if "field_service_automation" in excluded:
-                if any(term in text_blob for term in ("field service", "technician", "crew dispatch", "depot", "work order", "workforce", "spare parts")):
+                if _contains_unnegated_marker(text_blob, ("field service", "technician dispatch", "crew dispatch", "depot", "workforce dispatch", "spare parts")):
                     issues.append(ArchitectureValidationIssue(severity="critical", code="excluded_workload_family_present", message="Field-service/depot automation components appeared even though the extracted workload excluded that family.", mode=spec.mode))
             requirement_coverage = spec.metadata.get("requirement_coverage") or {}
             for requirement in requirement_coverage.get("requirements") or []:
@@ -201,3 +203,13 @@ def _read_json_artifact(artifacts: ArtifactStore, session_id: str, artifact_id: 
         return __import__("json").loads(artifacts.resolve(session_id, artifact_id).read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def _contains_unnegated_marker(text: str, markers: tuple[str, ...]) -> bool:
+    for marker in markers:
+        for match in re.finditer(re.escape(marker), text):
+            prefix = text[max(0, match.start() - 40):match.start()]
+            if re.search(r"\b(?:no|not|without|exclude|excluded|excluding|avoid|avoids|non-goal|non goal)\b[^.;:,]{0,35}$", prefix):
+                continue
+            return True
+    return False

@@ -4,7 +4,9 @@ from app.core.config import get_settings
 from app.models.domain import HealthStatus
 from app.services.health import HealthService
 from app.services.llm.base import LLMTask, LLMTaskType
+from app.services.llm.bedrock_provider import _converse_messages
 from app.services.llm.model_router import ModelRouter
+from app.services.understanding.deep_use_case_understanding import DeepUseCaseUnderstanding
 
 
 def test_bedrock_health_is_explicitly_degraded_without_model(monkeypatch):
@@ -28,3 +30,13 @@ def test_model_router_uses_deterministic_fallback_when_not_configured(monkeypatc
     assert result.provider == "deterministic"
     assert result.validated is False
     assert result.warnings
+
+
+def test_deep_understanding_bedrock_prompt_requests_instance_not_schema():
+    messages, _ = _converse_messages([], DeepUseCaseUnderstanding)
+
+    instruction = messages[-1]["content"][0]["text"]
+
+    assert "JSON object INSTANCE" in instruction
+    assert "workload_families" in instruction
+    assert '"$defs"' not in instruction

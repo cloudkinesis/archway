@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -46,6 +46,14 @@ type ArchitectureDraft = Pick<ArchitectureSpec, "summary" | "scaling_strategy" |
   security_controls_text: string;
   observability_controls_text: string;
 };
+
+function presentationText(value: string | null | undefined) {
+  return (value ?? "")
+    .replace(/\s*\b(?:this is\s+)?not\s+[^.]{1,120}?(?:,\s*not\s+[^.]{1,120}?){1,}(?:\.|$)/gi, "")
+    .replace(/\bSynthesis interview note:\s*[^.?!]*(?:[.?!]|$)/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
 
 export function App() {
   const queryClient = useQueryClient();
@@ -461,7 +469,7 @@ function SynthesisView({ session, setSession, readiness, setReadiness, setView }
   );
 }
 
-function ResearchView({ session, report, setReport, researchNarrative, setResearchNarrative, researchDigest, setResearchDigest, researchViewModel, setResearchViewModel, setView }: Parameters<typeof Workspace>[0]) {
+function ResearchView({ session, report, setReport, researchNarrative, setResearchNarrative, researchDigest, setResearchDigest, researchViewModel, setResearchViewModel, setView, latestExport, setLatestExport }: Parameters<typeof Workspace>[0]) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [researchDepth, setResearchDepth] = useState("deep_dossier");
   const job = useJobPolling(session.id, jobId, async () => {
@@ -499,7 +507,20 @@ function ResearchView({ session, report, setReport, researchNarrative, setResear
           {job.job?.status === "failed" ? <Banner tone="danger" text={job.job.error ?? "Research failed. Diagnostics were recorded."} /> : null}
         </div>
       ) : (
-        <Report session={session} report={report} narrative={researchNarrative} digest={researchDigest} viewModel={researchViewModel} onReportUpdated={setReport} onNarrativeUpdated={setResearchNarrative} onDigestUpdated={setResearchDigest} onViewModelUpdated={setResearchViewModel} onNext={() => setView("architecture")} />
+        <Report
+          session={session}
+          report={report}
+          narrative={researchNarrative}
+          digest={researchDigest}
+          viewModel={researchViewModel}
+          latestExport={latestExport}
+          onExportUpdated={setLatestExport}
+          onReportUpdated={setReport}
+          onNarrativeUpdated={setResearchNarrative}
+          onDigestUpdated={setResearchDigest}
+          onViewModelUpdated={setResearchViewModel}
+          onNext={() => setView("architecture")}
+        />
       )}
     </Panel>
   );
@@ -605,24 +626,83 @@ function ArchitectureView({
   );
 }
 
-function DiagramView({ session, galleries, setGalleries }: Parameters<typeof Workspace>[0]) {
+function DiagramView({ session, galleries, setGalleries, latestExport, setLatestExport }: Parameters<typeof Workspace>[0]) {
   const [jobId, setJobId] = useState<string | null>(null);
+  const [exportJobId, setExportJobId] = useState<string | null>(null);
+  const [diagramRefreshError, setDiagramRefreshError] = useState<string | null>(null);
+  const [diagramRefreshPending, setDiagramRefreshPending] = useState(false);
   const [selected, setSelected] = useState<{
     gallery: DiagramGalleryResult;
     diagram: DiagramGalleryResult["diagrams"][number];
     qa?: DiagramGalleryResult["qa_reports"][number];
   } | null>(null);
-  const job = useJobPolling(session.id, jobId, async () => {
-    const result = await api.getDiagrams(session.id);
-    setGalleries(result.galleries);
+  const refreshDiagrams = useCallback(async () => {
+    setDiagramRefreshError(null);
+    setDiagramRefreshPending(true);
+    try {
+      const result = await retryArtifactRead(() => api.getDiagrams(session.id));
+      setGalleries(result.galleries);
+      if (!result.galleries.length) {
+        setDiagramRefreshError("Diagram generation completed, but no diagram artifacts were returned. Export remains available and diagnostics were recorded.");
+      }
+    } catch (error) {
+      setDiagramRefreshError((error as Error).message);
+    } finally {
+      setDiagramRefreshPending(false);
+    }
+  }, [session.id, setGalleries]);
+  const job = useJobPolling(session.id, jobId, refreshDiagrams);
+  const generate = useMutation({
+    mutationFn: () => api.generateDiagrams(session.id),
+    onSuccess: (result) => {
+      setDiagramRefreshError(null);
+      setGalleries([]);
+      setJobId(result.job.id);
+    }
   });
-  const generate = useMutation({ mutationFn: () => api.generateDiagrams(session.id), onSuccess: (result) => setJobId(result.job.id) });
+  const exportJob = useJobPolling(session.id, exportJobId, async () => {
+    const result = await api.getExport(session.id);
+    setLatestExport(result.export);
+  });
+  const exportRun = useMutation({ mutationFn: () => api.generateExport(session.id), onSuccess: (result) => setExportJobId(result.job.id) });
   return (
     <Panel title="Diagram Gallery" icon={Image}>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border border-awsBorder bg-surface p-3">
+        <div>
+          <div className="text-sm font-semibold">Solution package</div>
+          <p className="mt-1 text-sm text-awsTextSecondary">Export the final package from here after diagrams are generated.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button icon={exportRun.isPending || exportJob.isActive ? Loader2 : Download} variant="secondary" disabled={exportRun.isPending || exportJob.isActive} onClick={() => exportRun.mutate()}>
+            {exportRun.isPending || exportJob.isActive ? "Exporting" : "Export package"}
+          </Button>
+          {latestExport ? (
+            <a href={artifactUrl(session.id, latestExport.artifact_id)} className="inline-flex min-h-10 items-center justify-center gap-2 border border-awsBorder bg-awsPanelSoft px-3 py-2 text-sm font-semibold text-awsTextPrimary hover:border-awsOrange">
+              <Download className="h-4 w-4" /> ZIP ready
+            </a>
+          ) : null}
+          {latestExport ? (
+            <a href={artifactUrl(session.id, latestExport.manifest_artifact_id)} className="inline-flex min-h-10 items-center justify-center gap-2 border border-awsBorder bg-awsPanelSoft px-3 py-2 text-sm font-semibold text-awsTextPrimary hover:border-awsOrange">
+              <FileText className="h-4 w-4" /> Manifest
+            </a>
+          ) : null}
+        </div>
+      </div>
+      {exportJob.job ? <JobProgress job={exportJob.job} onCancel={() => exportJob.cancel.mutate()} /> : null}
+      {exportRun.error ? <Banner tone="danger" text={(exportRun.error as Error).message} /> : null}
       {galleries.length === 0 ? (
         <div className="space-y-4">
           {job.job ? <JobProgress job={job.job} onCancel={() => job.cancel.mutate()} /> : null}
-          <Button icon={generate.isPending || job.isActive ? Loader2 : Image} disabled={generate.isPending || job.isActive} onClick={() => generate.mutate()}>{generate.isPending || job.isActive ? "Generating through existing compiler" : "Generate diagrams"}</Button>
+          {diagramRefreshPending ? <Banner tone="info" text="Diagram job finished. Loading generated diagram artifacts..." /> : null}
+          {diagramRefreshError ? <Banner tone="warning" text={`Diagram artifacts could not be loaded yet: ${diagramRefreshError}`} /> : null}
+          <div className="flex flex-wrap gap-2">
+            <Button icon={generate.isPending || job.isActive ? Loader2 : Image} disabled={generate.isPending || job.isActive || diagramRefreshPending} onClick={() => generate.mutate()}>{generate.isPending || job.isActive ? "Generating through existing compiler" : "Generate diagrams"}</Button>
+            {job.job?.status === "succeeded" ? (
+              <Button icon={diagramRefreshPending ? Loader2 : RefreshCw} variant="secondary" disabled={diagramRefreshPending} onClick={() => refreshDiagrams()}>
+                {diagramRefreshPending ? "Loading diagrams" : "Refresh diagrams"}
+              </Button>
+            ) : null}
+          </div>
           <Banner tone="info" text="If architecture validation still has blockers, Archway generates candidate diagnostic diagrams instead of stopping the session." />
           {job.job?.status === "failed" ? <Banner tone="danger" text={job.job.error ?? "Diagram generation failed. Diagnostics were recorded."} /> : null}
         </div>
@@ -664,9 +744,23 @@ function DiagramView({ session, galleries, setGalleries }: Parameters<typeof Wor
         </div>
       )}
       {generate.error ? <Banner tone="danger" text={(generate.error as Error).message} /> : null}
+      {exportJob.job?.status === "failed" ? <Banner tone="danger" text={exportJob.job.error ?? "Export failed. Diagnostics were recorded."} /> : null}
       {selected ? <DiagramInspector sessionId={session.id} selection={selected} onClose={() => setSelected(null)} /> : null}
     </Panel>
   );
+}
+
+async function retryArtifactRead<T>(read: () => Promise<T>, attempts = 8, delayMs = 750): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await read();
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Artifact refresh timed out.");
 }
 
 function DiagramInspector({
@@ -923,10 +1017,10 @@ function SolutionBrief({ session, readiness }: { session: Session | null; readin
       <BuildStatusCard status={buildStatus.data} />
       {!brief ? <p className="text-sm text-awsTextMuted">Start a session to see the brief evolve.</p> : (
         <div className="space-y-4 text-sm">
-          <BriefSection title="Current understanding" items={[brief.refined_problem_statement, brief.industry ? `Industry: ${brief.industry}` : "Industry: worth confirming"]} />
+          <BriefSection title="Current understanding" items={[presentationText(brief.refined_problem_statement), brief.industry ? `Industry: ${brief.industry}` : "Industry: worth confirming"]} />
           <BriefSection title="AI behavior" items={brief.ai_capabilities.map((item) => `${item.name} (${item.risk_level})`)} />
           <BriefSection title="Data and integrations" items={[...brief.data_sources.map((item) => `${item.name}: ${item.sensitivity}`), ...brief.integrations.map((item) => `${item.name}: ${item.direction}`)]} />
-          <BriefSection title="Assumptions so far" items={brief.assumptions.map((item) => item.text)} />
+          <BriefSection title="Assumptions so far" items={brief.assumptions.map((item) => presentationText(item.text))} />
           <BriefSection title="Worth confirming" items={brief.open_questions.map((item) => item.text)} />
           <div className="border border-awsBorder bg-surface p-3">
             <div className="text-xs uppercase tracking-[0.12em] text-awsTextMuted">Readiness</div>
@@ -969,6 +1063,8 @@ function Report({
   narrative,
   digest,
   viewModel,
+  latestExport,
+  onExportUpdated,
   onReportUpdated,
   onNarrativeUpdated,
   onDigestUpdated,
@@ -980,6 +1076,8 @@ function Report({
   narrative: ResearchNarrative | null;
   digest: ResearchDigest | null;
   viewModel: ResearchViewModel | null;
+  latestExport: ExportBundle | null;
+  onExportUpdated: (bundle: ExportBundle | null) => void;
   onReportUpdated: (report: ResearchReport) => void;
   onNarrativeUpdated: (narrative: ResearchNarrative | null) => void;
   onDigestUpdated: (digest: ResearchDigest | null) => void;
@@ -988,7 +1086,7 @@ function Report({
 }) {
   const [researchSubTab, setResearchSubTab] = useState<"overview" | "architecture" | "pricing" | "competitors" | "risks" | "evidence">("overview");
   const [exportJobId, setExportJobId] = useState<string | null>(null);
-  const [researchExport, setResearchExport] = useState<ExportBundle | null>(null);
+  const [researchJobId, setResearchJobId] = useState<string | null>(null);
   const researchQuality = report.metadata?.research_quality as { label?: string; reason?: string } | undefined;
   const evidenceQuality = report.metadata?.evidence_quality as { evidence_authority?: string; limitations?: string[] } | undefined;
   const customerReadiness = report.metadata?.customer_readiness as { status?: string; blockers?: string[]; warnings?: string[] } | undefined;
@@ -1000,9 +1098,18 @@ function Report({
   const checkpoint = useQuery({ queryKey: ["pricing-checkpoint", session.id, report.pricing_analysis.metadata?.pricing_maturity], queryFn: () => api.getPricingCheckpoint(session.id) });
   const exportJob = useJobPolling(session.id, exportJobId, async () => {
     const result = await api.getExport(session.id);
-    setResearchExport(result.export);
+    onExportUpdated(result.export);
+  });
+  const researchJob = useJobPolling(session.id, researchJobId, async () => {
+    const hydrated = await api.hydrateSession(session.id);
+    onReportUpdated(hydrated.research ?? report);
+    onNarrativeUpdated(hydrated.research_narrative ?? null);
+    onDigestUpdated(hydrated.research_digest ?? null);
+    onViewModelUpdated(hydrated.research_view_model ?? null);
+    onExportUpdated(null);
   });
   const exportRun = useMutation({ mutationFn: () => api.generateExport(session.id), onSuccess: (result) => setExportJobId(result.job.id) });
+  const refreshResearch = useMutation({ mutationFn: () => api.runResearch(session.id), onSuccess: (result) => setResearchJobId(result.job.id) });
   const useProfile = useMutation({
     mutationFn: (profileId: string) => api.usePricingProfile(session.id, profileId),
     onSuccess: async (result) => {
@@ -1033,10 +1140,15 @@ function Report({
           onNext={onNext}
           onExport={() => exportRun.mutate()}
           exportBusy={exportRun.isPending || exportJob.isActive}
-          exportBundle={researchExport}
+          onRefreshResearch={() => refreshResearch.mutate()}
+          refreshBusy={refreshResearch.isPending || researchJob.isActive}
+          exportBundle={latestExport}
         />
         {exportJob.job ? <JobProgress job={exportJob.job} onCancel={() => exportJob.cancel.mutate()} /> : null}
+        {researchJob.job ? <JobProgress job={researchJob.job} onCancel={() => researchJob.cancel.mutate()} /> : null}
         {exportRun.error ? <Banner tone="danger" text={(exportRun.error as Error).message} /> : null}
+        {refreshResearch.error ? <Banner tone="danger" text={(refreshResearch.error as Error).message} /> : null}
+        {researchJob.job?.status === "failed" ? <Banner tone="danger" text={researchJob.job.error ?? "Research refresh failed. Diagnostics were recorded."} /> : null}
         <ExecutiveBriefing viewModel={viewModel} />
         <PricingCheckpointCard
           checkpoint={checkpoint.data?.checkpoint}
@@ -1049,10 +1161,10 @@ function Report({
         {researchSubTab === "overview" ? <OverviewResearchTab viewModel={viewModel} /> : null}
         {researchSubTab === "architecture" ? <ArchitectureRationaleTab viewModel={viewModel} /> : null}
         {researchSubTab === "pricing" ? <PricingResearchTab viewModel={viewModel} /> : null}
-        {researchSubTab === "competitors" ? <CompetitorsResearchTab viewModel={viewModel} /> : null}
+        {researchSubTab === "competitors" ? <CompetitorsResearchTab viewModel={viewModel} onRefreshResearch={() => refreshResearch.mutate()} refreshBusy={refreshResearch.isPending || researchJob.isActive} /> : null}
         {researchSubTab === "risks" ? <RisksResearchTab viewModel={viewModel} /> : null}
         {researchSubTab === "evidence" ? <EvidenceResearchTab viewModel={viewModel} /> : null}
-        <TrustPanel pricing={report.pricing_analysis} exportBundle={researchExport} />
+        <TrustPanel pricing={report.pricing_analysis} exportBundle={latestExport} />
         <details className="border border-awsBorder bg-white p-4">
           <summary className="cursor-pointer text-sm font-semibold">Advanced dossier and debug trace</summary>
           <div className="mt-4 space-y-4">
@@ -1205,6 +1317,8 @@ function ResearchStickyHeader({
   onNext,
   onExport,
   exportBusy,
+  onRefreshResearch,
+  refreshBusy,
   exportBundle
 }: {
   sessionId: string;
@@ -1212,6 +1326,8 @@ function ResearchStickyHeader({
   onNext: () => void;
   onExport: () => void;
   exportBusy: boolean;
+  onRefreshResearch: () => void;
+  refreshBusy: boolean;
   exportBundle: ExportBundle | null;
 }) {
   return (
@@ -1235,8 +1351,8 @@ function ResearchStickyHeader({
               <Download className="h-4 w-4" /> ZIP ready
             </a>
           ) : null}
-          <Button icon={RefreshCw} variant="secondary" disabled title="Refresh evidence requires a fresh research run so citations, pricing, and competitor context stay consistent.">Refresh evidence</Button>
-          <Button icon={Search} variant="secondary" disabled title="Competitor scan runs during a fresh research pass when Tavily is enabled.">Run competitor scan</Button>
+          <Button icon={refreshBusy ? Loader2 : RefreshCw} variant="secondary" disabled={refreshBusy} onClick={onRefreshResearch}>{refreshBusy ? "Refreshing evidence" : "Refresh evidence"}</Button>
+          <Button icon={refreshBusy ? Loader2 : Search} variant="secondary" disabled={refreshBusy} onClick={onRefreshResearch}>{refreshBusy ? "Research running" : "Run competitor scan"}</Button>
         </div>
       </div>
       <div className="mt-2 flex flex-wrap gap-3 text-xs text-awsTextMuted">
@@ -1387,6 +1503,7 @@ function PricingResearchTab({ viewModel }: { viewModel: ResearchViewModel }) {
 }
 
 function PricingSummary({ pricing }: { pricing: PricingViewModel }) {
+  const headlineBlocked = pricing.headline_safe === false;
   return (
     <section className="border border-awsBorder bg-surface p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -1396,13 +1513,18 @@ function PricingSummary({ pricing }: { pricing: PricingViewModel }) {
         </div>
         <StatusPill status={pricing.procurement_ready ? "ready" : "degraded"} />
       </div>
-      <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Metric label="Monthly range" value={`${pricing.monthly_low} / ${pricing.monthly_high}`} />
-        <Metric label="Expected" value={pricing.monthly_expected} />
+      {headlineBlocked ? (
+        <div className="border border-awsWarning/50 bg-[#fff8e5] p-3 text-sm text-awsTextSecondary">
+          Budget-grade pricing is not available yet. Archway is retaining pricing assumptions and line-item evidence below without promoting the numeric range as a headline estimate.
+        </div>
+      ) : null}
+      <div className="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <Metric label="Monthly range" value={headlineBlocked ? "Needs pricing driver review" : `${pricing.monthly_low} / ${pricing.monthly_high}`} />
+        <Metric label="Expected" value={headlineBlocked ? "Not headline-safe" : pricing.monthly_expected} />
         <Metric label="Confidence" value={pricing.confidence} />
         <Metric label="SKU-backed" value={pricing.sku_backed_subtotal} />
-        <Metric label="Directional" value={pricing.directional_subtotal} />
-        <Metric label="Heuristic" value={pricing.heuristic_subtotal} />
+        <Metric label="Directional" value={headlineBlocked ? "Held from headline" : pricing.directional_subtotal} />
+        <Metric label="Heuristic" value={headlineBlocked ? "Held from headline" : pricing.heuristic_subtotal} />
       </div>
       <p className="mt-3 text-xs text-awsTextMuted">Last pricing refresh: {new Date(pricing.last_refreshed).toLocaleString()}</p>
     </section>
@@ -1432,9 +1554,9 @@ function PricingBreakdownTable({ pricing }: { pricing: PricingViewModel }) {
   );
 }
 
-function CompetitorsResearchTab({ viewModel }: { viewModel: ResearchViewModel }) {
+function CompetitorsResearchTab({ viewModel, onRefreshResearch, refreshBusy }: { viewModel: ResearchViewModel; onRefreshResearch: () => void; refreshBusy: boolean }) {
   const scan = viewModel.competitor_scan;
-  const disabledReason = !scan.tavily_enabled
+  const refreshReason = !scan.tavily_enabled
     ? "Tavily is not enabled for this session."
     : !scan.scan_enabled
       ? "Competitor scan is not enabled for this session."
@@ -1447,7 +1569,9 @@ function CompetitorsResearchTab({ viewModel }: { viewModel: ResearchViewModel })
             <h3 className="font-semibold">Competitor scan: {scan.status.replace("_", " ")}</h3>
             <p className="mt-1 text-sm text-awsTextMuted">{scan.failure_reason || scan.skipped_reason || "Competitor context is shown only when external evidence is available."}</p>
           </div>
-          <Button icon={Search} variant="secondary" disabled title={disabledReason}>Run with research</Button>
+          <Button icon={refreshBusy ? Loader2 : Search} variant="secondary" disabled={refreshBusy} onClick={onRefreshResearch} title={refreshReason}>
+            {refreshBusy ? "Research running" : "Run with research"}
+          </Button>
         </div>
         <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
           <Metric label="Tavily" value={String(scan.tavily_enabled)} />
@@ -2016,6 +2140,8 @@ function ClaimCard({ title, claims }: { title: string; claims: Array<{ id: strin
 
 function ArchitectureEditorCard({ architecture, draft, onChange }: { architecture: ArchitectureSpec; draft: ArchitectureDraft; onChange: (draft: ArchitectureDraft) => void }) {
   const update = (field: keyof ArchitectureDraft, value: string) => onChange({ ...draft, [field]: value });
+  const securityControls = parseControls(draft.security_controls_text);
+  const observabilityControls = parseControls(draft.observability_controls_text);
   return (
     <div className="border border-awsBorder bg-surface p-4">
       <div className="mb-3 flex items-start justify-between">
@@ -2025,15 +2151,42 @@ function ArchitectureEditorCard({ architecture, draft, onChange }: { architectur
         </div>
         <span className="border border-awsOrange/50 px-2 py-1 text-xs uppercase text-awsOrange">{architecture.mode}</span>
       </div>
-      <div className="grid gap-3 xl:grid-cols-2">
-        <TextArea label="Summary" value={draft.summary} onChange={(value) => update("summary", value)} />
-        <TextArea label="Security controls" value={draft.security_controls_text} onChange={(value) => update("security_controls_text", value)} hint="One control per line: name: rationale" />
-        <TextArea label="Observability controls" value={draft.observability_controls_text} onChange={(value) => update("observability_controls_text", value)} hint="One control per line: name: rationale" />
-        <TextArea label="Scaling strategy" value={draft.scaling_strategy} onChange={(value) => update("scaling_strategy", value)} />
-        <TextArea label="Resilience strategy" value={draft.resilience_strategy} onChange={(value) => update("resilience_strategy", value)} />
-        <TextArea label="Cost optimization" value={draft.cost_optimization_strategy} onChange={(value) => update("cost_optimization_strategy", value)} />
+      <div className="mb-4 grid gap-3 xl:grid-cols-3">
+        <ArchitectureReadCard title="Summary" lines={[draft.summary]} />
+        <ArchitectureReadCard title="Security controls" lines={securityControls.map((item) => `${item.name}: ${item.rationale}`)} />
+        <ArchitectureReadCard title="Observability controls" lines={observabilityControls.map((item) => `${item.name}: ${item.rationale}`)} />
+        <ArchitectureReadCard title="Scaling" lines={[draft.scaling_strategy]} />
+        <ArchitectureReadCard title="Resilience" lines={[draft.resilience_strategy]} />
+        <ArchitectureReadCard title="Cost posture" lines={[draft.cost_optimization_strategy]} />
       </div>
+      <details className="border border-awsBorder bg-white p-3">
+        <summary className="cursor-pointer text-sm font-semibold">Edit architecture fields</summary>
+        <div className="mt-3 grid gap-3 xl:grid-cols-2">
+          <TextArea label="Summary" value={draft.summary} onChange={(value) => update("summary", value)} />
+          <TextArea label="Security controls" value={draft.security_controls_text} onChange={(value) => update("security_controls_text", value)} hint="One control per line: name: rationale" />
+          <TextArea label="Observability controls" value={draft.observability_controls_text} onChange={(value) => update("observability_controls_text", value)} hint="One control per line: name: rationale" />
+          <TextArea label="Scaling strategy" value={draft.scaling_strategy} onChange={(value) => update("scaling_strategy", value)} />
+          <TextArea label="Resilience strategy" value={draft.resilience_strategy} onChange={(value) => update("resilience_strategy", value)} />
+          <TextArea label="Cost optimization" value={draft.cost_optimization_strategy} onChange={(value) => update("cost_optimization_strategy", value)} />
+        </div>
+      </details>
     </div>
+  );
+}
+
+function ArchitectureReadCard({ title, lines }: { title: string; lines: string[] }) {
+  const clean = lines.map((line) => presentationText(line)).filter(Boolean).slice(0, 4);
+  return (
+    <section className="border border-awsBorder bg-white p-3">
+      <h4 className="text-sm font-semibold">{title}</h4>
+      {clean.length ? (
+        <ul className="mt-2 space-y-2 text-sm leading-6 text-awsTextSecondary">
+          {clean.map((line) => <li key={line}>{line}</li>)}
+        </ul>
+      ) : (
+        <p className="mt-2 text-sm text-awsTextMuted">No generated narrative is available for this section yet.</p>
+      )}
+    </section>
   );
 }
 

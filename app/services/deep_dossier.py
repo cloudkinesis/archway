@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any
 
 from app.services.display_labels import dedupe_canonical, display_label, gate_display
@@ -165,7 +166,7 @@ class DeepDossierService:
                 claim.confidence,
                 "yes" if claim.requires_validation else "no",
                 ", ".join(claim.evidence_ids) or "none",
-                claim.text,
+                _presentation_text(claim.text),
             ]
             for claim in dossier.claims
         ]
@@ -200,6 +201,14 @@ class DeepDossierService:
         lines.extend(["## Errors", *[f"- {item}" for item in check.errors or ["None"]], ""])
         lines.extend(["## Warnings", *[f"- {item}" for item in check.warnings or ["None"]], ""])
         return "\n".join(lines)
+
+
+def _presentation_text(value: object) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"\s*Synthesis interview note:.*?(?=\s*Synthesis interview note:|$)", "", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"\s*\b(?:this is\s+)?not\s+[^.]{1,120}?(?:,\s*not\s+[^.]{1,120}?){1,}(?:\.|$)", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"Interview answer for\s+'[^']+':\s*", "Customer clarified: ", text, flags=re.IGNORECASE)
+    return re.sub(r"\s{2,}", " ", text).strip()
 
 
 def _research_plan(profile: dict, brief: dict) -> list[DossierResearchQuestion]:
@@ -249,7 +258,7 @@ def _assumptions(brief: dict, pricing: dict, evidence_items: list[dict]) -> list
     evidence_id = _first_evidence(evidence_items, {"user_input", "local_policy"})
     records = [
         AssumptionRecord(
-            assumption=item.get("text", ""),
+            assumption=_presentation_text(item.get("text", "")),
             confidence=item.get("confidence", "medium"),
             why_needed=item.get("reason", "Required to proceed without a blocking discovery question."),
             impacts=[item.get("impact", "architecture")],
@@ -520,7 +529,7 @@ def _use_case_interpretation(ctx: dict) -> str:
     return "\n".join([
         "## Use Case Interpretation",
         "",
-        f"Archway understood the business problem as: {brief.get('refined_problem_statement') or brief.get('raw_use_case', '')}",
+        f"Archway understood the business problem as: {_presentation_text(brief.get('refined_problem_statement') or brief.get('raw_use_case', ''))}",
         "",
         f"Target users/personas: {', '.join(item.get('name', '') for item in brief.get('users', [])) or 'Requires validation'}.",
         f"Operational outcome: {', '.join(brief.get('business_goals', [])) or 'Requires validation'}.",

@@ -23,6 +23,7 @@ class PricingDriverFamily(str, Enum):
 def select_pricing_driver_family(profile: UseCaseProfile) -> PricingDriverFamily:
     families = set(profile.workload_families)
     capabilities = set(profile.capabilities) | set(profile.capability_model)
+    excluded = set(profile.excluded_families or []) | set(profile.excluded_patterns or [])
     if {"healthcare_operations_scheduling", "surgical_scheduling_prediction", "clinical_workflow_decision_support"} & families:
         return PricingDriverFamily.HEALTHCARE_OPERATIONS_SCHEDULING
     if "financial_fraud_detection" in families:
@@ -39,7 +40,10 @@ def select_pricing_driver_family(profile: UseCaseProfile) -> PricingDriverFamily
         return PricingDriverFamily.FEDERATED_ML
     if "graph_analytics" in families:
         return PricingDriverFamily.GRAPH_ANALYTICS
-    if {"document_intelligence", "rag_assistant"} & families or {"document_retrieval", "rag_retrieval", "document_ingestion"} & capabilities:
+    if not ({"document_intelligence", "rag_assistant"} & excluded) and (
+        {"document_intelligence", "rag_assistant"} & families
+        or {"document_retrieval", "rag_retrieval", "document_ingestion"} & capabilities
+    ):
         return PricingDriverFamily.DOCUMENT_RAG_WORKFLOW
     if "ota_rollout_orchestration" in capabilities:
         return PricingDriverFamily.OTA_FLEET_ORCHESTRATION

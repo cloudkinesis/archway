@@ -27,11 +27,16 @@ class ArchitecturePlanner:
         semantic = semantic_views(profile, production=production)
         compiler = expected_views(profile, production=production)
         view_mappings = diagram_view_mappings(semantic, workload)
+        workload_context = _workload_specific_context(profile, (report.metadata or {}).get("canonical_fact_snapshot"))
         return ArchitectureSpec(
             session_id=report.session_id,
             mode=mode,
             title=f"{mode.upper()} {workload} Architecture",
-            summary=report.recommended_production_direction if production else report.recommended_poc,
+            summary=_architecture_summary(
+                report.recommended_production_direction if production else report.recommended_poc,
+                context=workload_context,
+                production=production,
+            ),
             selected_services=report.aws_service_recommendations,
             components=components,
             flows=flows,
@@ -57,8 +62,8 @@ class ArchitecturePlanner:
                 "deployment_target_note": "Archway recommendations and generated diagrams target AWS-native platform services. External enterprise systems may appear only as integration actors or existing customer systems.",
                 "network_view_reason": _network_view_reason(profile, production),
                 "network_private_connectivity_view_status": _network_view_status(semantic, compiler),
-                "requirement_coverage": _requirement_coverage(profile, components, flows, production=production),
-                "workload_specific_context": _workload_specific_context(profile, (report.metadata or {}).get("canonical_fact_snapshot")),
+                "requirement_coverage": _requirement_coverage(profile, components, flows, production=production, snapshot=(report.metadata or {}).get("canonical_fact_snapshot")),
+                "workload_specific_context": workload_context,
                 "architecture_generation": "pattern_catalog",
             },
         )
@@ -112,6 +117,36 @@ def _cost_strategy(profile, production: bool) -> str:
     terms = list(dict.fromkeys(terms)) or ["request volume", "storage retention", "observability retention"]
     prefix = "Set production budgets and anomaly alerts for" if production else "Track POC assumptions for"
     return f"{prefix} {', '.join(terms)}."
+
+
+def _architecture_summary(base: str, *, context: dict | None, production: bool) -> str:
+    """Turn the generated architecture note into a stakeholder-readable brief.
+
+    The additions are derived from extracted fact shapes, not from named
+    scenarios. They make latency, retention, and workload drivers visible in the
+    primary architecture surface so live-model critique has deterministic text
+    to reconcile against.
+    """
+    context = context if isinstance(context, dict) else {}
+    quantities = [str(item).strip() for item in context.get("quantities") or [] if str(item).strip()]
+    latency = []
+    for item in context.get("latency_slos") or []:
+        if isinstance(item, dict):
+            value = item.get("target") or item.get("source_text") or item.get("name")
+            if value:
+                latency.append(str(value).strip())
+        elif item:
+            latency.append(str(item).strip())
+    pieces = [str(base).strip().rstrip(".")]
+    if latency:
+        pieces.append(f"Must carry extracted latency targets such as {', '.join(list(dict.fromkeys(latency))[:3])}")
+    if quantities:
+        pieces.append(f"Must preserve workload facts for sizing, storage, and review: {'; '.join(list(dict.fromkeys(quantities))[:4])}")
+    if production:
+        pieces.append("Production design keeps per-data-class retention, audit evidence, and approval boundaries explicit before procurement or rollout")
+    else:
+        pieces.append("POC design keeps measurable success criteria, pricing drivers, and governance assumptions visible for review")
+    return ". ".join(piece for piece in pieces if piece) + "."
 
 
 def _network_view_reason(profile, production: bool) -> str:
@@ -177,7 +212,16 @@ def _open_world_components(profile, components: list[ArchitectureComponent]) -> 
             logical_group="Open-world inference",
             metadata={"role": "image_video_inference", "source": "open_world_requirement", "alternatives": ["Amazon Rekognition", "Amazon Bedrock multimodal model"]},
         ))
-    if _requires_documents(profile, profile_text):
+    if _requires_file_payload_ingestion(profile, profile_text):
+        add(ArchitectureComponent(
+            id="file_payload_ingest",
+            name="File and Batch Payload Ingestion",
+            service="amazon_s3",
+            scope="regional_managed_data",
+            logical_group="Open-world payload ingestion",
+            metadata={"role": "file_payload_ingestion", "source": "open_world_requirement"},
+        ))
+    if _requires_documents(profile, profile_text) and not _excludes_document_processing(profile):
         add(ArchitectureComponent(
             id="text_document_processing",
             name="Document and Notes Processing Path",
@@ -237,8 +281,10 @@ def _open_world_flows(profile, components: list[ArchitectureComponent], flows: l
     source_id = "edge_offline_sync" if "edge_offline_sync" in ids else "devices" if "devices" in ids else "user" if "user" in ids else ""
     if source_id:
         add(source_id, "image_ingest", "Capture and persist image/video evidence with workload metadata", "HTTPS/MQTT/TLS")
+        add(source_id, "file_payload_ingest", "Capture file payloads with workload metadata, lifecycle policy, and audit tags", "HTTPS/MQTT/TLS")
         add(source_id, "text_document_processing", "Submit notes, documents, or OCR text for extraction", "HTTPS/TLS")
     add("image_ingest", "vision_inference", "Run image/video preprocessing and model inference")
+    add("file_payload_ingest", "evidence_archive", "Persist file payloads under per-data-class retention controls")
     add("text_document_processing", "vision_inference", "Join extracted text with visual and event features")
     if "vision_inference" in ids:
         target = "human_review_workflow" if "human_review_workflow" in ids else "workflow" if "workflow" in ids else ""
@@ -280,13 +326,29 @@ def _requires_documents(profile, profile_text: str) -> bool:
     )
 
 
+def _requires_file_payload_ingestion(profile, profile_text: str) -> bool:
+    return any(
+        term in profile_text
+        for term in ("file", "files", "payload", "upload", "uploads", "mb", "gb", "result", "evidence", "attachment")
+    )
+
+
+def _excludes_document_processing(profile) -> bool:
+    excluded = set(getattr(profile, "excluded_families", []) or []) | set(getattr(profile, "excluded_patterns", []) or [])
+    return bool({
+        "document_intelligence",
+        "ocr_document_pipeline",
+        "contract_review",
+    } & excluded)
+
+
 def _requires_intermitent_connectivity(profile, profile_text: str) -> bool:
     return "intermittent_connectivity" in set(profile.capabilities or []) or any(
         term in profile_text for term in ("intermittent", "offline", "store and forward", "store-and-forward", "sync later", "edge")
     )
 
 
-def _requirement_coverage(profile, components, flows, production: bool) -> dict[str, list[dict[str, str]]]:
+def _requirement_coverage(profile, components, flows, production: bool, snapshot: dict | None = None) -> dict[str, list[dict[str, str]]]:
     """Audit how hard profile requirements map into the generated pattern.
 
     This is intentionally deterministic and advisory. It gives validators and
@@ -297,7 +359,14 @@ def _requirement_coverage(profile, components, flows, production: bool) -> dict[
     capabilities = set(profile.capabilities or [])
     posture = set(profile.deployment_posture or [])
     profile_text = _profile_requirement_text(profile)
-    component_text = " ".join([*(getattr(component, "name", "") for component in components), *(getattr(component, "purpose", "") for component in components)]).lower()
+    snapshot_text = _snapshot_requirement_text(snapshot)
+    requirement_text = f"{profile_text} {snapshot_text}".lower()
+    component_text = " ".join([
+        *(getattr(component, "name", "") for component in components),
+        *(getattr(component, "service", "") for component in components),
+        *(getattr(component, "purpose", "") for component in components),
+        *(getattr(component, "logical_group", "") or "" for component in components),
+    ]).lower()
     flow_text = " ".join([*(getattr(flow, "label", "") or "" for flow in flows), *(" ".join(str(value) for value in getattr(flow, "metadata", {}).values()) for flow in flows)]).lower()
     body = f"{component_text} {flow_text}"
     requirements: list[dict[str, str]] = []
@@ -311,7 +380,7 @@ def _requirement_coverage(profile, components, flows, production: bool) -> dict[
         })
 
     image_or_video_required = "computer_vision" in capabilities or any(
-        term in profile_text
+        term in requirement_text
         for term in ("image", "imagery", "photo", "video", "camera", "vision", "multispectral", "ocr", "scan")
     )
     if image_or_video_required:
@@ -322,7 +391,18 @@ def _requirement_coverage(profile, components, flows, production: bool) -> dict[
             "covered" if covered else "unmet",
             "Architecture carries an imagery/video inference path." if covered else "Computer-vision requirement was extracted but no imagery/video inference path is explicit.",
         )
-    document_required = "document_retrieval" in capabilities or any(term in profile_text for term in ("document", "pdf", "docx", "note", "contract", "text", "ocr"))
+    file_payload_required = any(term in requirement_text for term in ("file", "files", "payload", "upload", "uploads", "mb", "gb", "attachment"))
+    if file_payload_required:
+        covered = any(term in body for term in ("file", "payload", "upload", "s3", "object", "archive", "evidence"))
+        add(
+            "file_payload_ingestion",
+            "File / payload ingestion",
+            "covered" if covered else "unmet",
+            "Architecture carries a file/payload ingestion and storage path." if covered else "File or payload upload requirements were extracted but no ingestion/storage path is explicit.",
+        )
+    document_required = not _excludes_document_processing(profile) and (
+        "document_retrieval" in capabilities or any(term in requirement_text for term in ("document", "pdf", "docx", "note", "contract", "text", "ocr"))
+    )
     if document_required:
         covered = any(term in body for term in ("document", "pdf", "docx", "text", "ocr", "textract", "knowledge base", "opensearch", "bedrock"))
         add(
@@ -339,7 +419,7 @@ def _requirement_coverage(profile, components, flows, production: bool) -> dict[
             "covered" if covered else "unmet",
             "Architecture carries a streaming/event ingestion path." if covered else "Real-time ingestion was extracted but no streaming/event path is explicit.",
         )
-    if "intermittent_connectivity" in capabilities or {"edge_processing", "hybrid_edge"} & posture or _requires_intermitent_connectivity(profile, profile_text):
+    if "intermittent_connectivity" in capabilities or {"edge_processing", "hybrid_edge"} & posture or _requires_intermitent_connectivity(profile, requirement_text):
         covered = any(term in body for term in ("edge", "buffer", "offline", "store-and-forward", "iot greengrass"))
         add(
             "intermittent_connectivity",
@@ -355,7 +435,31 @@ def _requirement_coverage(profile, components, flows, production: bool) -> dict[
             "covered" if covered else "unmet",
             "Architecture carries approval/workflow controls for actions." if covered else "Actions were extracted but approval/workflow controls are not explicit.",
         )
-    if any(term in profile_text for term in ("residency", "sovereign", "eu", "europe", "regional", "country")):
+    if any(term in requirement_text for term in ("minute", "second", "latency", "sla", "slo", "within", "real-time", "real time")):
+        covered = any(term in body for term in ("latency", "within", "hot path", "stream", "real-time", "real time", "slo", "sla", "minute", "second"))
+        add(
+            "latency_slo",
+            "Latency / SLO target",
+            "covered" if covered else "unmet",
+            "Architecture explicitly carries latency or hot-path processing targets." if covered else "Latency/SLO targets were extracted but not explicit in architecture text.",
+        )
+    if any(term in requirement_text for term in ("retain", "retention", "archive", "years", "months", "days", "audit")):
+        covered = any(term in body for term in ("retention", "lifecycle", "archive", "object lock", "audit", "backup", "evidence"))
+        add(
+            "retention_policy",
+            "Retention / lifecycle policy",
+            "covered" if covered else "unmet",
+            "Architecture carries retention, archive, or lifecycle controls." if covered else "Retention requirements were extracted but not explicit in architecture text.",
+        )
+    if any(term in requirement_text for term in ("every", "per ", "kb", "mb", "gb", "frequency", "payload", "times per", "requests", "events")):
+        covered = any(term in body for term in ("pricing", "driver", "volume", "frequency", "payload", "sizing", "capacity", "quota", "event"))
+        add(
+            "pricing_driver_visibility",
+            "Pricing driver visibility",
+            "covered" if covered else "unmet",
+            "Architecture text keeps workload sizing and pricing drivers visible for review." if covered else "Extracted workload drivers were not visible in architecture text.",
+        )
+    if any(term in requirement_text for term in ("residency", "sovereign", "eu", "europe", "regional", "country")):
         covered = any(term in body for term in ("region", "residency", "multi-region", "cross-region", "kms", "backup", "replication"))
         add(
             "data_residency_boundary",
@@ -368,6 +472,19 @@ def _requirement_coverage(profile, components, flows, production: bool) -> dict[
         "mode": "production" if production else "poc",
         "requirements": requirements,
     }
+
+
+def _snapshot_requirement_text(snapshot: dict | None) -> str:
+    if not isinstance(snapshot, dict):
+        return ""
+    values: list[str] = []
+    for key in ("quantities", "latency_slos", "connectivity_constraints", "compliance_security_hints"):
+        for item in snapshot.get(key) or []:
+            if isinstance(item, dict):
+                values.extend(str(value) for value in item.values() if value)
+            elif item:
+                values.append(str(item))
+    return " ".join(values)
 
 
 def _workload_specific_context(profile, snapshot: dict | None) -> dict:

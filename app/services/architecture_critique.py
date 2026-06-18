@@ -43,11 +43,17 @@ class ArchitectureCritiqueService:
             parsed = result.parsed
             deterministic_findings = list(deterministic.findings)
             parsed.findings = deterministic_findings + parsed.findings
+            parsed.findings = _drop_non_actionable_positive_findings(parsed.findings)
             parsed.findings = _drop_satisfied_media_findings(parsed.findings, understanding, spec)
             parsed.findings = _drop_satisfied_governance_findings(parsed.findings, spec)
             parsed.findings = _drop_satisfied_human_approval_findings(parsed.findings, spec)
             parsed.findings = _drop_satisfied_command_center_findings(parsed.findings, spec)
             parsed.findings = _drop_satisfied_healthcare_occupancy_findings(parsed.findings, spec)
+            parsed.findings = _drop_satisfied_requirement_coverage_findings(parsed.findings, spec)
+            parsed.findings = _drop_satisfied_metric_findings(parsed.findings, spec)
+            parsed.findings = _drop_satisfied_pricing_driver_findings(parsed.findings, spec)
+            parsed.findings = _drop_satisfied_deployment_posture_findings(parsed.findings, spec)
+            parsed.findings = _drop_satisfied_service_rationale_findings(parsed.findings, spec)
             parsed.findings = _downgrade_unconfirmed_model_criticals(parsed.findings, deterministic_findings)
             parsed.passed = not any(item.severity == "critical" for item in parsed.findings)
             if deterministic.customer_readiness_cap == "internal_only":
@@ -108,6 +114,32 @@ def _downgrade_unconfirmed_model_criticals(findings: list[ArchitectureCritiqueFi
                     "validation confirms the same blocker."
                 ),
             }))
+            continue
+        output.append(item)
+    return output
+
+
+def _drop_non_actionable_positive_findings(findings: list[ArchitectureCritiqueFinding]) -> list[ArchitectureCritiqueFinding]:
+    """Remove model critique rows that are affirmations, not findings.
+
+    Some live critiques phrase service-fit confirmations as warning findings.
+    Those are useful prose signals but they should not pollute the quality gate
+    or customer-readiness summary.
+    """
+    positive_terms = (
+        "correctly",
+        "appropriately",
+        "well-suited",
+        "well suited",
+        "is selected for",
+        "is modeled as",
+        "is used for",
+        "is chosen for",
+    )
+    output: list[ArchitectureCritiqueFinding] = []
+    for item in findings:
+        text = " ".join([item.issue, item.why_it_matters, item.recommended_fix]).lower()
+        if item.category == "service_fit" and any(term in text for term in positive_terms):
             continue
         output.append(item)
     return output
@@ -209,6 +241,122 @@ def _drop_satisfied_healthcare_occupancy_findings(findings: list[ArchitectureCri
         if item.category == "missing_flow" and "occupancy" in text and ("event router" in text or "schedule event router" in text):
             continue
         if item.category == "missing_flow" and "occupancy" in text and "external systems" in text and has_external_feed_path and has_private_to_adapter:
+            continue
+        output.append(item)
+    return output
+
+
+_REQUIREMENT_COVERAGE_TERMS = {
+    "computer_vision_hot_path": ("image", "imagery", "photo", "video", "vision", "camera", "scan", "ocr"),
+    "file_payload_ingestion": ("file", "payload", "upload", "attachment", "mb", "gb", "result"),
+    "document_processing_path": ("document", "text", "note", "pdf", "contract", "record", "ocr", "extraction"),
+    "real_time_ingestion": ("real-time", "real time", "stream", "anomaly", "detection", "telemetry", "event"),
+    "intermittent_connectivity": ("offline", "intermittent", "connectivity", "sync", "edge", "store-and-forward"),
+    "governed_action_path": ("approval", "human", "review", "governed", "workflow", "action"),
+    "data_residency_boundary": ("residency", "sovereign", "region", "country", "jurisdiction", "boundary"),
+}
+
+
+def _drop_satisfied_requirement_coverage_findings(findings: list[ArchitectureCritiqueFinding], spec: ArchitectureSpec) -> list[ArchitectureCritiqueFinding]:
+    coverage = ((spec.metadata or {}).get("requirement_coverage") or {}).get("requirements") or []
+    covered = {
+        str(item.get("id") or "")
+        for item in coverage
+        if isinstance(item, dict) and str(item.get("status") or "").lower() == "covered"
+    }
+    if not covered:
+        return findings
+    output: list[ArchitectureCritiqueFinding] = []
+    for item in findings:
+        if item.category not in {"missing_component", "missing_flow"}:
+            output.append(item)
+            continue
+        text = " ".join([item.issue, item.why_it_matters, item.recommended_fix]).lower()
+        if any(requirement_id in covered and any(term in text for term in terms) for requirement_id, terms in _REQUIREMENT_COVERAGE_TERMS.items()):
+            continue
+        output.append(item)
+    return output
+
+
+def _covered_requirement_ids(spec: ArchitectureSpec) -> set[str]:
+    coverage = ((spec.metadata or {}).get("requirement_coverage") or {}).get("requirements") or []
+    return {
+        str(item.get("id") or "")
+        for item in coverage
+        if isinstance(item, dict) and str(item.get("status") or "").lower() == "covered"
+    }
+
+
+def _drop_satisfied_metric_findings(findings: list[ArchitectureCritiqueFinding], spec: ArchitectureSpec) -> list[ArchitectureCritiqueFinding]:
+    covered = _covered_requirement_ids(spec)
+    if not covered:
+        return findings
+    output: list[ArchitectureCritiqueFinding] = []
+    for item in findings:
+        text = " ".join([item.category, item.issue, item.why_it_matters, item.recommended_fix]).lower()
+        if item.category == "latency_mismatch" and "latency_slo" in covered:
+            continue
+        if item.category == "metric_mismatch" and "retention_policy" in covered and any(term in text for term in ("retention", "retain", "archive", "audit", "lifecycle")):
+            continue
+        output.append(item)
+    return output
+
+
+def _drop_satisfied_pricing_driver_findings(findings: list[ArchitectureCritiqueFinding], spec: ArchitectureSpec) -> list[ArchitectureCritiqueFinding]:
+    covered = _covered_requirement_ids(spec)
+    if "pricing_driver_visibility" not in covered:
+        return findings
+    output: list[ArchitectureCritiqueFinding] = []
+    for item in findings:
+        text = " ".join([item.category, item.issue, item.why_it_matters, item.recommended_fix]).lower()
+        if item.category == "pricing_driver_mismatch" and any(term in text for term in ("frequency", "payload", "quantity", "driver", "telemetry", "volume")):
+            continue
+        output.append(item)
+    return output
+
+
+def _drop_satisfied_deployment_posture_findings(findings: list[ArchitectureCritiqueFinding], spec: ArchitectureSpec) -> list[ArchitectureCritiqueFinding]:
+    metadata = spec.metadata or {}
+    has_posture = bool(metadata.get("deployment_target") or metadata.get("deployment_target_note") or spec.regions)
+    if not has_posture:
+        return findings
+    output: list[ArchitectureCritiqueFinding] = []
+    for item in findings:
+        text = " ".join([item.category, item.issue, item.why_it_matters, item.recommended_fix]).lower()
+        if item.category == "deployment_posture" and any(term in text for term in ("deployment", "multi-region", "multi-az", "resilience", "posture")):
+            continue
+        output.append(item)
+    return output
+
+
+def _drop_satisfied_service_rationale_findings(findings: list[ArchitectureCritiqueFinding], spec: ArchitectureSpec) -> list[ArchitectureCritiqueFinding]:
+    service_text = " ".join(
+        " ".join(str(value or "") for value in [
+            item.service,
+            item.purpose,
+            getattr(item, "rationale", ""),
+            " ".join(item.alternatives_considered or []),
+        ])
+        for item in spec.selected_services
+    ).lower()
+    component_text = " ".join(
+        " ".join(str(value or "") for value in [
+            component.name,
+            component.service,
+            component.logical_group,
+        ])
+        for component in spec.components
+    ).lower()
+    if not (service_text or component_text):
+        return findings
+    output: list[ArchitectureCritiqueFinding] = []
+    for item in findings:
+        text = " ".join([item.category, item.issue, item.why_it_matters, item.recommended_fix]).lower()
+        if item.category == "service_fit" and any(service in text and service in service_text for service in ("sns", "sqs", "pinpoint", "eventbridge")):
+            continue
+        if item.category == "missing_component" and "time-series" in text and any(term in service_text or term in component_text for term in ("time-series", "timeseries", "timestream", "sitewise", "dynamodb")):
+            continue
+        if item.category == "missing_component" and any(term in text for term in ("anomaly", "detection", "real-time", "real time")) and any(term in service_text or term in component_text for term in ("sagemaker", "flink", "analytics", "inference", "anomaly")):
             continue
         output.append(item)
     return output

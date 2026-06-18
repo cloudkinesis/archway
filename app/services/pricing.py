@@ -524,12 +524,12 @@ def derive_industrial_iot_pricing_model(profile: UseCaseProfile) -> IndustrialIo
     assumptions = INDUSTRIAL_IOT_DEFAULT_ASSUMPTIONS
     smart_meters = _metric_value(profile, "smart_meters")
     transformers = _metric_value(profile, "distribution_transformers") or _metric_value(profile, "transformers")
-    asset_count = int(_monitored_asset_count(profile) or 1000)
+    asset_count = int(_monitored_asset_count(profile) or _generic_monitored_asset_count(profile) or 1000)
     telemetry_frequency_seconds = int(assumptions["telemetry_frequency_seconds"]["expected"])
-    payload_kb = float(assumptions["payload_kb"]["expected"])
+    payload_kb = float(_generic_payload_kb(profile) or assumptions["payload_kb"]["expected"])
     raw_samples_per_second = _structured_metric(profile, "business_targets", "raw_sensor_samples_per_second")
     sample_rate_khz = _structured_metric(profile, "business_targets", "streaming_sample_rate_khz")
-    explicit_seconds = _structured_metric(profile, "business_targets", "telemetry_frequency_seconds")
+    explicit_seconds = _structured_metric(profile, "business_targets", "telemetry_frequency_seconds") or _generic_telemetry_frequency_seconds(profile)
     refresh_minutes = _structured_metric(profile, "business_targets", "refresh_cadence_minutes")
     imagery_windows = _structured_metric(profile, "business_targets", "imagery_windows_per_day")
     explicit_events_per_day = _structured_metric(profile, "business_targets", "events_per_day")
@@ -565,7 +565,7 @@ def derive_industrial_iot_pricing_model(profile: UseCaseProfile) -> IndustrialIo
     assumptions_list = [
         "Assumption profile: balanced_production for industrial IoT telemetry until exact device frequency and payload size are confirmed.",
         f"Telemetry frequency {'derived from explicit user cadence or latency target' if (sample_rate_khz or explicit_seconds or refresh_minutes or latency_minutes) else 'assumed'} at {telemetry_frequency_seconds} seconds; low/high profile values are {assumptions['telemetry_frequency_seconds']['low']}s and {assumptions['telemetry_frequency_seconds']['high']}s.",
-        f"Payload size assumed at {payload_kb:g} KB; low/high profile values are {assumptions['payload_kb']['low']} KB and {assumptions['payload_kb']['high']} KB.",
+        f"Payload size {'derived from explicit user payload facts' if _generic_payload_kb(profile) else 'assumed'} at {payload_kb:g} KB; low/high profile values are {assumptions['payload_kb']['low']} KB and {assumptions['payload_kb']['high']} KB.",
         f"Candidate anomaly rate assumed at {candidate_rate:g}%; confirmed incident rate assumed at {confirmed_rate:g}%.",
         "ML scoring is priced on aggregated feature windows by default, not every raw telemetry event.",
         "Dispatch workflow, external API calls, and notifications are priced on confirmed incidents by default, not raw telemetry events.",
@@ -976,6 +976,9 @@ def _pricing_validation(profile: UseCaseProfile, drivers: PricingDrivers) -> dic
         "underwater_cameras": _structured_metric(profile, "asset_counts", "underwater_cameras"),
         "fish_cages": _structured_metric(profile, "asset_counts", "fish_cages"),
         "telemetry_frequency_seconds": _structured_metric(profile, "business_targets", "telemetry_frequency_seconds"),
+        "generic_monitored_assets": _generic_monitored_asset_count(profile),
+        "generic_telemetry_frequency_seconds": _generic_telemetry_frequency_seconds(profile),
+        "generic_payload_kb": _generic_payload_kb(profile),
         "imagery_windows_per_day": _structured_metric(profile, "business_targets", "imagery_windows_per_day"),
         "events_per_day": _structured_metric(profile, "business_targets", "events_per_day"),
         "terminal_count": _structured_metric(profile, "asset_counts", "terminal_count"),
@@ -1031,9 +1034,18 @@ def _pricing_validation(profile: UseCaseProfile, drivers: PricingDrivers) -> dic
         if provided.get("terminal_count") and drivers.asset_count < int(provided["terminal_count"]):
             scale_applied = False
             reasons.append("Explicit terminal count from the prompt was not represented in asset_count.")
+        if provided.get("generic_monitored_assets") and drivers.asset_count < int(provided["generic_monitored_assets"]):
+            scale_applied = False
+            reasons.append("Generic monitored asset count from the prompt was not represented in asset_count.")
         if provided.get("telemetry_frequency_seconds") and drivers.telemetry_frequency_seconds != int(provided["telemetry_frequency_seconds"]):
             scale_applied = False
             reasons.append("Explicit telemetry frequency seconds from the prompt was not applied.")
+        if provided.get("generic_telemetry_frequency_seconds") and drivers.telemetry_frequency_seconds != int(provided["generic_telemetry_frequency_seconds"]):
+            scale_applied = False
+            reasons.append("Generic telemetry cadence from the prompt was not applied.")
+        if provided.get("generic_payload_kb") and drivers.payload_kb != float(provided["generic_payload_kb"]):
+            scale_applied = False
+            reasons.append("Generic payload size from the prompt was not applied.")
         if refresh_minutes and not refresh_bound_to_telemetry and not refresh_requires_or_cadence:
             scale_applied = False
             reasons.append("Explicit imagery/refresh cadence from the prompt was not applied to telemetry_frequency_seconds.")
@@ -1519,6 +1531,53 @@ def _monitored_asset_count(profile: UseCaseProfile) -> int:
         return total
     excluded = {"staff_users", "resident_alert_recipients", "active_users", "user_count", "document_count", "historical_contract_count"}
     return sum(int(metric.value) for metric in profile.metrics if metric.kind == "asset_count" and metric.label not in excluded)
+
+
+def _generic_monitored_asset_count(profile: UseCaseProfile) -> int:
+    blocked_units = {
+        "second", "seconds", "minute", "minutes", "hour", "hours", "day", "days",
+        "month", "months", "year", "years", "kb", "mb", "gb", "tb", "percent",
+        "requests", "events", "messages", "transactions", "inferences",
+        "resident", "residents", "user", "users", "people", "customers", "patients", "viewers",
+    }
+    candidates: list[int] = []
+    for metric in profile.metrics:
+        unit = str(getattr(metric, "unit", "") or "").lower()
+        label = str(getattr(metric, "label", "") or "").lower()
+        raw = str(getattr(metric, "raw", "") or "").lower()
+        if getattr(metric, "kind", "") == "asset_count":
+            if label not in {"staff_users", "resident_alert_recipients", "active_users", "user_count", "document_count", "historical_contract_count"}:
+                candidates.append(int(metric.value))
+            continue
+        if "explicit_quantity" not in label:
+            continue
+        if "_per_" in unit or " per " in raw:
+            continue
+        if any(blocked == unit or unit.startswith(f"{blocked}_") or unit.endswith(f"_{blocked}") for blocked in blocked_units):
+            continue
+        if any(token in raw for token in ("retain", "retention", "within", "latency", "target", "every")):
+            continue
+        candidates.append(int(metric.value))
+    return max(candidates) if candidates else 0
+
+
+def _generic_telemetry_frequency_seconds(profile: UseCaseProfile) -> int:
+    for metric in profile.metrics:
+        unit = str(getattr(metric, "unit", "") or "").lower()
+        raw = str(getattr(metric, "raw", "") or "").lower()
+        if unit.startswith("seconds") or unit == "seconds":
+            if "every" in raw or " per " in raw or "cadence" in raw or "frequency" in raw:
+                return max(1, int(metric.value))
+    return 0
+
+
+def _generic_payload_kb(profile: UseCaseProfile) -> float:
+    for metric in profile.metrics:
+        unit = str(getattr(metric, "unit", "") or "").lower()
+        raw = str(getattr(metric, "raw", "") or "").lower()
+        if unit.startswith("kb_per") or ("kb" in unit and " per " in raw):
+            return float(metric.value)
+    return 0.0
 
 
 def _metric_max(profile: UseCaseProfile, tokens: tuple[str, ...]) -> float:
