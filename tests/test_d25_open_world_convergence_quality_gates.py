@@ -12,6 +12,7 @@ from app.domain.source_of_truth import CanonicalFact, CanonicalFactsLedger
 from app.services.architecture import _architecture_summary, _open_world_components, _requirement_coverage
 from app.services.architecture_critique import (
     ArchitectureCritiqueFinding,
+    _drop_non_actionable_positive_findings,
     _drop_satisfied_deployment_posture_findings,
     _drop_satisfied_metric_findings,
     _drop_satisfied_pricing_driver_findings,
@@ -901,6 +902,29 @@ def test_model_service_and_posture_warnings_drop_when_architecture_carries_evide
     )
 
     assert remaining == []
+
+
+def test_positive_model_service_fit_rows_do_not_become_quality_warnings():
+    findings = [
+        ArchitectureCritiqueFinding(
+            severity="warning",
+            category="service_fit",
+            issue="Amazon SageMaker is appropriately selected for model training and inference.",
+            why_it_matters="This is a suitable fit.",
+            recommended_fix="No change required.",
+        ),
+        ArchitectureCritiqueFinding(
+            severity="warning",
+            category="service_fit",
+            issue="The notification service is missing a rationale.",
+            why_it_matters="Service fit must be explained.",
+            recommended_fix="Add rationale.",
+        ),
+    ]
+
+    remaining = _drop_non_actionable_positive_findings(findings)
+
+    assert [item.issue for item in remaining] == ["The notification service is missing a rationale."]
 
 
 def test_convergence_treats_generic_not_estimated_pricing_as_directional_not_internal_only():

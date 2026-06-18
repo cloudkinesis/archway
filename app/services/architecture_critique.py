@@ -43,6 +43,7 @@ class ArchitectureCritiqueService:
             parsed = result.parsed
             deterministic_findings = list(deterministic.findings)
             parsed.findings = deterministic_findings + parsed.findings
+            parsed.findings = _drop_non_actionable_positive_findings(parsed.findings)
             parsed.findings = _drop_satisfied_media_findings(parsed.findings, understanding, spec)
             parsed.findings = _drop_satisfied_governance_findings(parsed.findings, spec)
             parsed.findings = _drop_satisfied_human_approval_findings(parsed.findings, spec)
@@ -113,6 +114,32 @@ def _downgrade_unconfirmed_model_criticals(findings: list[ArchitectureCritiqueFi
                     "validation confirms the same blocker."
                 ),
             }))
+            continue
+        output.append(item)
+    return output
+
+
+def _drop_non_actionable_positive_findings(findings: list[ArchitectureCritiqueFinding]) -> list[ArchitectureCritiqueFinding]:
+    """Remove model critique rows that are affirmations, not findings.
+
+    Some live critiques phrase service-fit confirmations as warning findings.
+    Those are useful prose signals but they should not pollute the quality gate
+    or customer-readiness summary.
+    """
+    positive_terms = (
+        "correctly",
+        "appropriately",
+        "well-suited",
+        "well suited",
+        "is selected for",
+        "is modeled as",
+        "is used for",
+        "is chosen for",
+    )
+    output: list[ArchitectureCritiqueFinding] = []
+    for item in findings:
+        text = " ".join([item.issue, item.why_it_matters, item.recommended_fix]).lower()
+        if item.category == "service_fit" and any(term in text for term in positive_terms):
             continue
         output.append(item)
     return output
