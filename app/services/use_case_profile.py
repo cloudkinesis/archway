@@ -491,7 +491,11 @@ def _has_live_media_delivery_intent(lower: str) -> bool:
         "stream delivery",
         "media delivery",
     )
-    return any(term in lower for term in media_delivery_terms)
+    normalized = lower.replace("-", " ")
+    return any(
+        _contains_marker(lower, term) and not _is_marker_negated(normalized, term)
+        for term in media_delivery_terms
+    )
 
 
 def _is_healthcare_operations_scheduling(lower: str) -> bool:

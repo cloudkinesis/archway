@@ -1,3 +1,4 @@
+import re
 from enum import Enum
 
 from app.services.use_case_profile import UseCaseProfile
@@ -95,4 +96,20 @@ def _has_live_media_distribution_intent(profile: UseCaseProfile) -> bool:
         "glass to glass",
         "bitrate",
     )
-    return any(term in text for term in media_delivery_terms)
+    normalized = text.replace("-", " ")
+    return any(
+        _contains_marker(text, term) and not _is_marker_negated(normalized, term)
+        for term in media_delivery_terms
+    )
+
+
+def _contains_marker(lower: str, marker: str) -> bool:
+    if len(marker) <= 4 and marker.replace(" ", "").isalnum():
+        return re.search(rf"\b{re.escape(marker)}\b", lower) is not None
+    return marker in lower
+
+
+def _is_marker_negated(normalized_lower: str, marker: str) -> bool:
+    marker_pattern = re.escape(marker.replace("-", " ")).replace(r"\ ", r"\s+")
+    prefix = r"(?:not|no|without|exclude|excluding|avoid|avoiding|not\s+a|not\s+an|not\s+the)"
+    return re.search(rf"\b{prefix}\b(?:\W+\w+){{0,6}}\W+{marker_pattern}\b", normalized_lower) is not None
