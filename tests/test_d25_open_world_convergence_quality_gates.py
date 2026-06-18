@@ -9,9 +9,11 @@ from app.models.domain import (
     SecurityControl,
 )
 from app.domain.source_of_truth import CanonicalFact, CanonicalFactsLedger
-from app.services.architecture import _open_world_components, _requirement_coverage
+from app.services.architecture import _architecture_summary, _open_world_components, _requirement_coverage
 from app.services.architecture_critique import (
     ArchitectureCritiqueFinding,
+    _drop_satisfied_metric_findings,
+    _drop_satisfied_pricing_driver_findings,
     _drop_satisfied_requirement_coverage_findings,
 )
 from app.services.architecture_revisions import ArchitectureRevisionService
@@ -430,6 +432,59 @@ def test_requirement_coverage_does_not_require_document_path_when_excluded():
     assert "document_processing_path" not in requirement_ids
 
 
+def test_requirement_coverage_records_generic_latency_retention_and_file_payloads():
+    profile = UseCaseProfile(
+        domain="novel_operations",
+        workload_families=["industrial_iot_streaming_ml"],
+        excluded_families=[],
+        capabilities=["real_time_ingestion"],
+        entities=["remote_assets"],
+        signals=["temperature_reading", "result_file", "camera_image"],
+        actions=["approve_hold_recommendation"],
+    )
+    components = [
+        ArchitectureComponent(id="iot", name="Telemetry stream ingestion", service="AWS IoT Core"),
+        ArchitectureComponent(id="files", name="File and media evidence ingestion", service="Amazon S3"),
+        ArchitectureComponent(id="workflow", name="Human approval workflow", service="AWS Step Functions"),
+        ArchitectureComponent(id="archive", name="Retention and audit archive", service="Amazon S3 Object Lock"),
+    ]
+    flows = [
+        ArchitectureFlow(id="f1", source="iot", target="workflow", label="Score events within 6 minutes and route recommendations to human approval"),
+        ArchitectureFlow(id="f2", source="files", target="archive", label="Store 2 MB files, camera images, and per-data-class retention policies"),
+    ]
+    snapshot = {
+        "latency_slos": [{"target": "within 6 minutes", "source_text": "Predict alerts within 6 minutes."}],
+        "quantities": [
+            {"source_text": "2 MB result files 600 times per day"},
+            {"source_text": "5 MB images 12 times per day per site"},
+            {"source_text": "retain telemetry for 18 months"},
+            {"source_text": "retain audit decisions for 10 years"},
+        ],
+    }
+
+    coverage = _requirement_coverage(profile, components, flows, production=True, snapshot=snapshot)
+    statuses = {item["id"]: item["status"] for item in coverage["requirements"]}
+
+    assert statuses["latency_slo"] == "covered"
+    assert statuses["file_payload_ingestion"] == "covered"
+    assert statuses["retention_policy"] == "covered"
+    assert statuses["pricing_driver_visibility"] == "covered"
+
+
+def test_architecture_summary_surfaces_extracted_requirements_without_textbox_style():
+    base = "Validate an event ingestion and prediction path."
+    context = {
+        "quantities": ["2 MB result files 600 times per day", "retain audit decisions for 10 years"],
+        "latency_slos": [{"target": "within 6 minutes"}],
+    }
+
+    summary = _architecture_summary(base, context=context, production=False)
+
+    assert "Must carry extracted latency targets" in summary
+    assert "2 MB result files" in summary
+    assert "\n" not in summary
+
+
 def test_pricing_driver_selector_honors_excluded_rag_family_even_with_document_inputs():
     profile = UseCaseProfile(
         domain="novel_operations",
@@ -749,6 +804,48 @@ def test_model_missing_component_findings_drop_when_requirement_coverage_is_alre
     remaining = _drop_satisfied_requirement_coverage_findings(findings, spec)
 
     assert [item.issue for item in remaining] == ["No unrelated analytics component is present."]
+
+
+def test_model_metric_and_pricing_warnings_drop_when_generic_coverage_is_satisfied():
+    spec = SimpleNamespace(metadata={
+        "requirement_coverage": {
+            "requirements": [
+                {"id": "latency_slo", "status": "covered"},
+                {"id": "retention_policy", "status": "covered"},
+                {"id": "pricing_driver_visibility", "status": "covered"},
+            ]
+        }
+    })
+    findings = [
+        ArchitectureCritiqueFinding(
+            severity="warning",
+            category="latency_mismatch",
+            issue="The architecture does not explicitly address the 6 minute latency target.",
+            why_it_matters="Latency matters.",
+            recommended_fix="Add hot path.",
+        ),
+        ArchitectureCritiqueFinding(
+            severity="warning",
+            category="metric_mismatch",
+            issue="The architecture does not account for retention periods.",
+            why_it_matters="Retention matters.",
+            recommended_fix="Add retention policy.",
+        ),
+        ArchitectureCritiqueFinding(
+            severity="warning",
+            category="pricing_driver_mismatch",
+            issue="Pricing does not reflect exact telemetry frequency and payload size.",
+            why_it_matters="Pricing matters.",
+            recommended_fix="Confirm drivers.",
+        ),
+    ]
+
+    remaining = _drop_satisfied_pricing_driver_findings(
+        _drop_satisfied_metric_findings(findings, spec),
+        spec,
+    )
+
+    assert remaining == []
 
 
 def test_convergence_treats_generic_not_estimated_pricing_as_directional_not_internal_only():

@@ -49,6 +49,8 @@ class ArchitectureCritiqueService:
             parsed.findings = _drop_satisfied_command_center_findings(parsed.findings, spec)
             parsed.findings = _drop_satisfied_healthcare_occupancy_findings(parsed.findings, spec)
             parsed.findings = _drop_satisfied_requirement_coverage_findings(parsed.findings, spec)
+            parsed.findings = _drop_satisfied_metric_findings(parsed.findings, spec)
+            parsed.findings = _drop_satisfied_pricing_driver_findings(parsed.findings, spec)
             parsed.findings = _downgrade_unconfirmed_model_criticals(parsed.findings, deterministic_findings)
             parsed.passed = not any(item.severity == "critical" for item in parsed.findings)
             if deterministic.customer_readiness_cap == "internal_only":
@@ -217,6 +219,7 @@ def _drop_satisfied_healthcare_occupancy_findings(findings: list[ArchitectureCri
 
 _REQUIREMENT_COVERAGE_TERMS = {
     "computer_vision_hot_path": ("image", "imagery", "photo", "video", "vision", "camera", "scan", "ocr"),
+    "file_payload_ingestion": ("file", "payload", "upload", "attachment", "mb", "gb", "result"),
     "document_processing_path": ("document", "text", "note", "pdf", "contract", "record", "ocr", "extraction"),
     "intermittent_connectivity": ("offline", "intermittent", "connectivity", "sync", "edge", "store-and-forward"),
     "governed_action_path": ("approval", "human", "review", "governed", "workflow", "action"),
@@ -240,6 +243,43 @@ def _drop_satisfied_requirement_coverage_findings(findings: list[ArchitectureCri
             continue
         text = " ".join([item.issue, item.why_it_matters, item.recommended_fix]).lower()
         if any(requirement_id in covered and any(term in text for term in terms) for requirement_id, terms in _REQUIREMENT_COVERAGE_TERMS.items()):
+            continue
+        output.append(item)
+    return output
+
+
+def _covered_requirement_ids(spec: ArchitectureSpec) -> set[str]:
+    coverage = ((spec.metadata or {}).get("requirement_coverage") or {}).get("requirements") or []
+    return {
+        str(item.get("id") or "")
+        for item in coverage
+        if isinstance(item, dict) and str(item.get("status") or "").lower() == "covered"
+    }
+
+
+def _drop_satisfied_metric_findings(findings: list[ArchitectureCritiqueFinding], spec: ArchitectureSpec) -> list[ArchitectureCritiqueFinding]:
+    covered = _covered_requirement_ids(spec)
+    if not covered:
+        return findings
+    output: list[ArchitectureCritiqueFinding] = []
+    for item in findings:
+        text = " ".join([item.category, item.issue, item.why_it_matters, item.recommended_fix]).lower()
+        if item.category == "latency_mismatch" and "latency_slo" in covered:
+            continue
+        if item.category == "metric_mismatch" and "retention_policy" in covered and any(term in text for term in ("retention", "retain", "archive", "audit", "lifecycle")):
+            continue
+        output.append(item)
+    return output
+
+
+def _drop_satisfied_pricing_driver_findings(findings: list[ArchitectureCritiqueFinding], spec: ArchitectureSpec) -> list[ArchitectureCritiqueFinding]:
+    covered = _covered_requirement_ids(spec)
+    if "pricing_driver_visibility" not in covered:
+        return findings
+    output: list[ArchitectureCritiqueFinding] = []
+    for item in findings:
+        text = " ".join([item.category, item.issue, item.why_it_matters, item.recommended_fix]).lower()
+        if item.category == "pricing_driver_mismatch" and any(term in text for term in ("frequency", "payload", "quantity", "driver", "telemetry", "volume")):
             continue
         output.append(item)
     return output

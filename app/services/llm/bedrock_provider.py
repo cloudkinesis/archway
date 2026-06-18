@@ -142,12 +142,47 @@ def _converse_messages(messages: list[LLMMessage], response_schema: type[BaseMod
     system = "\n\n".join(message.content for message in messages if message.role == "system")
     bedrock_messages = [{"role": message.role, "content": [{"text": message.content}]} for message in messages if message.role != "system"]
     if response_schema:
-        schema = response_schema.model_json_schema()
-        bedrock_messages.append({"role": "user", "content": [{"text": f"Return JSON only matching this schema: {json.dumps(schema)}"}]})
+        bedrock_messages.append({"role": "user", "content": [{"text": _schema_instruction(response_schema)}]})
     if not bedrock_messages:
         bedrock_messages.append({"role": "user", "content": [{"text": "Return a concise response."}]})
     system_messages = [{"text": system}] if system else []
     return bedrock_messages, system_messages
+
+
+def _schema_instruction(response_schema: type[BaseModel]) -> str:
+    if response_schema.__name__ == "DeepUseCaseUnderstanding":
+        return (
+            "Return a JSON object INSTANCE only, not a JSON Schema and not markdown. "
+            "Do not include '$defs', 'properties', 'title', or 'type' keys unless they are part of the use case text. "
+            "Use this exact top-level shape and fill it from the use case:\n"
+            "{\n"
+            '  "industry": "string",\n'
+            '  "domain": "string",\n'
+            '  "workload_families": ["string"],\n'
+            '  "excluded_patterns": ["string"],\n'
+            '  "capabilities": ["string"],\n'
+            '  "extracted_metrics": [{"name":"string","value":"string-or-number","unit":"string-or-null","source_text":"string","confidence":"low|medium|high","derived":false,"derivation":null,"pricing_relevance":"none|low|medium|high"}],\n'
+            '  "latency_constraints": [{"name":"string","target":"string","latency_class":"string","source_text":"string","architecture_impact":"string","confidence":"low|medium|high"}],\n'
+            '  "compliance_constraints": [{"name":"string","source_text":"string","jurisdiction":null,"requires_validation":true,"architecture_impact":"string"}],\n'
+            '  "action_flows": [{"action_name":"string","action_type":"string","source_text":"string","impact_level":"low|medium|high|critical","required_controls":["string"],"recommended_failure_behavior":"block|queue_for_review|allow_with_audit|rollback|recommendation_only"}],\n'
+            '  "deployment_posture": "public_cloud|hybrid|edge|unknown",\n'
+            '  "architecture_implications": ["string"],\n'
+            '  "pricing_implications": ["string"],\n'
+            '  "dossier_research_questions": ["string"],\n'
+            '  "critical_unknowns": ["string"],\n'
+            '  "confidence": "low|medium|high",\n'
+            '  "concerns": ["string"]\n'
+            "}"
+        )
+    schema = response_schema.model_json_schema()
+    required = ", ".join(schema.get("required") or [])
+    properties = ", ".join((schema.get("properties") or {}).keys())
+    return (
+        "Return JSON only: a data object instance matching the requested schema, not the schema definition. "
+        "Do not include '$defs', 'properties', 'title', or 'type' keys unless the output model explicitly requires them. "
+        f"Required top-level fields: {required or 'none'}. Top-level fields: {properties}. "
+        f"Schema reference: {json.dumps(schema)}"
+    )
 
 
 def _extract_json(text: str) -> str:

@@ -1086,6 +1086,7 @@ function Report({
 }) {
   const [researchSubTab, setResearchSubTab] = useState<"overview" | "architecture" | "pricing" | "competitors" | "risks" | "evidence">("overview");
   const [exportJobId, setExportJobId] = useState<string | null>(null);
+  const [researchJobId, setResearchJobId] = useState<string | null>(null);
   const researchQuality = report.metadata?.research_quality as { label?: string; reason?: string } | undefined;
   const evidenceQuality = report.metadata?.evidence_quality as { evidence_authority?: string; limitations?: string[] } | undefined;
   const customerReadiness = report.metadata?.customer_readiness as { status?: string; blockers?: string[]; warnings?: string[] } | undefined;
@@ -1099,7 +1100,16 @@ function Report({
     const result = await api.getExport(session.id);
     onExportUpdated(result.export);
   });
+  const researchJob = useJobPolling(session.id, researchJobId, async () => {
+    const hydrated = await api.hydrateSession(session.id);
+    onReportUpdated(hydrated.research ?? report);
+    onNarrativeUpdated(hydrated.research_narrative ?? null);
+    onDigestUpdated(hydrated.research_digest ?? null);
+    onViewModelUpdated(hydrated.research_view_model ?? null);
+    onExportUpdated(null);
+  });
   const exportRun = useMutation({ mutationFn: () => api.generateExport(session.id), onSuccess: (result) => setExportJobId(result.job.id) });
+  const refreshResearch = useMutation({ mutationFn: () => api.runResearch(session.id), onSuccess: (result) => setResearchJobId(result.job.id) });
   const useProfile = useMutation({
     mutationFn: (profileId: string) => api.usePricingProfile(session.id, profileId),
     onSuccess: async (result) => {
@@ -1130,10 +1140,15 @@ function Report({
           onNext={onNext}
           onExport={() => exportRun.mutate()}
           exportBusy={exportRun.isPending || exportJob.isActive}
+          onRefreshResearch={() => refreshResearch.mutate()}
+          refreshBusy={refreshResearch.isPending || researchJob.isActive}
           exportBundle={latestExport}
         />
         {exportJob.job ? <JobProgress job={exportJob.job} onCancel={() => exportJob.cancel.mutate()} /> : null}
+        {researchJob.job ? <JobProgress job={researchJob.job} onCancel={() => researchJob.cancel.mutate()} /> : null}
         {exportRun.error ? <Banner tone="danger" text={(exportRun.error as Error).message} /> : null}
+        {refreshResearch.error ? <Banner tone="danger" text={(refreshResearch.error as Error).message} /> : null}
+        {researchJob.job?.status === "failed" ? <Banner tone="danger" text={researchJob.job.error ?? "Research refresh failed. Diagnostics were recorded."} /> : null}
         <ExecutiveBriefing viewModel={viewModel} />
         <PricingCheckpointCard
           checkpoint={checkpoint.data?.checkpoint}
@@ -1146,7 +1161,7 @@ function Report({
         {researchSubTab === "overview" ? <OverviewResearchTab viewModel={viewModel} /> : null}
         {researchSubTab === "architecture" ? <ArchitectureRationaleTab viewModel={viewModel} /> : null}
         {researchSubTab === "pricing" ? <PricingResearchTab viewModel={viewModel} /> : null}
-        {researchSubTab === "competitors" ? <CompetitorsResearchTab viewModel={viewModel} /> : null}
+        {researchSubTab === "competitors" ? <CompetitorsResearchTab viewModel={viewModel} onRefreshResearch={() => refreshResearch.mutate()} refreshBusy={refreshResearch.isPending || researchJob.isActive} /> : null}
         {researchSubTab === "risks" ? <RisksResearchTab viewModel={viewModel} /> : null}
         {researchSubTab === "evidence" ? <EvidenceResearchTab viewModel={viewModel} /> : null}
         <TrustPanel pricing={report.pricing_analysis} exportBundle={latestExport} />
@@ -1302,6 +1317,8 @@ function ResearchStickyHeader({
   onNext,
   onExport,
   exportBusy,
+  onRefreshResearch,
+  refreshBusy,
   exportBundle
 }: {
   sessionId: string;
@@ -1309,6 +1326,8 @@ function ResearchStickyHeader({
   onNext: () => void;
   onExport: () => void;
   exportBusy: boolean;
+  onRefreshResearch: () => void;
+  refreshBusy: boolean;
   exportBundle: ExportBundle | null;
 }) {
   return (
@@ -1332,8 +1351,8 @@ function ResearchStickyHeader({
               <Download className="h-4 w-4" /> ZIP ready
             </a>
           ) : null}
-          <Button icon={RefreshCw} variant="secondary" disabled title="Refresh evidence requires a fresh research run so citations, pricing, and competitor context stay consistent.">Refresh evidence</Button>
-          <Button icon={Search} variant="secondary" disabled title="Competitor scan runs during a fresh research pass when Tavily is enabled.">Run competitor scan</Button>
+          <Button icon={refreshBusy ? Loader2 : RefreshCw} variant="secondary" disabled={refreshBusy} onClick={onRefreshResearch}>{refreshBusy ? "Refreshing evidence" : "Refresh evidence"}</Button>
+          <Button icon={refreshBusy ? Loader2 : Search} variant="secondary" disabled={refreshBusy} onClick={onRefreshResearch}>{refreshBusy ? "Research running" : "Run competitor scan"}</Button>
         </div>
       </div>
       <div className="mt-2 flex flex-wrap gap-3 text-xs text-awsTextMuted">
@@ -1535,9 +1554,9 @@ function PricingBreakdownTable({ pricing }: { pricing: PricingViewModel }) {
   );
 }
 
-function CompetitorsResearchTab({ viewModel }: { viewModel: ResearchViewModel }) {
+function CompetitorsResearchTab({ viewModel, onRefreshResearch, refreshBusy }: { viewModel: ResearchViewModel; onRefreshResearch: () => void; refreshBusy: boolean }) {
   const scan = viewModel.competitor_scan;
-  const disabledReason = !scan.tavily_enabled
+  const refreshReason = !scan.tavily_enabled
     ? "Tavily is not enabled for this session."
     : !scan.scan_enabled
       ? "Competitor scan is not enabled for this session."
@@ -1550,7 +1569,9 @@ function CompetitorsResearchTab({ viewModel }: { viewModel: ResearchViewModel })
             <h3 className="font-semibold">Competitor scan: {scan.status.replace("_", " ")}</h3>
             <p className="mt-1 text-sm text-awsTextMuted">{scan.failure_reason || scan.skipped_reason || "Competitor context is shown only when external evidence is available."}</p>
           </div>
-          <Button icon={Search} variant="secondary" disabled title={disabledReason}>Run with research</Button>
+          <Button icon={refreshBusy ? Loader2 : Search} variant="secondary" disabled={refreshBusy} onClick={onRefreshResearch} title={refreshReason}>
+            {refreshBusy ? "Research running" : "Run with research"}
+          </Button>
         </div>
         <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
           <Metric label="Tavily" value={String(scan.tavily_enabled)} />
