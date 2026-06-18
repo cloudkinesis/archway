@@ -412,7 +412,7 @@ def _rank_workload_families(lower: str, capabilities: list[str]) -> list[str]:
     if any(term in lower for term in ("compound", "drug interaction", "faers", "molecular")):
         scores["graph_analytics"] += 6
         scores["industrial_iot_streaming_ml"] = 0
-    if any(term in lower for term in ("live streams", "live sports", "4k hdr", "concurrent viewers", "drm", "cdn")):
+    if _has_live_media_delivery_intent(lower):
         scores["live_streaming"] += 9
         scores["web_api_application"] = 0
         scores["computer_vision_quality_inspection"] = 0
@@ -463,6 +463,35 @@ def _excluded_families(lower: str, selected: list[str]) -> list[str]:
     if "computer_vision_quality_inspection" not in selected and not any(term in lower for term in ("image", "video", "camera", "vision")):
         excluded.append("computer_vision_quality_inspection")
     return excluded
+
+
+def _has_live_media_delivery_intent(lower: str) -> bool:
+    """Distinguish media-as-product from media-as-source-data.
+
+    Many open-world workloads ingest video or expose a public dashboard. That
+    should not select live-media pricing/diagrams unless the requirement is
+    actually about delivering media streams to an audience.
+    """
+    media_delivery_terms = (
+        "live stream",
+        "live streams",
+        "live streaming",
+        "video streaming",
+        "streaming video",
+        "live sports",
+        "4k hdr",
+        "ott",
+        "cdn",
+        "drm",
+        "playback",
+        "watch time",
+        "glass-to-glass",
+        "glass to glass",
+        "bitrate",
+        "stream delivery",
+        "media delivery",
+    )
+    return any(term in lower for term in media_delivery_terms)
 
 
 def _is_healthcare_operations_scheduling(lower: str) -> bool:

@@ -32,7 +32,9 @@ def select_pricing_driver_family(profile: UseCaseProfile) -> PricingDriverFamily
         return PricingDriverFamily.TELECOM_CDR_ANALYTICS
     if {"capital_markets_risk_engine", "monte_carlo_risk_grid", "pre_trade_compliance"} & families:
         return PricingDriverFamily.CAPITAL_MARKETS_RISK_ENGINE
-    if "live_streaming" in families or ("video_streaming" in capabilities and _has_live_media_distribution_intent(profile)):
+    if "live_streaming" in families or (
+        "video_streaming" in capabilities and _has_live_media_distribution_intent(profile)
+    ):
         return PricingDriverFamily.LIVE_MEDIA_STREAMING
     if "hpc_simulation" in families or "hpc_simulation" in capabilities:
         return PricingDriverFamily.HPC_SIMULATION
@@ -75,16 +77,13 @@ def _profile_text(profile: UseCaseProfile) -> str:
 
 def _has_live_media_distribution_intent(profile: UseCaseProfile) -> bool:
     text = _profile_text(profile)
-    audience_or_distribution_terms = (
-        "audience",
-        "viewer",
-        "viewers",
-        "subscriber",
-        "subscribers",
-        "broadcast",
+    media_delivery_terms = (
+        "live stream",
+        "live streams",
+        "live streaming",
+        "video streaming",
+        "streaming video",
         "ott",
-        "channel",
-        "channels",
         "content delivery",
         "cdn",
         "drm",
@@ -92,7 +91,8 @@ def _has_live_media_distribution_intent(profile: UseCaseProfile) -> bool:
         "playback",
         "stream delivery",
         "media delivery",
-        "concurrent streams",
-        "concurrent viewers",
+        "glass-to-glass",
+        "glass to glass",
+        "bitrate",
     )
-    return any(term in text for term in audience_or_distribution_terms)
+    return any(term in text for term in media_delivery_terms)

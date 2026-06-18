@@ -37,6 +37,19 @@ def test_video_payload_without_audience_intent_does_not_select_live_media_pricin
     assert select_pricing_driver_family(profile) is PricingDriverFamily.GENERIC_DIRECTIONAL
 
 
+def test_public_analytics_with_ingested_video_is_not_live_media_streaming():
+    profile = profile_use_case(
+        "A coastal habitat restoration program ingests drone imagery, underwater robot video, "
+        "water sensors, field notes, and permit PDFs. It predicts restoration risk every "
+        "15 minutes, schedules crews for approval, keeps evidence for 25 years, and publishes "
+        "a public progress dashboard for 50,000 monthly visitors and 5,000 concurrent viewers."
+    )
+
+    assert "live_streaming" not in profile.workload_families
+    assert "video_streaming" not in profile.capability_model
+    assert select_pricing_driver_family(profile) is PricingDriverFamily.GENERIC_DIRECTIONAL
+
+
 def test_video_distribution_with_viewer_intent_still_selects_live_media_pricing():
     profile = _profile(
         workload_families=["live_streaming"],
