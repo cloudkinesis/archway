@@ -76,12 +76,19 @@ function persistHealthAccepted(value: boolean) {
 }
 
 function furthestCompletedView(data: {
+  session?: Session | null;
   research?: ResearchReport | null;
   architecture?: { architectures?: ArchitectureSpec[] | null } | null;
   diagrams?: DiagramGalleryResult[] | null;
+  jobs?: LatestJobs | null;
 }): View {
   if ((data.diagrams ?? []).length > 0) return "diagrams";
   if ((data.architecture?.architectures ?? []).length > 0) return "architecture";
+  if (data.jobs?.export?.status === "queued" || data.jobs?.export?.status === "running") return "diagrams";
+  if (data.jobs?.diagrams?.status === "queued" || data.jobs?.diagrams?.status === "running") return "diagrams";
+  if (data.jobs?.architecture?.status === "queued" || data.jobs?.architecture?.status === "running") return "architecture";
+  if (data.jobs?.research?.status === "queued" || data.jobs?.research?.status === "running") return "research";
+  if (data.session) return phaseView(data.session);
   if (data.research) return "research";
   return "synthesis";
 }
@@ -392,6 +399,7 @@ function Workspace(props: {
   hydrationLoading: boolean;
   hydrationError: Error | null;
 }) {
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
   const tabs: Array<[View, string, typeof MessageSquareText]> = [
     ["synthesis", "Synthesis", MessageSquareText],
     ["research", "Research", ClipboardList],
@@ -399,8 +407,13 @@ function Workspace(props: {
     ["diagrams", "Diagrams", Image],
     ["diagnostics", "Diagnostics", Activity]
   ];
+  useEffect(() => {
+    workspaceRef.current?.scrollIntoView({ block: "start" });
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [props.session.id, props.view]);
+
   return (
-    <div className="flex min-h-full flex-col">
+    <div ref={workspaceRef} className="flex min-h-full flex-col">
       <nav className="sticky top-0 z-30 flex gap-1 border-b border-awsBorder bg-surface px-4 py-3">
         {tabs.map(([id, label, Icon]) => (
           <button key={id} onClick={() => props.setView(id)} className={`flex items-center gap-2 border px-3 py-2 text-sm ${props.view === id ? "border-awsOrange bg-awsPanelSoft text-awsTextPrimary" : "border-transparent text-awsTextMuted hover:border-awsBorder"}`}>
@@ -698,6 +711,7 @@ function DiagramView({ session, galleries, setGalleries, latestExport, setLatest
   const [exportJobId, setExportJobId] = useState<string | null>(null);
   const [diagramRefreshError, setDiagramRefreshError] = useState<string | null>(null);
   const [diagramRefreshPending, setDiagramRefreshPending] = useState(false);
+  const autoRefreshAttemptRef = useRef<string | null>(null);
   const [selected, setSelected] = useState<{
     gallery: DiagramGalleryResult;
     diagram: DiagramGalleryResult["diagrams"][number];
@@ -718,6 +732,25 @@ function DiagramView({ session, galleries, setGalleries, latestExport, setLatest
       setDiagramRefreshPending(false);
     }
   }, [session.id, setGalleries]);
+  useEffect(() => {
+    autoRefreshAttemptRef.current = null;
+  }, [session.id]);
+  useEffect(() => {
+    const latest = latestJobs.diagrams;
+    const sessionLooksDiagramComplete =
+      session.active_phase === "diagrams" &&
+      (session.status === "complete" || session.status === "diagrams" || latest?.status === "succeeded");
+    const refreshKey = `${session.id}:${latest?.id ?? "session"}`;
+    if (
+      galleries.length === 0 &&
+      sessionLooksDiagramComplete &&
+      !diagramRefreshPending &&
+      autoRefreshAttemptRef.current !== refreshKey
+    ) {
+      autoRefreshAttemptRef.current = refreshKey;
+      void refreshDiagrams();
+    }
+  }, [diagramRefreshPending, galleries.length, latestJobs.diagrams, refreshDiagrams, session.active_phase, session.id, session.status]);
   useEffect(() => {
     const latest = latestJobs.diagrams;
     if (!galleries.length && latest?.id && latest.id !== jobId && ["queued", "running", "succeeded"].includes(latest.status)) {

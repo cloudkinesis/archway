@@ -160,6 +160,12 @@ class ExportPackageService:
             diagrams=diagrams,
         )
         self.artifacts.write_json(session_id, "quality", "dossier_consistency_check", deep_dossier.consistency_check.model_dump(mode="json"))
+        convergence_result, convergence_status, convergence_reason = _collect_async(
+            lambda: GoldenConvergenceOrchestrator().run(session_id, session.initial_use_case, [], "deep_dossier"),
+            "golden convergence",
+            warnings,
+        )
+        report = _report_with_convergence_readiness(report, convergence_result)
         for issue in diagram_fidelity.get("missing_requested_views", []):
             _warn_once(
                 warnings,
@@ -1521,7 +1527,37 @@ def _diagram_qa_status(diagrams) -> dict:
     qa_reports = [qa for gallery in diagrams for qa in (gallery.get("qa_reports") or [])]
     if not qa_reports:
         return {"status": "not_applicable", "reason": "No diagram QA reports were present."}
-    return {"status": "present", "passed": all(qa.get("passed", False) for qa in qa_reports)}
+    return {"status": "present", "passed": not any(_diagram_qa_render_blocking(qa) for qa in qa_reports)}
+
+
+def _diagram_qa_render_blocking(qa: dict) -> bool:
+    if qa.get("passed", False):
+        return False
+    diagnostics = qa.get("diagnostics") or []
+    if not diagnostics:
+        return True
+    text = " ".join(str(item) for item in diagnostics).lower()
+    render_failure_terms = (
+        "blank",
+        "empty svg",
+        "compile",
+        "syntax",
+        "renderer failed",
+        "png failed",
+        "svg failed",
+        "missing artifact",
+        "file not found",
+    )
+    if any(term in text for term in render_failure_terms):
+        return True
+    for item in diagnostics:
+        code = str(item.get("code") if isinstance(item, dict) else "").lower()
+        if code in {"too_many_edge_crossings", "aws_service_catalog_fallback"}:
+            continue
+        severity = str(item.get("severity") if isinstance(item, dict) else "").lower()
+        if severity in {"critical", "error", "fatal"}:
+            return True
+    return False
 
 
 def _pricing_headline_status(pricing) -> dict:

@@ -988,6 +988,7 @@ def _diagram_qa_is_render_blocking(qa: dict) -> bool:
         return True
     return any(
         str(item.get("severity") if isinstance(item, dict) else "").lower() in {"critical", "error", "fatal"}
+        and str(item.get("code") if isinstance(item, dict) else "").lower() not in {"too_many_edge_crossings", "aws_service_catalog_fallback"}
         for item in diagnostics
     )
 

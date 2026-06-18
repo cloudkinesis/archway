@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 from app.models.domain import (
@@ -9,7 +10,7 @@ from app.models.domain import (
     SecurityControl,
 )
 from app.domain.source_of_truth import CanonicalFact, CanonicalFactsLedger
-from app.services.architecture import _architecture_summary, _open_world_components, _requirement_coverage
+from app.services.architecture import _architecture_summary, _open_world_components, _requirement_coverage, _workload_specific_context
 from app.services.architecture_critique import (
     ArchitectureCritiqueFinding,
     _drop_non_actionable_positive_findings,
@@ -23,7 +24,7 @@ from app.services.architecture_revisions import ArchitectureRevisionService
 from app.services.client_pack import client_pack_files
 from app.services.convergence.golden_convergence_orchestrator import _diagram_findings, _pricing_findings
 from app.services.diagram_compiler_adapter import DiagramCompilerAdapter
-from app.services.export_package import ExportPackageService, _llm_telemetry_live_audits, _prior_live_call_audits
+from app.services.export_package import ExportPackageService, _diagram_qa_status, _llm_telemetry_live_audits, _prior_live_call_audits
 from app.services.llm.base import LLMTaskType
 from app.services.pricing import derive_industrial_iot_pricing_model, derive_pricing_drivers
 from app.services.pricing_driver_selector import PricingDriverFamily, select_pricing_driver_family
@@ -488,6 +489,23 @@ def test_architecture_summary_surfaces_extracted_requirements_without_textbox_st
     assert "\n" not in summary
 
 
+def test_architecture_context_prefers_specific_user_quantity_sources():
+    profile = SimpleNamespace(domain="blood_bank_network", signals=[], actions=[], entities=[])
+    context = _workload_specific_context(profile, {
+        "quantities": [
+            {"name": "hospital_count", "source_text": "11 hospital"},
+            {"name": "total_monitored_assets", "source_text": "sum of monitored asset counts"},
+            {"name": "explicit_quantity_hospital_depots", "source_text": "11 hospital depots"},
+            {"name": "explicit_quantity_collection_vans", "source_text": "42 collection vans"},
+        ],
+    })
+
+    assert "11 hospital depots" in context["quantities"]
+    assert "42 collection vans" in context["quantities"]
+    assert "11 hospital" not in context["quantities"]
+    assert "sum of monitored asset counts" not in context["quantities"]
+
+
 def test_pricing_driver_selector_honors_excluded_rag_family_even_with_document_inputs():
     profile = UseCaseProfile(
         domain="novel_operations",
@@ -638,6 +656,96 @@ def test_client_pack_hides_legacy_range_for_generic_not_estimated_pricing_and_sh
     assert "Budget-grade pricing is not available yet" in pricing_summary
     assert "Derived usage quantities to review" in pricing_summary
     assert "632812.5 GB-month" in pricing_summary
+
+
+def test_client_pack_filters_synthetic_and_prefix_quantity_facts():
+    dossier = SimpleNamespace(
+        title="Open World Scenario",
+        verdict="Proceed as a directional candidate.",
+        estimated_monthly_cost_range="$20-$180 per month",
+        top_validation_gates=[],
+        workload_family=["open_world_candidate"],
+        risks=[],
+        quality_score=SimpleNamespace(pricing_score=5),
+    )
+    pricing = {
+        "metadata": {
+            "pricing_can_be_displayed_as_headline": False,
+            "source_truth_pricing_compiler": {"mode": "generic_not_estimated"},
+            "canonical_facts": {
+                "facts": [
+                    {"source_text": "11 hospital"},
+                    {"source_text": "11 hospital depots"},
+                    {"source_text": "sum of monitored asset counts", "derived": True},
+                    {"source_text": "readings every 30 seconds"},
+                ]
+            },
+        }
+    }
+
+    client = client_pack_files(
+        session_name="Open World Scenario",
+        brief={"title": "Open World Scenario", "refined_problem_statement": "Assess unfamiliar assets."},
+        report={"metadata": {"customer_readiness": {"status": "directional_only"}}, "evidence_items": []},
+        pricing=pricing,
+        architectures=[],
+        diagrams=[],
+        deep_dossier=dossier,
+        decision_records=[],
+    )
+
+    architecture_summary = client["03-architecture-summary.md"]
+    pricing_summary = client["04-pricing-summary.md"]
+    assert "11 hospital depots" in architecture_summary
+    assert "11 hospital;" not in architecture_summary
+    assert "sum of monitored asset counts" not in architecture_summary
+    assert "11 hospital\n" not in pricing_summary
+    assert "sum of monitored asset counts" not in pricing_summary
+
+
+def test_open_world_edge_sync_uses_compiler_valid_scope_without_losing_edge_intent():
+    profile = SimpleNamespace(
+        domain="remote operations",
+        capabilities=["intermittent_connectivity"],
+        capability_model=[],
+        entities=["remote vehicles"],
+        signals=["telemetry"],
+        actions=[],
+        business_targets=["keep local capture working"],
+    )
+
+    components = _open_world_components(profile, [])
+
+    edge = next(item for item in components if item.id == "edge_offline_sync")
+    assert edge.service == "aws_iot_greengrass"
+    assert edge.scope == "regional_managed_data"
+    assert edge.metadata["deployment_posture"] == "edge_store_and_forward"
+
+
+def test_diagram_layout_only_warnings_do_not_fail_convergence_or_export_status():
+    qa = {
+        "view_id": "bundle",
+        "passed": False,
+        "diagnostics": [
+            {"severity": "error", "code": "too_many_edge_crossings", "message": "layout is dense"},
+            {"severity": "warning", "code": "aws_service_catalog_fallback", "message": "catalog fallback"},
+        ],
+    }
+    gallery = {"mode": "production", "qa_reports": [qa]}
+
+    findings = _diagram_findings([gallery])
+    assert [item.code for item in findings] == ["diagram.qa_warning_only"]
+    assert findings[0].customer_readiness_impact == "cap_to_customer_demo"
+    assert _diagram_qa_status([gallery]) == {"status": "present", "passed": True}
+
+
+def test_export_reruns_convergence_after_current_dossier_consistency_is_written():
+    source = Path("app/services/export_package.py").read_text(encoding="utf-8")
+
+    write_index = source.index('self.artifacts.write_json(session_id, "quality", "dossier_consistency_check"')
+    later_source = source[write_index:]
+    assert "GoldenConvergenceOrchestrator().run" in later_source
+    assert "report = _report_with_convergence_readiness(report, convergence_result)" in later_source
 
 
 def test_client_pack_strips_interview_scaffolding_and_negation_lists_from_presentation_text():

@@ -47,3 +47,8 @@ def test_healthcare_profile_metrics_match_structured_metrics_for_pricing_drivers
     }
     assert {key: profile_metrics[key].value for key in expected} == expected
 
+
+def test_hospital_modifier_does_not_create_hospital_count_for_depots():
+    structured = extract_metrics("Monitor 11 hospital depots and 42 collection vans.")
+
+    assert "hospital_count" not in structured.asset_counts

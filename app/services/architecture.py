@@ -235,9 +235,9 @@ def _open_world_components(profile, components: list[ArchitectureComponent]) -> 
             id="edge_offline_sync",
             name="Offline Edge Capture and Sync",
             service="aws_iot_greengrass",
-            scope="edge_or_regional_control",
+            scope="regional_managed_data",
             logical_group="Open-world edge and sync",
-            metadata={"role": "offline_store_and_forward", "source": "open_world_requirement"},
+            metadata={"role": "offline_store_and_forward", "source": "open_world_requirement", "deployment_posture": "edge_store_and_forward"},
         ))
     if profile.actions and "workflow" not in seen and "policy" not in seen:
         add(ArchitectureComponent(
@@ -493,9 +493,14 @@ def _workload_specific_context(profile, snapshot: dict | None) -> dict:
     for item in snapshot.get("quantities") or []:
         if not isinstance(item, dict):
             continue
+        if item.get("name") == "total_monitored_assets":
+            continue
         source = item.get("source_text")
+        if str(source or "").lower().startswith("sum of "):
+            continue
         if source and source not in quantities:
             quantities.append(source)
+    quantities = _prefer_specific_quantity_sources(quantities)
     return {
         "domain": profile.domain,
         "signals": list(dict.fromkeys(profile.signals or []))[:12],
@@ -506,3 +511,15 @@ def _workload_specific_context(profile, snapshot: dict | None) -> dict:
         "connectivity_constraints": list(snapshot.get("connectivity_constraints") or [])[:8],
         "compliance_security_hints": list(snapshot.get("compliance_security_hints") or [])[:8],
     }
+
+
+def _prefer_specific_quantity_sources(values: list[str]) -> list[str]:
+    cleaned = [str(value).strip() for value in values if str(value).strip()]
+    lowered = [value.lower() for value in cleaned]
+    specific: list[str] = []
+    for index, value in enumerate(cleaned):
+        prefix = lowered[index] + " "
+        if any(other.startswith(prefix) for other_index, other in enumerate(lowered) if other_index != index):
+            continue
+        specific.append(value)
+    return specific

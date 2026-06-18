@@ -660,11 +660,11 @@ def _workload_context(brief: dict, report: dict, pricing: dict, architectures: l
     profile = brief.get("use_case_profile") or ((report.get("metadata") or {}).get("use_case_profile") or {})
     quantities: list[str] = []
     for item in snapshot.get("quantities") or []:
-        if isinstance(item, dict) and item.get("source_text"):
+        if isinstance(item, dict) and item.get("source_text") and not item.get("derived"):
             quantities.append(str(item["source_text"]))
     pricing_facts = (((pricing.get("metadata") or {}).get("canonical_facts") or {}).get("facts") or [])
     for item in pricing_facts:
-        if isinstance(item, dict) and item.get("source_text"):
+        if isinstance(item, dict) and item.get("source_text") and not item.get("derived"):
             quantities.append(str(item["source_text"]))
     signals = list(snapshot.get("signals") or [])
     actions = list(snapshot.get("actions") or [])
@@ -684,7 +684,7 @@ def _workload_context(brief: dict, report: dict, pricing: dict, architectures: l
         "signals": list(dict.fromkeys(str(item) for item in signals if item))[:12],
         "actions": list(dict.fromkeys(str(item) for item in actions if item))[:12],
         "actors": list(dict.fromkeys(str(item) for item in actors if item))[:12],
-        "quantities": list(dict.fromkeys(str(item) for item in quantities if item))[:16],
+        "quantities": _filtered_quantity_texts(quantities)[:16],
         "latency_slos": list(dict.fromkeys(str(item) for item in snapshot.get("latency_slos") or [] if item))[:8],
         "connectivity_constraints": list(dict.fromkeys(str(item) for item in snapshot.get("connectivity_constraints") or [] if item))[:8],
         "compliance_security_hints": list(dict.fromkeys(str(item) for item in snapshot.get("compliance_security_hints") or [] if item))[:8],
@@ -720,9 +720,32 @@ def _workload_context_section(context: dict | None) -> list[str]:
 
 def _workload_quantity_rows(context: dict | None) -> list[str]:
     context = context or {}
-    rows = [_client_text(item) for item in context.get("quantities") or []]
+    rows = [_client_text(item) for item in _filtered_quantity_texts(context.get("quantities") or [])]
     rows.extend(_client_text(item) for item in context.get("latency_slos") or [])
     return list(dict.fromkeys(rows))[:12]
+
+
+def _filtered_quantity_texts(values: list | tuple) -> list[str]:
+    cleaned: list[str] = []
+    for value in values:
+        text = _client_text(value).strip()
+        lower = text.lower()
+        if not text:
+            continue
+        if lower.startswith("sum of "):
+            continue
+        if lower in {"unknown", "seconds", "minutes", "hours", "days", "months", "years"}:
+            continue
+        cleaned.append(text)
+    unique = list(dict.fromkeys(cleaned))
+    result: list[str] = []
+    lowered = [item.lower() for item in unique]
+    for index, item in enumerate(unique):
+        lower = lowered[index]
+        if any(other != lower and other.startswith(lower + " ") for other in lowered):
+            continue
+        result.append(item)
+    return result
 
 
 def _requirement_coverage_rows(spec: dict) -> list[str]:

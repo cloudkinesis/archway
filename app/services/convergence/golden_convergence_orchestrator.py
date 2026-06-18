@@ -362,6 +362,9 @@ def _qa_failure_is_non_blocking(qa: dict) -> bool:
     if any(term in text for term in render_failure_terms):
         return False
     for item in diagnostics:
+        code = str(item.get("code") if isinstance(item, dict) else "").lower()
+        if code in {"too_many_edge_crossings", "aws_service_catalog_fallback"}:
+            continue
         severity = str(item.get("severity") if isinstance(item, dict) else "").lower()
         if severity in {"critical", "error", "fatal"}:
             return False

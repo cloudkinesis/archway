@@ -36,7 +36,7 @@ def extract_metrics(text: str) -> ExtractedMetrics:
     _put_match(result.asset_counts, "fabs", "count", text, r"(?P<value>\d[\d,]*)\s+fabs?")
     _put_match(result.asset_counts, "manufacturing_tools", "count", text, r"(?P<value>\d[\d,]*)\s+tools?")
     _put_match(result.asset_counts, "cell_towers", "count", text, r"(?P<value>\d[\d,]*)\s+cell towers?")
-    _put_match(result.asset_counts, "hospital_count", "count", text, r"(?P<value>\d[\d,]*)\s+hospitals?")
+    _put_match(result.asset_counts, "hospital_count", "count", text, r"(?P<value>\d[\d,]*)\s+hospitals?(?!\s+(?:depots?|systems?|networks?|operations?|transfers?))")
     _put_match(result.asset_counts, "operating_room_count", "count", text, r"(?P<value>\d[\d,]*)\s+operating rooms?")
     _put_match(result.asset_counts, "camera_towers", "count", text, r"(?P<value>\d[\d,]*)\s+(?:remote\s+|lookout\s+)?camera towers?")
     _put_match(result.asset_counts, "underwater_cameras", "count", text, r"(?P<value>\d[\d,]*)\s+underwater cameras?")
