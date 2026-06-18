@@ -352,9 +352,12 @@ def _overall_status(gates, research_section, pricing_section, convergence_status
         return "blocked"
     if gates["diagram_validation"] == "failed":
         return "blocked"
-    # Directional when pricing is not headline-safe or evidence isn't ready.
-    if not gates["pricing_headline_safe"] or gates["research_evidence_readiness"] in {"not_ready", "blocked"}:
+    if gates["research_evidence_readiness"] in {"not_ready", "blocked"}:
         return "directional_only"
+    # Non-headline-safe pricing blocks procurement language, not a complete
+    # workshop package. Keep the warning visible and withhold headline pricing.
+    if not gates["pricing_headline_safe"]:
+        return "ready_with_warnings"
     if gates["warnings"] or gates["architecture_completeness"] != "present":
         return "ready_with_warnings"
     return "ready"

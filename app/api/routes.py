@@ -1,5 +1,6 @@
 from pathlib import Path
 import asyncio
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -133,6 +134,10 @@ async def hydrate_session(session_id: str):
             "logs": read_session_logs(session_id),
             "latest_export": latest_export,
             "mcp_security": mcp_security_status(get_settings()),
+        },
+        "jobs": {
+            operation: job_manager.latest_for_session(session_id, operation)
+            for operation in ("research", "architecture", "diagrams", "export")
         },
     }
 
@@ -636,6 +641,9 @@ def _latest_export_bundle(session_id: str):
     manifest = __import__("json").loads(manifests[0].read_text(encoding="utf-8"))
     package_dir = manifests[0].parent
     zip_path = root / f"{manifest['name']}.zip"
+    warnings = list(manifest.get("warnings", []))
+    if not _ensure_export_zip(package_dir, zip_path):
+        warnings.append("Export ZIP is not available yet; the package directory remains available for diagnostics.")
     artifact_id = artifacts.to_artifact_id(session_id, zip_path)
     manifest_artifact_id = artifacts.to_artifact_id(session_id, manifests[0])
     download_url = f"/api/sessions/{session_id}/artifacts/{artifact_id}"
@@ -651,8 +659,30 @@ def _latest_export_bundle(session_id: str):
         "download_url": download_url,
         "export_url": download_url,
         "included_artifacts": manifest.get("included_artifacts", []),
-        "warnings": manifest.get("warnings", []),
+        "warnings": warnings,
     }
+
+
+def _ensure_export_zip(package_dir: Path, zip_path: Path) -> bool:
+    if zip_path.is_file() and zip_path.stat().st_size > 0:
+        return True
+    if not package_dir.exists() or not package_dir.is_dir():
+        return False
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = zip_path.with_suffix(zip_path.suffix + ".tmp")
+    try:
+        with ZipFile(tmp_path, "w", ZIP_DEFLATED) as archive:
+            for path in sorted(package_dir.rglob("*")):
+                if path.is_file():
+                    archive.write(path, arcname=str(path.relative_to(package_dir)))
+        tmp_path.replace(zip_path)
+        return zip_path.is_file() and zip_path.stat().st_size > 0
+    except OSError:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
 
 
 def _latest_live_agent_status(session_id: str):

@@ -32,7 +32,7 @@ def select_pricing_driver_family(profile: UseCaseProfile) -> PricingDriverFamily
         return PricingDriverFamily.TELECOM_CDR_ANALYTICS
     if {"capital_markets_risk_engine", "monte_carlo_risk_grid", "pre_trade_compliance"} & families:
         return PricingDriverFamily.CAPITAL_MARKETS_RISK_ENGINE
-    if "live_streaming" in families or "video_streaming" in capabilities:
+    if "live_streaming" in families or ("video_streaming" in capabilities and _has_live_media_distribution_intent(profile)):
         return PricingDriverFamily.LIVE_MEDIA_STREAMING
     if "hpc_simulation" in families or "hpc_simulation" in capabilities:
         return PricingDriverFamily.HPC_SIMULATION
@@ -54,3 +54,45 @@ def select_pricing_driver_family(profile: UseCaseProfile) -> PricingDriverFamily
     if {"industrial_iot_streaming_ml", "real_time_anomaly_detection"} & families:
         return PricingDriverFamily.INDUSTRIAL_IOT_STREAMING
     return PricingDriverFamily.GENERIC_DIRECTIONAL
+
+
+def _profile_text(profile: UseCaseProfile) -> str:
+    fields: list[object] = [
+        getattr(profile, "business_goal", None),
+        profile.domain,
+        profile.workload_families,
+        profile.capabilities,
+        profile.capability_model,
+        getattr(profile, "data_classes", None),
+        profile.signals,
+        profile.entities,
+        profile.actions,
+        profile.business_targets,
+        profile.metrics,
+    ]
+    return " ".join(str(field).lower() for field in fields if field)
+
+
+def _has_live_media_distribution_intent(profile: UseCaseProfile) -> bool:
+    text = _profile_text(profile)
+    audience_or_distribution_terms = (
+        "audience",
+        "viewer",
+        "viewers",
+        "subscriber",
+        "subscribers",
+        "broadcast",
+        "ott",
+        "channel",
+        "channels",
+        "content delivery",
+        "cdn",
+        "drm",
+        "watch time",
+        "playback",
+        "stream delivery",
+        "media delivery",
+        "concurrent streams",
+        "concurrent viewers",
+    )
+    return any(term in text for term in audience_or_distribution_terms)

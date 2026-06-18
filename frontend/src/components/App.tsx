@@ -42,10 +42,13 @@ import type { ArchitectureRevision, ArchitectureSpec, ArchitectureValidationIssu
 import { sanitizeMarkdown } from "../lib/markdown";
 
 type View = "synthesis" | "research" | "architecture" | "diagrams" | "diagnostics";
+type LatestJobs = Partial<Record<JobRun["operation"], JobRun | null>>;
 type ArchitectureDraft = Pick<ArchitectureSpec, "summary" | "scaling_strategy" | "resilience_strategy" | "cost_optimization_strategy"> & {
   security_controls_text: string;
   observability_controls_text: string;
 };
+
+const HEALTH_ACCEPTED_KEY = "archway.healthAccepted.v1";
 
 function presentationText(value: string | null | undefined) {
   return (value ?? "")
@@ -55,9 +58,51 @@ function presentationText(value: string | null | undefined) {
     .trim();
 }
 
+function initialHealthAccepted() {
+  try {
+    return window.localStorage.getItem(HEALTH_ACCEPTED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function persistHealthAccepted(value: boolean) {
+  try {
+    window.localStorage.setItem(HEALTH_ACCEPTED_KEY, String(value));
+  } catch {
+    // Browser storage can be unavailable in private contexts; health acceptance
+    // still works for the current render through React state.
+  }
+}
+
+function furthestCompletedView(data: {
+  session?: Session | null;
+  research?: ResearchReport | null;
+  architecture?: { architectures?: ArchitectureSpec[] | null } | null;
+  diagrams?: DiagramGalleryResult[] | null;
+  jobs?: LatestJobs | null;
+}): View {
+  if ((data.diagrams ?? []).length > 0) return "diagrams";
+  if ((data.architecture?.architectures ?? []).length > 0) return "architecture";
+  if (data.jobs?.export?.status === "queued" || data.jobs?.export?.status === "running") return "diagrams";
+  if (data.jobs?.diagrams?.status === "queued" || data.jobs?.diagrams?.status === "running") return "diagrams";
+  if (data.jobs?.architecture?.status === "queued" || data.jobs?.architecture?.status === "running") return "architecture";
+  if (data.jobs?.research?.status === "queued" || data.jobs?.research?.status === "running") return "research";
+  if (data.session) return phaseView(data.session);
+  if (data.research) return "research";
+  return "synthesis";
+}
+
+function phaseView(session: Session): View {
+  if (session.active_phase === "diagrams" || session.active_phase === "export") return "diagrams";
+  if (session.active_phase === "architecture") return "architecture";
+  if (session.active_phase === "research") return "research";
+  return "synthesis";
+}
+
 export function App() {
   const queryClient = useQueryClient();
-  const [healthAccepted, setHealthAccepted] = useState(false);
+  const [healthAccepted, setHealthAccepted] = useState(initialHealthAccepted);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [view, setView] = useState<View>("synthesis");
@@ -70,6 +115,8 @@ export function App() {
   const [architectureRevisions, setArchitectureRevisions] = useState<ArchitectureRevision[]>([]);
   const [galleries, setGalleries] = useState<DiagramGalleryResult[]>([]);
   const [latestExport, setLatestExport] = useState<ExportBundle | null>(null);
+  const [latestJobs, setLatestJobs] = useState<LatestJobs>({});
+  const hydratedSessionRef = useRef<string | null>(null);
 
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: healthAccepted ? false : 8000 });
   const sessions = useQuery({ queryKey: ["sessions"], queryFn: api.listSessions, enabled: healthAccepted });
@@ -93,10 +140,18 @@ export function App() {
     setArchitectureRevisions(data.architecture?.revisions ?? []);
     setGalleries(data.diagrams ?? []);
     setLatestExport(data.diagnostics?.latest_export ?? null);
+    setLatestJobs(data.jobs ?? {});
+    if (hydratedSessionRef.current !== data.session.id) {
+      hydratedSessionRef.current = data.session.id;
+      setView(furthestCompletedView(data));
+    }
   }, [hydration.data]);
 
   if (!healthAccepted) {
-    return <HealthGate health={health.data} loading={health.isLoading} error={health.error as Error | null} onRetry={() => health.refetch()} onContinue={() => setHealthAccepted(true)} />;
+    return <HealthGate health={health.data} loading={health.isLoading} error={health.error as Error | null} onRetry={() => health.refetch()} onContinue={() => {
+      persistHealthAccepted(true);
+      setHealthAccepted(true);
+    }} />;
   }
 
   return (
@@ -118,7 +173,9 @@ export function App() {
             setArchitectureRevisions([]);
             setGalleries([]);
             setLatestExport(null);
-            setView("synthesis");
+            setLatestJobs({});
+            hydratedSessionRef.current = null;
+            setView(phaseView(session));
           }}
           onCreated={(session, nextReadiness) => {
             setActiveSession(session);
@@ -156,6 +213,7 @@ export function App() {
               setGalleries={setGalleries}
               latestExport={latestExport}
               setLatestExport={setLatestExport}
+              latestJobs={latestJobs}
               hydrationLoading={hydration.isFetching}
               hydrationError={hydration.error as Error | null}
             />
@@ -337,9 +395,11 @@ function Workspace(props: {
   setGalleries: (items: DiagramGalleryResult[]) => void;
   latestExport: ExportBundle | null;
   setLatestExport: (bundle: ExportBundle | null) => void;
+  latestJobs: LatestJobs;
   hydrationLoading: boolean;
   hydrationError: Error | null;
 }) {
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
   const tabs: Array<[View, string, typeof MessageSquareText]> = [
     ["synthesis", "Synthesis", MessageSquareText],
     ["research", "Research", ClipboardList],
@@ -347,8 +407,13 @@ function Workspace(props: {
     ["diagrams", "Diagrams", Image],
     ["diagnostics", "Diagnostics", Activity]
   ];
+  useEffect(() => {
+    workspaceRef.current?.scrollIntoView({ block: "start" });
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [props.session.id, props.view]);
+
   return (
-    <div className="flex min-h-full flex-col">
+    <div ref={workspaceRef} className="flex min-h-full flex-col">
       <nav className="sticky top-0 z-30 flex gap-1 border-b border-awsBorder bg-surface px-4 py-3">
         {tabs.map(([id, label, Icon]) => (
           <button key={id} onClick={() => props.setView(id)} className={`flex items-center gap-2 border px-3 py-2 text-sm ${props.view === id ? "border-awsOrange bg-awsPanelSoft text-awsTextPrimary" : "border-transparent text-awsTextMuted hover:border-awsBorder"}`}>
@@ -469,9 +534,15 @@ function SynthesisView({ session, setSession, readiness, setReadiness, setView }
   );
 }
 
-function ResearchView({ session, report, setReport, researchNarrative, setResearchNarrative, researchDigest, setResearchDigest, researchViewModel, setResearchViewModel, setView, latestExport, setLatestExport }: Parameters<typeof Workspace>[0]) {
+function ResearchView({ session, report, setReport, researchNarrative, setResearchNarrative, researchDigest, setResearchDigest, researchViewModel, setResearchViewModel, setView, latestExport, setLatestExport, latestJobs }: Parameters<typeof Workspace>[0]) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [researchDepth, setResearchDepth] = useState("deep_dossier");
+  useEffect(() => {
+    const latest = latestJobs.research;
+    if (!report && latest?.id && latest.id !== jobId && ["queued", "running", "succeeded"].includes(latest.status)) {
+      setJobId(latest.id);
+    }
+  }, [jobId, latestJobs.research, report]);
   const job = useJobPolling(session.id, jobId, async () => {
     const result = await api.hydrateSession(session.id);
     setReport(result.research ?? null);
@@ -504,7 +575,8 @@ function ResearchView({ session, report, setReport, researchNarrative, setResear
           {job.job ? <JobProgress job={job.job} onCancel={() => job.cancel.mutate()} /> : null}
           <Button icon={run.isPending || job.isActive ? Loader2 : Sparkles} disabled={run.isPending || job.isActive} onClick={() => run.mutate()}>{run.isPending || job.isActive ? "Research running" : "Run evidence-grounded research"}</Button>
           {run.error ? <Banner tone="danger" text={(run.error as Error).message} /> : null}
-          {job.job?.status === "failed" ? <Banner tone="danger" text={job.job.error ?? "Research failed. Diagnostics were recorded."} /> : null}
+          {job.refreshError ? <Banner tone="warning" text={`Research completed, but the browser could not refresh the artifacts yet: ${job.refreshError}`} /> : null}
+          {job.job?.status === "failed" ? <Banner tone="warning" text={job.job.error ?? "Research needs a retry. Diagnostics were recorded, and you can run research again without losing the interview."} /> : null}
         </div>
       ) : (
         <Report
@@ -535,10 +607,17 @@ function ArchitectureView({
   architectureRevisions,
   setArchitectureRevisions,
   setGalleries,
-  setView
+  setView,
+  latestJobs
 }: Parameters<typeof Workspace>[0]) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, ArchitectureDraft>>({});
+  useEffect(() => {
+    const latest = latestJobs.architecture;
+    if (architectures.length === 0 && latest?.id && latest.id !== jobId && ["queued", "running", "succeeded"].includes(latest.status)) {
+      setJobId(latest.id);
+    }
+  }, [architectures.length, jobId, latestJobs.architecture]);
   const job = useJobPolling(session.id, jobId, async () => {
     const result = await api.getArchitecture(session.id);
     setArchitectures(result.architectures);
@@ -584,7 +663,8 @@ function ArchitectureView({
         <div className="space-y-4">
           {job.job ? <JobProgress job={job.job} onCancel={() => job.cancel.mutate()} /> : null}
           <Button icon={generate.isPending || job.isActive ? Loader2 : LayoutDashboard} disabled={generate.isPending || job.isActive} onClick={() => generate.mutate()}>{generate.isPending || job.isActive ? "Planning" : "Generate POC and production specs"}</Button>
-          {job.job?.status === "failed" ? <Banner tone="danger" text={job.job.error ?? "Architecture planning failed. Diagnostics were recorded."} /> : null}
+          {job.refreshError ? <Banner tone="warning" text={`Architecture finished, but the browser could not refresh the specs yet: ${job.refreshError}`} /> : null}
+          {job.job?.status === "failed" ? <Banner tone="warning" text={job.job.error ?? "Architecture planning needs a retry. Diagnostics were recorded and the session remains usable."} /> : null}
         </div>
       ) : (
         <div className="space-y-4">
@@ -626,11 +706,12 @@ function ArchitectureView({
   );
 }
 
-function DiagramView({ session, galleries, setGalleries, latestExport, setLatestExport }: Parameters<typeof Workspace>[0]) {
+function DiagramView({ session, galleries, setGalleries, latestExport, setLatestExport, latestJobs }: Parameters<typeof Workspace>[0]) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [exportJobId, setExportJobId] = useState<string | null>(null);
   const [diagramRefreshError, setDiagramRefreshError] = useState<string | null>(null);
   const [diagramRefreshPending, setDiagramRefreshPending] = useState(false);
+  const autoRefreshAttemptRef = useRef<string | null>(null);
   const [selected, setSelected] = useState<{
     gallery: DiagramGalleryResult;
     diagram: DiagramGalleryResult["diagrams"][number];
@@ -651,6 +732,37 @@ function DiagramView({ session, galleries, setGalleries, latestExport, setLatest
       setDiagramRefreshPending(false);
     }
   }, [session.id, setGalleries]);
+  useEffect(() => {
+    autoRefreshAttemptRef.current = null;
+  }, [session.id]);
+  useEffect(() => {
+    const latest = latestJobs.diagrams;
+    const sessionLooksDiagramComplete =
+      session.active_phase === "diagrams" &&
+      (session.status === "complete" || session.status === "diagrams" || latest?.status === "succeeded");
+    const refreshKey = `${session.id}:${latest?.id ?? "session"}`;
+    if (
+      galleries.length === 0 &&
+      sessionLooksDiagramComplete &&
+      !diagramRefreshPending &&
+      autoRefreshAttemptRef.current !== refreshKey
+    ) {
+      autoRefreshAttemptRef.current = refreshKey;
+      void refreshDiagrams();
+    }
+  }, [diagramRefreshPending, galleries.length, latestJobs.diagrams, refreshDiagrams, session.active_phase, session.id, session.status]);
+  useEffect(() => {
+    const latest = latestJobs.diagrams;
+    if (!galleries.length && latest?.id && latest.id !== jobId && ["queued", "running", "succeeded"].includes(latest.status)) {
+      setJobId(latest.id);
+    }
+  }, [galleries.length, jobId, latestJobs.diagrams]);
+  useEffect(() => {
+    const latest = latestJobs.export;
+    if (!latestExport && latest?.id && latest.id !== exportJobId && ["queued", "running", "succeeded"].includes(latest.status)) {
+      setExportJobId(latest.id);
+    }
+  }, [exportJobId, latestExport, latestJobs.export]);
   const job = useJobPolling(session.id, jobId, refreshDiagrams);
   const generate = useMutation({
     mutationFn: () => api.generateDiagrams(session.id),
@@ -690,6 +802,7 @@ function DiagramView({ session, galleries, setGalleries, latestExport, setLatest
       </div>
       {exportJob.job ? <JobProgress job={exportJob.job} onCancel={() => exportJob.cancel.mutate()} /> : null}
       {exportRun.error ? <Banner tone="danger" text={(exportRun.error as Error).message} /> : null}
+      {exportJob.refreshError ? <Banner tone="warning" text={`Export completed, but the browser could not load the package link yet: ${exportJob.refreshError}`} /> : null}
       {galleries.length === 0 ? (
         <div className="space-y-4">
           {job.job ? <JobProgress job={job.job} onCancel={() => job.cancel.mutate()} /> : null}
@@ -704,7 +817,8 @@ function DiagramView({ session, galleries, setGalleries, latestExport, setLatest
             ) : null}
           </div>
           <Banner tone="info" text="If architecture validation still has blockers, Archway generates candidate diagnostic diagrams instead of stopping the session." />
-          {job.job?.status === "failed" ? <Banner tone="danger" text={job.job.error ?? "Diagram generation failed. Diagnostics were recorded."} /> : null}
+          {job.refreshError ? <Banner tone="warning" text={`Diagrams finished, but the browser could not load the gallery yet: ${job.refreshError}`} /> : null}
+          {job.job?.status === "failed" ? <Banner tone="warning" text={job.job.error ?? "Diagram generation needs a retry. Existing diagnostics and export paths remain available."} /> : null}
         </div>
       ) : (
         <div className="grid gap-4 xl:grid-cols-2">
@@ -834,6 +948,7 @@ function DiagramInspector({
 
 function useJobPolling(sessionId: string, jobId: string | null, onSucceeded: () => Promise<void>) {
   const [completedJobId, setCompletedJobId] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const query = useQuery({
     queryKey: ["job", sessionId, jobId],
     queryFn: () => api.getJob(sessionId, jobId as string),
@@ -849,14 +964,18 @@ function useJobPolling(sessionId: string, jobId: string | null, onSucceeded: () 
     onSuccess: () => query.refetch()
   });
   useEffect(() => {
+    setRefreshError(null);
+  }, [jobId]);
+  useEffect(() => {
     if (job?.status === "succeeded" && completedJobId !== job.id) {
       setCompletedJobId(job.id);
-      onSucceeded().catch(() => undefined);
+      onSucceeded().catch((error) => setRefreshError((error as Error).message));
     }
   }, [completedJobId, job?.id, job?.status, onSucceeded]);
   return {
     job,
     cancel,
+    refreshError,
     isActive: job?.status === "queued" || job?.status === "running"
   };
 }
@@ -1148,7 +1267,9 @@ function Report({
         {researchJob.job ? <JobProgress job={researchJob.job} onCancel={() => researchJob.cancel.mutate()} /> : null}
         {exportRun.error ? <Banner tone="danger" text={(exportRun.error as Error).message} /> : null}
         {refreshResearch.error ? <Banner tone="danger" text={(refreshResearch.error as Error).message} /> : null}
-        {researchJob.job?.status === "failed" ? <Banner tone="danger" text={researchJob.job.error ?? "Research refresh failed. Diagnostics were recorded."} /> : null}
+        {exportJob.refreshError ? <Banner tone="warning" text={`Export completed, but the browser could not load the package link yet: ${exportJob.refreshError}`} /> : null}
+        {researchJob.refreshError ? <Banner tone="warning" text={`Research refresh completed, but the browser could not reload the updated dossier yet: ${researchJob.refreshError}`} /> : null}
+        {researchJob.job?.status === "failed" ? <Banner tone="warning" text={researchJob.job.error ?? "Research refresh needs a retry. Diagnostics were recorded and the current dossier remains available."} /> : null}
         <ExecutiveBriefing viewModel={viewModel} />
         <PricingCheckpointCard
           checkpoint={checkpoint.data?.checkpoint}

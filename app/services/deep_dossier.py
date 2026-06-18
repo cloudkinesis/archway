@@ -933,7 +933,7 @@ def _dossier_readiness(readiness: dict, consistency: DossierConsistencyCheck, pr
         return DossierReadinessStatus.failed_validation
     if status == "directional_only":
         return DossierReadinessStatus.directional_only
-    if status in {"customer_demo_ready_with_caveats", "demo_ready_with_caveats"}:
+    if status in {"workshop_ready", "customer_demo_ready_with_caveats", "demo_ready_with_caveats"}:
         return DossierReadinessStatus.customer_demo_ready_with_caveats
     if readiness.get("status") == "customer_ready" and pricing_score >= 8 and architecture_score >= 8:
         return DossierReadinessStatus.customer_ready
@@ -963,9 +963,34 @@ def _production_gallery(diagrams: list[dict]) -> dict:
 def _diagram_qa_failed(diagrams: list[dict]) -> bool:
     for gallery in diagrams:
         for qa in gallery.get("qa_reports", []):
-            if not qa.get("passed", False):
+            if not qa.get("passed", False) and _diagram_qa_is_render_blocking(qa):
                 return True
     return False
+
+
+def _diagram_qa_is_render_blocking(qa: dict) -> bool:
+    diagnostics = qa.get("diagnostics") or []
+    if not diagnostics:
+        return True
+    text = " ".join(str(item) for item in diagnostics).lower()
+    render_failure_terms = (
+        "blank",
+        "empty svg",
+        "compile",
+        "syntax",
+        "renderer failed",
+        "png failed",
+        "svg failed",
+        "missing artifact",
+        "file not found",
+    )
+    if any(term in text for term in render_failure_terms):
+        return True
+    return any(
+        str(item.get("severity") if isinstance(item, dict) else "").lower() in {"critical", "error", "fatal"}
+        and str(item.get("code") if isinstance(item, dict) else "").lower() not in {"too_many_edge_crossings", "aws_service_catalog_fallback"}
+        for item in diagnostics
+    )
 
 
 def _diagram_requested_views_missing(diagrams: list[dict]) -> bool:

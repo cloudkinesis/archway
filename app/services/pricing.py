@@ -466,7 +466,7 @@ def derive_pricing_drivers(profile: UseCaseProfile, pricing_driver_overrides: di
             reporting_query_tb_scanned_monthly=round(max(0.1, (api_requests_per_day * 30) / 10_000_000), 2),
             pricing_driver_overrides=overrides,
         )
-    asset_count = _asset_count(profile)
+    asset_count = _effective_monitored_asset_count(profile)
     if asset_count == 0:
         asset_count = int(_metric_max(profile, ("request", "event", "message", "transaction")) or 1000)
     telemetry_frequency_seconds = 300
@@ -524,7 +524,7 @@ def derive_industrial_iot_pricing_model(profile: UseCaseProfile) -> IndustrialIo
     assumptions = INDUSTRIAL_IOT_DEFAULT_ASSUMPTIONS
     smart_meters = _metric_value(profile, "smart_meters")
     transformers = _metric_value(profile, "distribution_transformers") or _metric_value(profile, "transformers")
-    asset_count = int(_monitored_asset_count(profile) or _generic_monitored_asset_count(profile) or 1000)
+    asset_count = int(_effective_monitored_asset_count(profile) or 1000)
     telemetry_frequency_seconds = int(assumptions["telemetry_frequency_seconds"]["expected"])
     payload_kb = float(_generic_payload_kb(profile) or assumptions["payload_kb"]["expected"])
     raw_samples_per_second = _structured_metric(profile, "business_targets", "raw_sensor_samples_per_second")
@@ -1541,6 +1541,11 @@ def _generic_monitored_asset_count(profile: UseCaseProfile) -> int:
         "resident", "residents", "user", "users", "people", "customers", "patients", "viewers",
     }
     candidates: list[int] = []
+    volume_or_cadence_terms = (
+        "event", "events", "read", "reads", "scan", "scans", "cycle", "cycles",
+        "request", "requests", "transaction", "transactions", "message", "messages",
+        "inference", "inferences", "sample", "samples", "per_", "_per", " per",
+    )
     for metric in profile.metrics:
         unit = str(getattr(metric, "unit", "") or "").lower()
         label = str(getattr(metric, "label", "") or "").lower()
@@ -1553,12 +1558,23 @@ def _generic_monitored_asset_count(profile: UseCaseProfile) -> int:
             continue
         if "_per_" in unit or " per " in raw:
             continue
+        joined = f"{label} {unit} {raw}"
+        if any(term in joined for term in volume_or_cadence_terms):
+            continue
         if any(blocked == unit or unit.startswith(f"{blocked}_") or unit.endswith(f"_{blocked}") for blocked in blocked_units):
             continue
         if any(token in raw for token in ("retain", "retention", "within", "latency", "target", "every")):
             continue
         candidates.append(int(metric.value))
     return max(candidates) if candidates else 0
+
+
+def _effective_monitored_asset_count(profile: UseCaseProfile) -> int:
+    structured = _monitored_asset_count(profile)
+    generic = _generic_monitored_asset_count(profile)
+    if generic and generic > structured:
+        return generic
+    return structured
 
 
 def _generic_telemetry_frequency_seconds(profile: UseCaseProfile) -> int:

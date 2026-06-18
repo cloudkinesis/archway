@@ -825,12 +825,9 @@ def _domain_clean(value: Any) -> str:
         "proceed_with_caution": "proceed with caution",
         "telemetry streams": "operational event feeds",
         "telemetry": "operational events",
-        "asset_count": "operating room scope",
-        "asset count": "operating room scope",
         "candidate anomalies": "recommendation candidates",
         "confirmed incidents": "approved workflow outcomes",
         "dispatch": "approval workflow",
-        "depot": "hospital operations",
         "hot-path": "time-sensitive workflow",
         "hot path": "time-sensitive workflow",
     }

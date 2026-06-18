@@ -18,7 +18,14 @@ from app.services.pricing_sanity_reviewer import PricingSanityReview
 from app.services.understanding.deep_use_case_understanding import DeepUseCaseUnderstanding, deterministic_understanding
 
 
-FinalStatus = Literal["golden_candidate", "customer_demo_ready_with_caveats", "directional_only", "internal_only", "failed_validation"]
+FinalStatus = Literal[
+    "golden_candidate",
+    "workshop_ready",
+    "customer_demo_ready_with_caveats",
+    "directional_only",
+    "internal_only",
+    "failed_validation",
+]
 
 
 class ConvergenceIteration(BaseModel):
@@ -282,17 +289,17 @@ def _pricing_findings(pricing: dict | None) -> list[QualityFinding]:
     findings: list[QualityFinding] = []
     if status in {"invalid_extracted_scale_not_applied", "invalid_placeholder"}:
         if generic_not_estimated and has_derived_dimensions and metadata.get("pricing_can_be_displayed_as_headline") is False:
-            findings.append(finding(code="pricing.not_estimated_with_derived_dimensions", severity="warning", category="pricing", title="Pricing remains non-headline", description="Pricing is honestly withheld from headline totals while derived usage quantities are preserved for review.", evidence=[status, "source_truth_pricing_compiler.mode=generic_not_estimated"], auto_repairable=False, repair_strategy="Bind exact AWS usage/rate dimensions before showing a customer-facing total.", customer_readiness_impact="cap_to_directional"))
+            findings.append(finding(code="pricing.not_estimated_with_derived_dimensions", severity="warning", category="pricing", title="Pricing remains non-headline", description="Pricing is honestly withheld from headline totals while derived usage quantities are preserved for review.", evidence=[status, "source_truth_pricing_compiler.mode=generic_not_estimated"], auto_repairable=False, repair_strategy="Bind exact AWS usage/rate dimensions before showing procurement-ready pricing.", customer_readiness_impact="cap_to_workshop"))
         else:
             findings.append(finding(code="pricing.fallback_driver_ignored_explicit_metrics", severity="critical", category="pricing", title="Pricing not headline-safe", description=metadata.get("reason") or "Pricing sanity found an invalid placeholder or ignored explicit metrics.", evidence=[status], auto_repairable=True, repair_strategy="Invalidate headline pricing and cap customer readiness.", customer_readiness_impact="cap_to_internal_only"))
     if status == "directional_only_missing_core_compute_drivers":
         findings.append(finding(code="pricing.directional_only_missing_core_compute_drivers", severity="critical", category="pricing", title="Core pricing drivers missing", description=metadata.get("reason") or "Core compute/SKU drivers are missing for this workload.", evidence=[status], auto_repairable=True, repair_strategy="Mark pricing as directional only and hide headline estimate.", customer_readiness_impact="cap_to_directional"))
     if metadata.get("pricing_can_be_displayed_as_headline") is False and maturity == "pricing_placeholder_only":
-        findings.append(finding(code="pricing.headline_blocked", severity="warning", category="pricing", title="Headline pricing blocked", description="Pricing must be shown as directional placeholder only.", evidence=["pricing.metadata.pricing_can_be_displayed_as_headline=false"], auto_repairable=False, repair_strategy="Ensure reports do not show the estimate as a normal headline.", customer_readiness_impact="cap_to_directional"))
+        findings.append(finding(code="pricing.headline_blocked", severity="warning", category="pricing", title="Headline pricing blocked", description="Pricing must be shown as directional placeholder only.", evidence=["pricing.metadata.pricing_can_be_displayed_as_headline=false"], auto_repairable=False, repair_strategy="Ensure reports do not show the estimate as procurement-ready headline pricing.", customer_readiness_impact="cap_to_workshop"))
     elif metadata.get("pricing_can_be_displayed_as_headline") is False and maturity == "pricing_customer_demo_ready":
         findings.append(finding(code="pricing.scenario_demo_ready", severity="info", category="pricing", title="Scenario pricing ready for demo", description="Pricing is scenario-based, not procurement-ready, and can be shown as a directional demo estimate with visible caveats.", evidence=["pricing.metadata.pricing_maturity=pricing_customer_demo_ready"], auto_repairable=False, customer_readiness_impact="none"))
     elif metadata.get("pricing_can_be_displayed_as_headline") is False:
-        findings.append(finding(code="pricing.headline_blocked", severity="warning", category="pricing", title="Headline pricing blocked", description="Pricing must be shown as directional placeholder only.", evidence=["pricing.metadata.pricing_can_be_displayed_as_headline=false"], auto_repairable=False, repair_strategy="Ensure reports do not show the estimate as a normal headline.", customer_readiness_impact="cap_to_directional"))
+        findings.append(finding(code="pricing.headline_blocked", severity="warning", category="pricing", title="Headline pricing blocked", description="Pricing must be shown as directional placeholder only.", evidence=["pricing.metadata.pricing_can_be_displayed_as_headline=false"], auto_repairable=False, repair_strategy="Ensure reports do not show the estimate as procurement-ready headline pricing.", customer_readiness_impact="cap_to_workshop"))
     return findings
 
 
@@ -312,6 +319,8 @@ def _diagram_findings(diagrams: list | None) -> list[QualityFinding]:
             if not qa.get("passed", False):
                 if _qa_failure_is_view_coverage_only(qa, broader_rendered):
                     findings.append(finding(code="diagram.qa_view_coverage_only", severity="info", category="diagram", title="Diagram QA covered by broader view", description=f"Requested view {qa.get('view_id')} was represented through a broader supported diagram.", evidence=[str(qa.get("diagnostics") or [])], affected_sections=[str(gallery.get("mode"))], auto_repairable=False, customer_readiness_impact="none"))
+                elif _qa_failure_is_non_blocking(qa):
+                    findings.append(finding(code="diagram.qa_warning_only", severity="warning", category="diagram", title="Diagram QA recorded non-blocking warnings", description=f"Diagram QA for {qa.get('view_id')} reported warning/info diagnostics, but no render-blocking failure.", evidence=[str(qa.get("diagnostics") or [])], affected_sections=[str(gallery.get("mode"))], auto_repairable=False, customer_readiness_impact="cap_to_workshop"))
                 else:
                     findings.append(finding(code="diagram.qa_failed", severity="critical", category="diagram", title="Diagram QA failed", description=f"Diagram QA failed for {qa.get('view_id')}.", evidence=[str(qa.get("diagnostics") or [])], affected_sections=[str(gallery.get("mode"))], auto_repairable=False, customer_readiness_impact="fail"))
     return findings
@@ -341,6 +350,34 @@ def _qa_failure_is_view_coverage_only(qa: dict, broader_rendered: set[str]) -> b
     return any(term in diagnostics for term in view_gap_terms) and not any(term in diagnostics for term in render_failure_terms)
 
 
+def _qa_failure_is_non_blocking(qa: dict) -> bool:
+    diagnostics = qa.get("diagnostics") or []
+    if not diagnostics:
+        return False
+    text = " ".join(str(item) for item in diagnostics).lower()
+    render_failure_terms = (
+        "blank",
+        "empty svg",
+        "compile",
+        "syntax",
+        "renderer failed",
+        "png failed",
+        "svg failed",
+        "missing artifact",
+        "file not found",
+    )
+    if any(term in text for term in render_failure_terms):
+        return False
+    for item in diagnostics:
+        code = str(item.get("code") if isinstance(item, dict) else "").lower()
+        if code in {"too_many_edge_crossings", "aws_service_catalog_fallback"}:
+            continue
+        severity = str(item.get("severity") if isinstance(item, dict) else "").lower()
+        if severity in {"critical", "error", "fatal"}:
+            return False
+    return True
+
+
 def _dossier_findings(consistency: dict | None) -> list[QualityFinding]:
     findings: list[QualityFinding] = []
     if not consistency:
@@ -348,7 +385,7 @@ def _dossier_findings(consistency: dict | None) -> list[QualityFinding]:
     for item in consistency.get("errors") or []:
         findings.append(finding(code="dossier.consistency_error", severity="critical", category="dossier", title="Dossier consistency error", description=str(item), evidence=["dossier_consistency_check"], auto_repairable=False, customer_readiness_impact="cap_to_internal_only"))
     for item in consistency.get("warnings") or []:
-        findings.append(finding(code="dossier.consistency_warning", severity="warning", category="dossier", title="Dossier consistency warning", description=str(item), evidence=["dossier_consistency_check"], auto_repairable=False, customer_readiness_impact="cap_to_directional"))
+        findings.append(finding(code="dossier.consistency_warning", severity="warning", category="dossier", title="Dossier consistency warning", description=str(item), evidence=["dossier_consistency_check"], auto_repairable=False, customer_readiness_impact="cap_to_workshop"))
     return findings
 
 
@@ -396,10 +433,12 @@ def _merge_repaired_state(findings: list[QualityFinding], repaired: list[Quality
 def _final_status(unresolved: list[QualityFinding], context: dict[str, Any]) -> FinalStatus:
     if any(item.customer_readiness_impact == "fail" or item.severity == "blocker" for item in unresolved):
         return "failed_validation"
-    if any(item.customer_readiness_impact == "cap_to_internal_only" or item.severity == "critical" for item in unresolved):
+    if any(item.customer_readiness_impact == "cap_to_internal_only" for item in unresolved):
         return "internal_only"
-    if any(item.customer_readiness_impact == "cap_to_directional" for item in unresolved):
+    if any(item.customer_readiness_impact == "cap_to_directional" or item.severity == "critical" for item in unresolved):
         return "directional_only"
+    if any(item.customer_readiness_impact == "cap_to_workshop" for item in unresolved):
+        return "workshop_ready"
     if any(item.severity == "warning" for item in unresolved):
         return "customer_demo_ready_with_caveats"
     return "golden_candidate"
@@ -440,6 +479,8 @@ def quality_summary_markdown(result: GoldenConvergenceResult) -> str:
 def _readiness_impact_text(result: GoldenConvergenceResult) -> str:
     if result.final_status == "golden_candidate":
         return "No unresolved critical contradictions remain; package is a golden candidate subject to source freshness."
+    if result.final_status == "workshop_ready":
+        return "Workshop ready with visible caveats; pricing is suitable for planning discussion but not procurement approval."
     if result.final_status == "customer_demo_ready_with_caveats":
         return "Suitable for customer demo with caveats; warnings must stay visible."
     if result.final_status == "directional_only":

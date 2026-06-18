@@ -374,4 +374,5 @@ export interface HydratedSession {
     logs: unknown[];
     latest_export?: ExportBundle | null;
   };
+  jobs?: Partial<Record<JobRun["operation"], JobRun | null>>;
 }

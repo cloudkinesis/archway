@@ -136,6 +136,22 @@ def test_research_view_model_generic_profile_stays_neutral_and_hides_raw_evidenc
     assert "ev_1234567890" not in rendered
 
 
+def test_research_view_model_does_not_rewrite_depots_or_asset_count_to_healthcare_terms():
+    report = _report(
+        "blood_bank_network",
+        ["operational_event_prediction_workflow", "data_platform_analytics"],
+        "Monitor collection vans, hospital depots, mobile drives, and asset_count based custody workflows.",
+    )
+
+    view_model = build_research_view_model("sess_blood_bank", report, None, _pricing(), None)
+    rendered = view_model.model_dump_json() if view_model else ""
+
+    assert "hospital depots" in rendered
+    assert "hospital operationss" not in rendered
+    assert "operating room scope" not in rendered
+    assert "asset count" in rendered
+
+
 def test_pricing_headline_unsafe_estimate_is_withheld_and_basis_is_visible():
     report = _report("retail", ["web_api_application"])
     view_model = build_research_view_model("sess_pricing", report, None, _pricing(headline_safe=False), None)

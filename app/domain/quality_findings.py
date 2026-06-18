@@ -24,7 +24,14 @@ QualityCategory = Literal[
     "security",
     "regression",
 ]
-ReadinessImpact = Literal["none", "cap_to_customer_demo", "cap_to_directional", "cap_to_internal_only", "fail"]
+ReadinessImpact = Literal[
+    "none",
+    "cap_to_workshop",
+    "cap_to_customer_demo",
+    "cap_to_directional",
+    "cap_to_internal_only",
+    "fail",
+]
 
 
 class QualityFinding(BaseModel):
