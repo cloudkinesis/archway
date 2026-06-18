@@ -12,9 +12,11 @@ from app.domain.source_of_truth import CanonicalFact, CanonicalFactsLedger
 from app.services.architecture import _architecture_summary, _open_world_components, _requirement_coverage
 from app.services.architecture_critique import (
     ArchitectureCritiqueFinding,
+    _drop_satisfied_deployment_posture_findings,
     _drop_satisfied_metric_findings,
     _drop_satisfied_pricing_driver_findings,
     _drop_satisfied_requirement_coverage_findings,
+    _drop_satisfied_service_rationale_findings,
 )
 from app.services.architecture_revisions import ArchitectureRevisionService
 from app.services.client_pack import client_pack_files
@@ -842,6 +844,59 @@ def test_model_metric_and_pricing_warnings_drop_when_generic_coverage_is_satisfi
 
     remaining = _drop_satisfied_pricing_driver_findings(
         _drop_satisfied_metric_findings(findings, spec),
+        spec,
+    )
+
+    assert remaining == []
+
+
+def test_model_service_and_posture_warnings_drop_when_architecture_carries_evidence():
+    spec = ArchitectureSpec(
+        session_id="sess_d25_reconcile",
+        mode="production",
+        title="Generic streaming architecture",
+        summary="Streaming anomaly detection architecture.",
+        selected_services=[
+            AWSServiceRecommendation(
+                service="Amazon SageMaker",
+                purpose="Model inference for anomaly detection",
+                rationale="Selected for governed model scoring.",
+            ),
+            AWSServiceRecommendation(
+                service="AWS IoT SiteWise / time-series storage decision",
+                purpose="Time-series storage decision point",
+                rationale="Selected as a decision point for hot operational queries.",
+            ),
+            AWSServiceRecommendation(
+                service="Amazon SNS",
+                purpose="Operator notifications",
+                rationale="Selected for simple fan-out notification delivery.",
+            ),
+        ],
+        components=[
+            ArchitectureComponent(id="analytics", name="Streaming Analytics", service="Amazon Managed Service for Apache Flink"),
+            ArchitectureComponent(id="ml", name="Predictive Model Inference", service="Amazon SageMaker"),
+            ArchitectureComponent(id="timeseries", name="Industrial Asset Time-Series Store", service="Amazon DynamoDB"),
+        ],
+        flows=[],
+        security_controls=[],
+        observability_controls=[],
+        scaling_strategy="Scale by event volume.",
+        resilience_strategy="Use managed multi-AZ services.",
+        cost_optimization_strategy="Track workload drivers.",
+        assumptions=[],
+        risks=[],
+        metadata={"deployment_target": "aws_only", "deployment_target_note": "AWS-native services; external systems are integration actors."},
+    )
+    findings = [
+        ArchitectureCritiqueFinding(severity="warning", category="missing_component", issue="Missing component for real-time anomaly detection", why_it_matters="Detection matters.", recommended_fix="Add SageMaker or Flink."),
+        ArchitectureCritiqueFinding(severity="warning", category="deployment_posture", issue="Deployment posture not specified", why_it_matters="Posture matters.", recommended_fix="Specify deployment posture."),
+        ArchitectureCritiqueFinding(severity="warning", category="missing_component", issue="AWS IoT SiteWise is marked as a decision point but not explicitly selected for time-series storage.", why_it_matters="Storage matters.", recommended_fix="Select a time-series store."),
+        ArchitectureCritiqueFinding(severity="warning", category="service_fit", issue="Amazon SNS is selected for notifications but not explicitly justified in the rationale.", why_it_matters="Notification fit matters.", recommended_fix="Justify SNS."),
+    ]
+
+    remaining = _drop_satisfied_service_rationale_findings(
+        _drop_satisfied_deployment_posture_findings(findings, spec),
         spec,
     )
 

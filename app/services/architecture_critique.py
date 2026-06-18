@@ -51,6 +51,8 @@ class ArchitectureCritiqueService:
             parsed.findings = _drop_satisfied_requirement_coverage_findings(parsed.findings, spec)
             parsed.findings = _drop_satisfied_metric_findings(parsed.findings, spec)
             parsed.findings = _drop_satisfied_pricing_driver_findings(parsed.findings, spec)
+            parsed.findings = _drop_satisfied_deployment_posture_findings(parsed.findings, spec)
+            parsed.findings = _drop_satisfied_service_rationale_findings(parsed.findings, spec)
             parsed.findings = _downgrade_unconfirmed_model_criticals(parsed.findings, deterministic_findings)
             parsed.passed = not any(item.severity == "critical" for item in parsed.findings)
             if deterministic.customer_readiness_cap == "internal_only":
@@ -221,6 +223,7 @@ _REQUIREMENT_COVERAGE_TERMS = {
     "computer_vision_hot_path": ("image", "imagery", "photo", "video", "vision", "camera", "scan", "ocr"),
     "file_payload_ingestion": ("file", "payload", "upload", "attachment", "mb", "gb", "result"),
     "document_processing_path": ("document", "text", "note", "pdf", "contract", "record", "ocr", "extraction"),
+    "real_time_ingestion": ("real-time", "real time", "stream", "anomaly", "detection", "telemetry", "event"),
     "intermittent_connectivity": ("offline", "intermittent", "connectivity", "sync", "edge", "store-and-forward"),
     "governed_action_path": ("approval", "human", "review", "governed", "workflow", "action"),
     "data_residency_boundary": ("residency", "sovereign", "region", "country", "jurisdiction", "boundary"),
@@ -280,6 +283,53 @@ def _drop_satisfied_pricing_driver_findings(findings: list[ArchitectureCritiqueF
     for item in findings:
         text = " ".join([item.category, item.issue, item.why_it_matters, item.recommended_fix]).lower()
         if item.category == "pricing_driver_mismatch" and any(term in text for term in ("frequency", "payload", "quantity", "driver", "telemetry", "volume")):
+            continue
+        output.append(item)
+    return output
+
+
+def _drop_satisfied_deployment_posture_findings(findings: list[ArchitectureCritiqueFinding], spec: ArchitectureSpec) -> list[ArchitectureCritiqueFinding]:
+    metadata = spec.metadata or {}
+    has_posture = bool(metadata.get("deployment_target") or metadata.get("deployment_target_note") or spec.regions)
+    if not has_posture:
+        return findings
+    output: list[ArchitectureCritiqueFinding] = []
+    for item in findings:
+        text = " ".join([item.category, item.issue, item.why_it_matters, item.recommended_fix]).lower()
+        if item.category == "deployment_posture" and any(term in text for term in ("deployment", "multi-region", "multi-az", "resilience", "posture")):
+            continue
+        output.append(item)
+    return output
+
+
+def _drop_satisfied_service_rationale_findings(findings: list[ArchitectureCritiqueFinding], spec: ArchitectureSpec) -> list[ArchitectureCritiqueFinding]:
+    service_text = " ".join(
+        " ".join(str(value or "") for value in [
+            item.service,
+            item.purpose,
+            getattr(item, "rationale", ""),
+            " ".join(item.alternatives_considered or []),
+        ])
+        for item in spec.selected_services
+    ).lower()
+    component_text = " ".join(
+        " ".join(str(value or "") for value in [
+            component.name,
+            component.service,
+            component.logical_group,
+        ])
+        for component in spec.components
+    ).lower()
+    if not (service_text or component_text):
+        return findings
+    output: list[ArchitectureCritiqueFinding] = []
+    for item in findings:
+        text = " ".join([item.category, item.issue, item.why_it_matters, item.recommended_fix]).lower()
+        if item.category == "service_fit" and any(service in text and service in service_text for service in ("sns", "sqs", "pinpoint", "eventbridge")):
+            continue
+        if item.category == "missing_component" and "time-series" in text and any(term in service_text or term in component_text for term in ("time-series", "timeseries", "timestream", "sitewise", "dynamodb")):
+            continue
+        if item.category == "missing_component" and any(term in text for term in ("anomaly", "detection", "real-time", "real time")) and any(term in service_text or term in component_text for term in ("sagemaker", "flink", "analytics", "inference", "anomaly")):
             continue
         output.append(item)
     return output
