@@ -1136,7 +1136,7 @@ def _pricing_ledger(pricing: PricingAnalysis, usage_dimensions: list[ServiceUsag
         procurement_ready = False
         if rate and rate.binding_status == "bound":
             evidence_class = "sku_tier_backed"
-            procurement_ready = not bool(dimension and dimension.assumption_ids)
+            procurement_ready = not bool(dimension and dimension.assumption_ids) and not getattr(rate, "is_tiered", False)
             if dimension and dimension.quantity is not None and rate.price_per_unit is not None:
                 monthly = (Decimal(dimension.quantity) * Decimal(rate.price_per_unit)).quantize(Decimal("0.01"))
         elif rate and rate.binding_status == "ambiguous":

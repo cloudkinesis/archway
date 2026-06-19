@@ -38,15 +38,13 @@ import {
 } from "lucide-react";
 import { api, artifactUrl } from "../lib/api";
 import { TrustPanel } from "./TrustPanel";
+import { SynthesisTab } from "./synthesis/SynthesisTab";
+import { ArchitectureViewer } from "./architecture/ArchitectureViewer";
 import type { ArchitectureRevision, ArchitectureSpec, ArchitectureValidationIssue, BuildStatusSummary, DiagramGalleryResult, ExportBundle, HealthCheckResult, HealthSummary, JobRun, LiveAgentStatus, PricingCheckpoint, PricingViewModel, Readiness, ResearchDigest, ResearchNarrative, ResearchReport, ResearchViewModel, Session } from "../lib/types";
 import { sanitizeMarkdown } from "../lib/markdown";
 
 type View = "synthesis" | "research" | "architecture" | "diagrams" | "diagnostics";
 type LatestJobs = Partial<Record<JobRun["operation"], JobRun | null>>;
-type ArchitectureDraft = Pick<ArchitectureSpec, "summary" | "scaling_strategy" | "resilience_strategy" | "cost_optimization_strategy"> & {
-  security_controls_text: string;
-  observability_controls_text: string;
-};
 
 const HEALTH_ACCEPTED_KEY = "archway.healthAccepted.v1";
 
@@ -440,115 +438,38 @@ function Workspace(props: {
       </nav>
       {props.hydrationLoading ? <div className="border-b border-awsBorder bg-[#eef6ff] px-5 py-2 text-xs text-awsTextSecondary">Loading saved session artifacts...</div> : null}
       {props.hydrationError ? <div className="border-b border-awsDanger/40 bg-[#fff1f2] px-5 py-2 text-xs text-awsDanger">Could not hydrate saved session: {props.hydrationError.message}</div> : null}
-      {props.view === "synthesis" ? <SynthesisView {...props} /> : null}
+      {props.view === "synthesis" ? (
+        <SynthesisTab
+          session={props.session}
+          setSession={props.setSession}
+          readiness={props.readiness}
+          setReadiness={props.setReadiness}
+          setView={props.setView}
+        />
+      ) : null}
       {props.view === "research" ? <ResearchView {...props} /> : null}
-      {props.view === "architecture" ? <ArchitectureView {...props} /> : null}
+      {props.view === "architecture" ? (
+        <ArchitectureViewer
+          session={props.session}
+          setSession={props.setSession}
+          architectures={props.architectures}
+          setArchitectures={props.setArchitectures}
+          architectureValidationIssues={props.architectureValidationIssues}
+          setArchitectureValidationIssues={props.setArchitectureValidationIssues}
+          architectureRevisions={props.architectureRevisions}
+          setArchitectureRevisions={props.setArchitectureRevisions}
+          setGalleries={props.setGalleries}
+          setView={props.setView}
+          latestJobs={props.latestJobs}
+          setLatestJobs={props.setLatestJobs}
+        />
+      ) : null}
       {props.view === "diagrams" ? <DiagramView {...props} /> : null}
       {props.view === "diagnostics" ? <DiagnosticsView {...props} /> : null}
     </div>
   );
 }
 
-function SynthesisView({ session, setSession, readiness, setReadiness, setView }: Parameters<typeof Workspace>[0]) {
-  const [message, setMessage] = useState("");
-  const [turns, setTurns] = useState<Array<{ role: "user" | "assistant"; text: string }>>([]);
-  const [showJumpLatest, setShowJumpLatest] = useState(false);
-  const endRef = useRef<HTMLDivElement | null>(null);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const opening = interviewPromptFromReadiness(readiness);
-  useEffect(() => {
-    setTurns(interviewTurnsFromSession(session, opening));
-    setMessage("");
-    setShowJumpLatest(false);
-  }, [session.id, opening]);
-  useEffect(() => {
-    if (!showJumpLatest) {
-      endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-    }
-  }, [turns.length]);
-  const scrollToLatest = () => {
-    setShowJumpLatest(false);
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  };
-  const onConversationScroll = () => {
-    const element = scrollRef.current;
-    if (!element) return;
-    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
-    setShowJumpLatest(distanceFromBottom > 160);
-  };
-  const send = useMutation({
-    mutationFn: () => api.sendSynthesis(session.id, message),
-    onSuccess: (result) => {
-      const userText = message;
-      setSession({ ...session, current_summary: result.brief });
-      setReadiness(result.readiness);
-      setTurns((current) => [...current, { role: "user", text: userText }, { role: "assistant", text: result.message }]);
-      setMessage("");
-    }
-  });
-  const proceed = useMutation({
-    mutationFn: (assume: boolean) => api.proceed(session.id, assume),
-    onSuccess: (result) => {
-      setReadiness(result.readiness);
-      if (!result.proceeded) {
-        setTurns((current) => [...current, { role: "assistant", text: result.message }]);
-      }
-      if (result.proceeded) setView("research");
-    }
-  });
-  const interviewCount = interviewTurnCount(session);
-  const showOptionalProceed = interviewCount >= 4 || !readiness?.recommended_minimum_questions.length;
-  return (
-    <section className="flex h-[calc(100vh-113px)] flex-1 flex-col bg-[#f8fafc]">
-      <div className="border-b border-awsBorder bg-surface px-6 py-3">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-semibold"><MessageSquareText className="h-4 w-4 text-awsOrange" /> Interview</div>
-            <p className="mt-1 text-xs text-awsTextMuted">Answers feed the brief, research, pricing, architecture, diagrams, and export package.</p>
-          </div>
-          <span className="border border-awsBorder bg-white px-2 py-1 text-xs text-awsTextMuted">{interviewCount} answers captured</span>
-        </div>
-      </div>
-      <div ref={scrollRef} onScroll={onConversationScroll} className="archway-scroll relative flex-1 overflow-y-auto px-5 py-5">
-        <div className="mx-auto space-y-4 pb-4">
-          {turns.map((turn, index) => <ConversationBubble key={`${turn.role}-${index}`} role={turn.role} text={turn.text} />)}
-          {readiness && showOptionalProceed ? <Checkpoint readiness={readiness} onAssume={() => proceed.mutate(true)} /> : null}
-          <div ref={endRef} />
-        </div>
-        {showJumpLatest ? (
-          <button onClick={scrollToLatest} className="sticky bottom-3 mx-auto flex border border-awsBorder bg-white px-3 py-2 text-sm font-semibold text-awsTextSecondary shadow-console hover:border-awsOrange">
-            Jump to latest
-          </button>
-        ) : null}
-      </div>
-      <div className="sticky bottom-0 border-t border-awsBorder bg-white px-5 py-4 shadow-console">
-        <div className="mx-auto max-w-5xl">
-          <textarea
-            value={message}
-            onChange={(event) => setMessage(event.target.value)}
-            onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && message.trim() && !send.isPending) {
-                send.mutate();
-              }
-            }}
-            className="min-h-28 w-full resize-y border border-awsBorder bg-white p-4 text-base leading-7 text-awsTextPrimary outline-none focus:border-awsOrange"
-            placeholder="Answer here. Add constraints, systems, approval rules, numbers, or say what is unknown."
-            disabled={send.isPending || proceed.isPending}
-          />
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="text-xs text-awsTextMuted">Natural language is fine. Short answers are fine too.</div>
-            <div className="flex flex-wrap gap-2">
-              <Button icon={MessageSquareText} disabled={!message.trim() || send.isPending} onClick={() => send.mutate()} variant="secondary">{send.isPending ? "Capturing" : "Send Answer"}</Button>
-              <Button icon={ChevronRight} disabled={proceed.isPending} onClick={() => proceed.mutate(showOptionalProceed)}>{showOptionalProceed ? "Proceed to Research" : "Ask Next Question"}</Button>
-            </div>
-          </div>
-          {send.error ? <Banner tone="danger" text={(send.error as Error).message} /> : null}
-          {proceed.error ? <Banner tone="danger" text={(proceed.error as Error).message} /> : null}
-        </div>
-      </div>
-    </section>
-  );
-}
 
 function ResearchView({ session, setSession, report, setReport, researchNarrative, setResearchNarrative, researchDigest, setResearchDigest, researchViewModel, setResearchViewModel, setView, latestExport, setLatestExport, latestJobs, setLatestJobs }: Parameters<typeof Workspace>[0]) {
   const [jobId, setJobId] = useState<string | null>(null);
@@ -616,117 +537,6 @@ function ResearchView({ session, setSession, report, setReport, researchNarrativ
   );
 }
 
-function ArchitectureView({
-  session,
-  setSession,
-  architectures,
-  setArchitectures,
-  architectureValidationIssues,
-  setArchitectureValidationIssues,
-  architectureRevisions,
-  setArchitectureRevisions,
-  setGalleries,
-  setView,
-  latestJobs,
-  setLatestJobs
-}: Parameters<typeof Workspace>[0]) {
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, ArchitectureDraft>>({});
-  useEffect(() => {
-    const latest = latestJobs.architecture;
-    if (architectures.length === 0 && latest?.id && latest.id !== jobId && ["queued", "running", "succeeded"].includes(latest.status)) {
-      setJobId(latest.id);
-    }
-  }, [architectures.length, jobId, latestJobs.architecture]);
-  const job = useJobPolling(session.id, jobId, async () => {
-    const result = await api.hydrateSession(session.id);
-    setSession(result.session);
-    setArchitectures(result.architecture?.architectures ?? []);
-    setArchitectureValidationIssues(result.architecture?.validation_issues ?? []);
-    setArchitectureRevisions(result.architecture?.revisions ?? []);
-    setLatestJobs(result.jobs ?? {});
-  });
-  const generate = useMutation({ mutationFn: () => api.generateArchitecture(session.id), onSuccess: (result) => setJobId(result.job.id) });
-  const save = useMutation({
-    mutationFn: () => api.updateArchitecture(session.id, {
-      reason: "User-edited architecture revision",
-      specs: Object.fromEntries(architectures.map((architecture) => [architecture.mode, draftToPatch(drafts[architecture.mode] ?? architectureToDraft(architecture))]))
-    }),
-    onSuccess: (result) => {
-      setArchitectures(result.architectures);
-      setArchitectureValidationIssues(result.validation_issues ?? []);
-      setArchitectureRevisions(result.revisions ?? []);
-      setGalleries([]);
-    }
-  });
-  const regenerate = useMutation({
-    mutationFn: () => api.regenerateArchitecture(session.id),
-    onSuccess: (result) => {
-      setArchitectures(result.architectures);
-      setArchitectureValidationIssues(result.validation_issues ?? []);
-      setArchitectureRevisions(result.revisions ?? []);
-      setGalleries([]);
-    }
-  });
-
-  useEffect(() => {
-    if (architectures.length === 0) {
-      setDrafts({});
-      return;
-    }
-    setDrafts(Object.fromEntries(architectures.map((architecture) => [architecture.mode, architectureToDraft(architecture)])));
-  }, [architectures]);
-
-  const hasCriticalIssues = architectureValidationIssues.some((issue) => issue.severity === "critical");
-
-  return (
-    <Panel title="Architecture" icon={LayoutDashboard}>
-      {architectures.length === 0 ? (
-        <div className="space-y-4">
-          {job.job ? <JobProgress job={job.job} onCancel={() => job.cancel.mutate()} /> : null}
-          <Button icon={generate.isPending || job.isActive ? Loader2 : LayoutDashboard} disabled={generate.isPending || job.isActive} onClick={() => generate.mutate()}>{generate.isPending || job.isActive ? "Planning" : "Generate POC and production specs"}</Button>
-          {job.refreshError ? <Banner tone="warning" text={`Architecture finished, but the browser could not refresh the specs yet: ${job.refreshError}`} /> : null}
-          {job.job?.status === "failed" ? <Banner tone="warning" text={job.job.error ?? "Architecture planning needs a retry. Diagnostics were recorded and the session remains usable."} /> : null}
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 border border-awsBorder bg-surface p-4">
-            <div>
-              <div className="font-semibold">Revision {architectureRevisions[architectureRevisions.length - 1]?.version ?? 1}</div>
-              <p className="text-sm text-awsTextSecondary">Edits are saved as new revisions and diagrams regenerate only from the active revision.</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button icon={regenerate.isPending ? Loader2 : RotateCcw} variant="secondary" disabled={regenerate.isPending || save.isPending} onClick={() => regenerate.mutate()}>Regenerate from active</Button>
-              <Button icon={save.isPending ? Loader2 : Save} disabled={save.isPending || regenerate.isPending} onClick={() => save.mutate()}>Save revision</Button>
-            </div>
-          </div>
-          <ValidationPanel issues={architectureValidationIssues} />
-          {architectures.map((architecture) => (
-            <ArchitectureEditorCard
-              key={architecture.id}
-              architecture={architecture}
-              draft={drafts[architecture.mode] ?? architectureToDraft(architecture)}
-              onChange={(draft) => setDrafts((current) => ({ ...current, [architecture.mode]: draft }))}
-            />
-          ))}
-          <div className="flex flex-wrap items-center gap-3">
-            <Button icon={ChevronRight} onClick={() => setView("diagrams")}>
-              {hasCriticalIssues ? "Proceed to Diagnostic Diagrams" : "Proceed to Diagrams"}
-            </Button>
-            {hasCriticalIssues ? (
-              <span className="text-sm text-awsTextSecondary">
-                Critical findings will generate candidate diagnostic diagrams with the blockers attached; export can still complete.
-              </span>
-            ) : null}
-          </div>
-          {save.error ? <Banner tone="danger" text={(save.error as Error).message} /> : null}
-          {regenerate.error ? <Banner tone="danger" text={(regenerate.error as Error).message} /> : null}
-          {architectureRevisions.length > 1 ? <RevisionHistory revisions={architectureRevisions} /> : null}
-        </div>
-      )}
-    </Panel>
-  );
-}
 
 function DiagramView({ session, setSession, galleries, setGalleries, latestExport, setLatestExport, latestJobs, setLatestJobs }: Parameters<typeof Workspace>[0]) {
   const [jobId, setJobId] = useState<string | null>(null);
@@ -2177,43 +1987,6 @@ function titleize(value: string) {
   return value.replace(/_/g, " ").replace(/\b\w/g, (char: string) => char.toUpperCase());
 }
 
-function interviewTurnCount(session: Session) {
-  const profile = session.current_summary?.use_case_profile as { interview?: { turn_count?: number; answered?: string[] } } | undefined;
-  return profile?.interview?.turn_count ?? profile?.interview?.answered?.length ?? 0;
-}
-
-function interviewPromptFromReadiness(readiness: Readiness | null) {
-  const question = readiness?.recommended_minimum_questions?.[0];
-  if (!question) {
-    return "I have enough to shape the first research pass. Add any constraints you want captured before research, or proceed when ready.";
-  }
-  return [
-    "Let’s tighten the brief before research.",
-    "",
-    question.prompt,
-    "",
-    `Why it matters: ${question.why_it_matters}`,
-    "",
-    `Useful answer styles: ${question.options.join(" | ")}`
-  ].join("\n");
-}
-
-function interviewTurnsFromSession(session: Session, opening: string) {
-  const turns: Array<{ role: "user" | "assistant"; text: string }> = [{ role: "user", text: session.initial_use_case }];
-  const assumptions = session.current_summary?.assumptions ?? [];
-  const capturedAnswers = assumptions
-    .map((item) => {
-      const match = item.text.match(/^Interview answer for '(.+)': ([\s\S]+)$/);
-      return match ? { question: match[1], answer: match[2] } : null;
-    })
-    .filter((item): item is { question: string; answer: string } => Boolean(item));
-  capturedAnswers.forEach((item, index) => {
-    turns.push({ role: "assistant", text: index === 0 ? item.question : `Next question: ${item.question}` });
-    turns.push({ role: "user", text: item.answer });
-  });
-  turns.push({ role: "assistant", text: opening });
-  return turns;
-}
 
 function PricingCheckpointCard({
   checkpoint,
@@ -2292,135 +2065,6 @@ function ClaimCard({ title, claims }: { title: string; claims: Array<{ id: strin
   );
 }
 
-function ArchitectureEditorCard({ architecture, draft, onChange }: { architecture: ArchitectureSpec; draft: ArchitectureDraft; onChange: (draft: ArchitectureDraft) => void }) {
-  const update = (field: keyof ArchitectureDraft, value: string) => onChange({ ...draft, [field]: value });
-  const securityControls = parseControls(draft.security_controls_text);
-  const observabilityControls = parseControls(draft.observability_controls_text);
-  return (
-    <div className="border border-awsBorder bg-surface p-4">
-      <div className="mb-3 flex items-start justify-between">
-        <div>
-          <h3 className="text-lg font-semibold">{architecture.title}</h3>
-          <p className="mt-1 text-sm leading-6 text-awsTextSecondary">{architecture.selected_services.map((item) => item.service).join(", ")}</p>
-        </div>
-        <span className="border border-awsOrange/50 px-2 py-1 text-xs uppercase text-awsOrange">{architecture.mode}</span>
-      </div>
-      <div className="mb-4 grid gap-3 xl:grid-cols-3">
-        <ArchitectureReadCard title="Summary" lines={[draft.summary]} />
-        <ArchitectureReadCard title="Security controls" lines={securityControls.map((item) => `${item.name}: ${item.rationale}`)} />
-        <ArchitectureReadCard title="Observability controls" lines={observabilityControls.map((item) => `${item.name}: ${item.rationale}`)} />
-        <ArchitectureReadCard title="Scaling" lines={[draft.scaling_strategy]} />
-        <ArchitectureReadCard title="Resilience" lines={[draft.resilience_strategy]} />
-        <ArchitectureReadCard title="Cost posture" lines={[draft.cost_optimization_strategy]} />
-      </div>
-      <details className="border border-awsBorder bg-white p-3">
-        <summary className="cursor-pointer text-sm font-semibold">Edit architecture fields</summary>
-        <div className="mt-3 grid gap-3 xl:grid-cols-2">
-          <TextArea label="Summary" value={draft.summary} onChange={(value) => update("summary", value)} />
-          <TextArea label="Security controls" value={draft.security_controls_text} onChange={(value) => update("security_controls_text", value)} hint="One control per line: name: rationale" />
-          <TextArea label="Observability controls" value={draft.observability_controls_text} onChange={(value) => update("observability_controls_text", value)} hint="One control per line: name: rationale" />
-          <TextArea label="Scaling strategy" value={draft.scaling_strategy} onChange={(value) => update("scaling_strategy", value)} />
-          <TextArea label="Resilience strategy" value={draft.resilience_strategy} onChange={(value) => update("resilience_strategy", value)} />
-          <TextArea label="Cost optimization" value={draft.cost_optimization_strategy} onChange={(value) => update("cost_optimization_strategy", value)} />
-        </div>
-      </details>
-    </div>
-  );
-}
-
-function ArchitectureReadCard({ title, lines }: { title: string; lines: string[] }) {
-  const clean = lines.map((line) => presentationText(line)).filter(Boolean).slice(0, 4);
-  return (
-    <section className="border border-awsBorder bg-white p-3">
-      <h4 className="text-sm font-semibold">{title}</h4>
-      {clean.length ? (
-        <ul className="mt-2 space-y-2 text-sm leading-6 text-awsTextSecondary">
-          {clean.map((line) => <li key={line}>{line}</li>)}
-        </ul>
-      ) : (
-        <p className="mt-2 text-sm text-awsTextMuted">No generated narrative is available for this section yet.</p>
-      )}
-    </section>
-  );
-}
-
-function ValidationPanel({ issues }: { issues: ArchitectureValidationIssue[] }) {
-  if (issues.length === 0) {
-    return <div className="border border-awsSuccess/40 bg-[#f1f8f5] p-4 text-sm text-awsTextSecondary">Architecture validation passed for security, observability, and tool governance guardrails.</div>;
-  }
-  return (
-    <div className="border border-awsWarning/50 bg-[#fff8e5] p-4">
-      <div className="mb-3 flex items-center gap-2 font-semibold"><ShieldCheck className="h-5 w-5 text-awsWarning" /> Architecture validation</div>
-      <div className="space-y-2">
-        {issues.map((issue) => (
-          <div key={`${issue.mode}-${issue.code}-${issue.message}`} className="flex flex-wrap items-center gap-2 text-sm text-awsTextSecondary">
-            <span className={`border px-2 py-1 text-xs uppercase ${issue.severity === "critical" ? "border-awsDanger/50 text-awsDanger" : issue.severity === "important" ? "border-awsWarning/60 text-awsWarning" : "border-awsBorder text-awsTextMuted"}`}>{issue.severity}</span>
-            <span>{issue.mode ? `${issue.mode}: ` : ""}{issue.message}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function RevisionHistory({ revisions }: { revisions: ArchitectureRevision[] }) {
-  return (
-    <div className="border border-awsBorder bg-surface p-4">
-      <div className="mb-3 flex items-center gap-2 font-semibold"><History className="h-4 w-4 text-awsOrange" /> Revision history</div>
-      <div className="space-y-2 text-sm text-awsTextSecondary">
-        {revisions.slice(-5).reverse().map((revision) => (
-          <div key={revision.id} className="flex flex-wrap items-center justify-between gap-3 border border-awsBorder bg-white p-3">
-            <span>Revision {revision.version}: {revision.reason}</span>
-            <span className="text-awsTextMuted">{new Date(revision.created_at).toLocaleString()}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function TextArea({ label, value, onChange, hint }: { label: string; value: string; onChange: (value: string) => void; hint?: string }) {
-  return (
-    <label className="block">
-      <span className="mb-2 block text-sm font-semibold">{label}</span>
-      <textarea className="min-h-32 w-full resize-y border border-awsBorder bg-white p-3 text-sm leading-6 text-awsTextSecondary outline-none focus:border-awsOrange" value={value} onChange={(event) => onChange(event.target.value)} />
-      {hint ? <span className="mt-1 block text-xs text-awsTextMuted">{hint}</span> : null}
-    </label>
-  );
-}
-
-function architectureToDraft(architecture: ArchitectureSpec): ArchitectureDraft {
-  return {
-    summary: architecture.summary,
-    scaling_strategy: architecture.scaling_strategy,
-    resilience_strategy: architecture.resilience_strategy,
-    cost_optimization_strategy: architecture.cost_optimization_strategy,
-    security_controls_text: formatControls(architecture.security_controls),
-    observability_controls_text: formatControls(architecture.observability_controls)
-  };
-}
-
-function draftToPatch(draft: ArchitectureDraft) {
-  return {
-    summary: draft.summary,
-    scaling_strategy: draft.scaling_strategy,
-    resilience_strategy: draft.resilience_strategy,
-    cost_optimization_strategy: draft.cost_optimization_strategy,
-    security_controls: parseControls(draft.security_controls_text),
-    observability_controls: parseControls(draft.observability_controls_text)
-  };
-}
-
-function formatControls(controls: Array<{ name: string; rationale: string }>) {
-  return controls.map((control) => `${control.name}: ${control.rationale}`).join("\n");
-}
-
-function parseControls(value: string) {
-  return value.split("\n").map((line) => {
-    const [name, ...rest] = line.split(":");
-    return { name: name.trim(), rationale: rest.join(":").trim() };
-  }).filter((item) => item.name);
-}
 
 function Checkpoint({ readiness, onAssume }: { readiness: Readiness; onAssume: () => void }) {
   return (

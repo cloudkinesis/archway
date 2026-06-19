@@ -545,13 +545,66 @@ class ArchitectureComponent(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class FlowIntent(str, Enum):
+    READ_ONLY = "read_only"
+    MUTATING_WRITE = "mutating_write"
+    CONTROL_PLANE = "control_plane"
+    INTEGRATION_SYNC = "integration_sync"
+
+
+from pydantic import BaseModel, Field, HttpUrl, model_validator
+
 class ArchitectureFlow(BaseModel):
     id: str
     source: str
     target: str
     label: str | None = None
     protocol: str | None = None
+    flow_intent: FlowIntent = FlowIntent.READ_ONLY
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def infer_flow_intent(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            intent = data.get("flow_intent")
+            label = str(data.get("label") or "").lower()
+            metadata = data.get("metadata") or {}
+            classification = str(metadata.get("classification") or "").lower()
+            
+            is_write = False
+            if classification in {"external_write", "mutating_write", "state_write", "cache_write", "workflow_start", "audit_write", "private_integration"}:
+                is_write = True
+            elif any(term in label for term in ("write", "delete", "remove", "update", "modify", "dispatch", "block", "create", "submit", "publish")):
+                is_write = True
+                
+            # Only assign MUTATING_WRITE if flow_intent is omitted (None)
+            if is_write and intent is None:
+                data["flow_intent"] = FlowIntent.MUTATING_WRITE
+                
+            # Only infer action_intent if final flow_intent is MUTATING_WRITE
+            final_intent = data.get("flow_intent") or intent
+            if final_intent == FlowIntent.MUTATING_WRITE or final_intent == "mutating_write":
+                if "action_intent" not in metadata:
+                    inferred_intent = None
+                    if "dispatch" in label:
+                        inferred_intent = "dispatch"
+                    elif "delete" in label or "remove" in label:
+                        inferred_intent = "delete"
+                    elif "block" in label:
+                        inferred_intent = "block"
+                    elif "create" in label or "submit" in label:
+                        inferred_intent = "create"
+                    elif "update" in label or "modify" in label:
+                        inferred_intent = "update"
+                    elif "write" in label or "publish" in label:
+                        inferred_intent = "writeback"
+                    
+                    if inferred_intent:
+                        metadata["action_intent"] = inferred_intent
+                        data["metadata"] = metadata
+        return data
+
 
 
 class SecurityControl(BaseModel):

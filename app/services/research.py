@@ -37,10 +37,18 @@ class ResearchOrchestrator:
         self.evidence_discipline = EvidenceDisciplineService()
         self.settings = get_settings()
 
+    def _check_cancellation(self, session_id: str) -> None:
+        from app.services.jobs import job_manager
+        job = job_manager.latest_for_session(session_id, "research")
+        if job and job_manager.should_cancel(job.id):
+            raise Exception("Research job was cancelled by user request.")
+
     async def run_research(self, brief: UseCaseBrief, session_id: str, progress: Callable[[int, str], None] | None = None) -> ResearchReport:
         progress = progress or (lambda _progress, _message: None)
+        self._check_cancellation(session_id)
         progress(8, "Understanding use case and tool-governance constraints.")
         self.registry.assert_allowed("local_policy", SessionPhase.research, brief.model_dump(), session_id)
+        self._check_cancellation(session_id)
         profile = _profile_for_research(brief)
         progress(15, "Running domain classification and workload-family checks.")
         brief = brief.model_copy(deep=True)
@@ -74,6 +82,7 @@ class ResearchOrchestrator:
             ),
         ]
         try:
+            self._check_cancellation(session_id)
             progress(25, "Collecting AWS documentation evidence.")
             query = f"AWS architecture guidance for {profile.domain or effective_brief.industry or 'enterprise'} {workload_label} {effective_brief.title}"
             aws_docs = await AWSDocsAdapter().search(query, session_id)
@@ -136,6 +145,7 @@ class ResearchOrchestrator:
                     confidence="low",
                 )
             )
+        self._check_cancellation(session_id)
         progress(45, "Selecting AWS services and building service-decision evidence.")
         selected = _recommend_services(effective_brief, evidence)
         progress(52, "Building workload pricing assumptions and directional estimate.")
@@ -171,6 +181,7 @@ class ResearchOrchestrator:
                 )
             )
         try:
+            self._check_cancellation(session_id)
             progress(72, "Checking AWS Pricing MCP evidence path.")
             mcp_pricing_evidence = await AWSPricingAdapter().lookup(
                 [item.service for item in selected],
@@ -493,6 +504,10 @@ async def _run_competitor_scan(brief: UseCaseBrief, profile, workload_label: str
     results_returned = 0
     attempted = 0
     for query in queries:
+        from app.services.jobs import job_manager
+        job = job_manager.latest_for_session(session_id, "research")
+        if job and job_manager.should_cancel(job.id):
+            raise Exception("Research job was cancelled by user request.")
         attempted += 1
         search = await client.search(query, session_id, max_results=5, purpose="competitor_scan")
         searches.append(search)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.models.domain import ArchitectureFlow, ArchitectureSpec, GovernanceControl
+from app.models.domain import ArchitectureFlow, ArchitectureSpec, FlowIntent, GovernanceControl
 
 
 EFFECTFUL_ACTION_MARKERS: dict[str, tuple[str, ...]] = {
@@ -157,23 +157,15 @@ def _action_type(flow: ArchitectureFlow) -> str | None:
        ``automation_mode``, ``customer_or_patient_impacting``, ``target_system_type``;
        also the existing healthcare keys ``approval_required``/``patient_impacting``/
        ``governance_mode``).
-    2. Existing label/classification string matching as a UNION fallback.
-
-    Union semantics: a flow is effectful if typed metadata OR string matching says
-    so, so this never removes governance that the previous string logic produced.
-    Typed metadata is preferred only for choosing the concrete action type.
+    2. Mapping directly from FlowIntent as a fallback.
     """
-    return _typed_action_type(flow) or _string_action_type(flow)
-
-
-def _string_action_type(flow: ArchitectureFlow) -> str | None:
-    classification = str(flow.metadata.get("classification", "")).lower()
-    label = (flow.label or "").lower()
-    text = f"{classification} {label}"
-    for action_type, markers in EFFECTFUL_ACTION_MARKERS.items():
-        if any(marker in text for marker in markers):
-            return action_type
+    typed = _typed_action_type(flow)
+    if typed:
+        return typed
+    if flow.flow_intent == FlowIntent.MUTATING_WRITE:
+        return "external_write"
     return None
+
 
 
 def _truthy(value) -> bool:
@@ -209,7 +201,7 @@ def _typed_action_type(flow: ArchitectureFlow) -> str | None:
 
     effectful = (
         has_risk_signal
-        or intent in {"delete", "block"}
+        or intent in {"delete", "block", "dispatch", "pre_position"}
         or (state_changing and target in external_targets)
     )
     if not effectful:
@@ -225,6 +217,8 @@ def _typed_action_type(flow: ArchitectureFlow) -> str | None:
         return "device_update"
     if intent == "create":
         return "create"
+    if intent == "dispatch":
+        return "dispatch"
     if external or mutates or intent in {"writeback", "publish"} or target in external_targets:
         return "external_write"
     if intent == "update":
