@@ -73,6 +73,10 @@ class Settings(BaseModel):
     aws_pricing_mcp_args: list[str] = Field(default_factory=lambda: shlex.split(os.getenv("ARCHWAY_AWS_PRICING_MCP_ARGS", "")))
     aws_pricing_mcp_aws_profile: str = Field(default_factory=lambda: os.getenv("ARCHWAY_AWS_PRICING_MCP_AWS_PROFILE", os.getenv("AWS_PROFILE", "default")))
     aws_pricing_mcp_aws_region: str = Field(default_factory=lambda: os.getenv("ARCHWAY_AWS_PRICING_MCP_AWS_REGION", os.getenv("AWS_REGION", "us-east-1")))
+    pricing_authority_timeout_seconds: int = Field(default_factory=lambda: int(os.getenv("ARCHWAY_PRICING_AUTHORITY_TIMEOUT_SECONDS", "120")))
+    enable_aws_price_list_query_api: bool = Field(
+        default_factory=lambda: os.getenv("ARCHWAY_ENABLE_AWS_PRICE_LIST_QUERY_API", "false") == "true"
+    )
     aws_pricing_reference_mcp_url: str | None = Field(
         default_factory=lambda: os.getenv("ARCHWAY_AWS_PRICING_REFERENCE_MCP_URL") or os.getenv("ARCHWAY_AWS_DOCS_MCP_URL") or None
     )

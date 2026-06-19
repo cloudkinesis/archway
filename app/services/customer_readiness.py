@@ -85,10 +85,11 @@ def assess_customer_readiness(
 # machinery above, governance, or manifest/verifier semantics — and a tier can
 # never promote pricing numbers beyond what their evidence class supports.
 # --------------------------------------------------------------------------- #
-READINESS_TIERS = ("internal_only", "demo_ready", "workshop_ready", "procurement_ready")
+READINESS_TIERS = ("internal_only", "directional_only", "demo_ready", "workshop_ready", "procurement_ready")
 
 TIER_DISPLAY = {
     "internal_only": "Internal only",
+    "directional_only": "Directional only",
     "demo_ready": "Demo ready",
     "workshop_ready": "Workshop ready",
     "procurement_ready": "Procurement ready",
@@ -104,6 +105,7 @@ ESTIMATE_CLASS_DISPLAY = {
 # package failed or internal-only, so it is not suitable even for a controlled
 # demo (→ internal_only tier).
 _HARD_QUALITY_STATUSES = {"failed", "failed_validation", "internal_only", "internal_demo_only"}
+_DIRECTIONAL_QUALITY_STATUSES = {"directional_only"}
 
 # HARD-failure pricing-metadata status values: the pricing basis is not even
 # directionally coherent (→ internal_only tier).
@@ -157,6 +159,16 @@ def compute_readiness_tier(*, report: dict | None, pricing: dict | None, archite
         )
     if hard_reasons:
         return _tier_result("internal_only", pricing_metadata, closure, ledger_summary, hard_reasons)
+    if quality_status in _DIRECTIONAL_QUALITY_STATUSES:
+        return _tier_result(
+            "directional_only",
+            pricing_metadata,
+            closure,
+            ledger_summary,
+            [
+                "Golden convergence capped this package at Directional only; client-facing readiness cannot be promoted above the final quality gate."
+            ],
+        )
 
     # --- demo_ready: the evidence-on gate for workshop_ready ----------------
     # A coherent package is at least demo_ready. It is capped here (not

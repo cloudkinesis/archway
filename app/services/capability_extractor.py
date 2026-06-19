@@ -72,7 +72,7 @@ CAPABILITY_MARKERS: list[tuple[ArchitectureCapability, tuple[str, ...]]] = [
     (ArchitectureCapability.CDR_INGESTION, ("cdr", "call detail record")),
     (ArchitectureCapability.MARKET_DATA_INGESTION, ("market data", "exchange", "instruments", "bid", "order flow")),
     (ArchitectureCapability.BIOMETRIC_REQUEST_PROCESSING, ("verification requests", "biometric", "citizens")),
-    (ArchitectureCapability.VIDEO_STREAMING, ("4k", "hdr", "live streams", "video streaming", "concurrent viewers")),
+    (ArchitectureCapability.VIDEO_STREAMING, ("4k", "hdr", "live streams", "video streaming")),
     (ArchitectureCapability.POS_DATA_INGESTION, ("pos transactions", "retail endpoints")),
     (ArchitectureCapability.WEATHER_DATA_INGESTION, ("weather", "storm", "wind/solar")),
     (ArchitectureCapability.BATCH_PROCESSING, ("nightly", "batch", "within 4 hours", "8-hour", "rerun")),

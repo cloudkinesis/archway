@@ -1,3 +1,6 @@
+import re
+from typing import Any
+
 from app.models.domain import ArchitectureComponent, ArchitectureFlow, ArchitectureSpec, ResearchReport
 from app.services.pattern_catalog import (
     expected_views,
@@ -128,7 +131,7 @@ def _architecture_summary(base: str, *, context: dict | None, production: bool) 
     to reconcile against.
     """
     context = context if isinstance(context, dict) else {}
-    quantities = [str(item).strip() for item in context.get("quantities") or [] if str(item).strip()]
+    quantities = _clean_architecture_fact_list(context.get("quantities") or [], limit=4)
     latency = []
     for item in context.get("latency_slos") or []:
         if isinstance(item, dict):
@@ -137,16 +140,52 @@ def _architecture_summary(base: str, *, context: dict | None, production: bool) 
                 latency.append(str(value).strip())
         elif item:
             latency.append(str(item).strip())
+    latency = _clean_architecture_fact_list(latency, limit=3)
     pieces = [str(base).strip().rstrip(".")]
     if latency:
-        pieces.append(f"Must carry extracted latency targets such as {', '.join(list(dict.fromkeys(latency))[:3])}")
+        pieces.append(f"Must carry extracted latency targets such as {', '.join(latency)}")
     if quantities:
-        pieces.append(f"Must preserve workload facts for sizing, storage, and review: {'; '.join(list(dict.fromkeys(quantities))[:4])}")
+        pieces.append(f"Must preserve workload facts for sizing, storage, and review: {'; '.join(quantities)}")
     if production:
         pieces.append("Production design keeps per-data-class retention, audit evidence, and approval boundaries explicit before procurement or rollout")
     else:
         pieces.append("POC design keeps measurable success criteria, pricing drivers, and governance assumptions visible for review")
     return ". ".join(piece for piece in pieces if piece) + "."
+
+
+def _clean_architecture_fact_list(values: list[Any], *, limit: int) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    low_signal = {
+        "unknown", "second", "seconds", "minute", "minutes", "hour", "hours",
+        "day", "days", "week", "weeks", "month", "months", "year", "years",
+    }
+    for raw in values:
+        text = " ".join(str(raw or "").replace("_", " ").split()).strip(" ,.;")
+        if not text:
+            continue
+        parts = [
+            part.strip(" ,.;")
+            for part in re.split(r"(?<!\d)\s*,\s*(?!\d)", text)
+            if part.strip(" ,.;")
+        ]
+        for part in parts or [text]:
+            lowered = part.lower()
+            if lowered in low_signal:
+                continue
+            if lowered.endswith(" unknown"):
+                part = part[: -len(" unknown")].strip(" ,.;")
+                lowered = part.lower()
+            if not part or lowered in low_signal:
+                continue
+            key = re.sub(r"\W+", " ", lowered).strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            output.append(part)
+            if len(output) >= limit:
+                return output
+    return output
 
 
 def _network_view_reason(profile, production: bool) -> str:

@@ -239,6 +239,7 @@ def explicit_numeric_phrases(text: str) -> list[MetricValue]:
         "about",
         "approximately",
         "around",
+        "across",
         "after",
         "before",
         "plus",
@@ -250,9 +251,13 @@ def explicit_numeric_phrases(text: str) -> list[MetricValue]:
         if not tail:
             continue
         unit_tokens: list[str] = []
+        scale = 1.0
         for token in tail.split():
             cleaned = token.strip(".,;:()[]{}").lower()
             if not cleaned:
+                continue
+            if not unit_tokens and cleaned in {"thousand", "million", "billion"}:
+                scale = {"thousand": 1_000.0, "million": 1_000_000.0, "billion": 1_000_000_000.0}[cleaned]
                 continue
             if cleaned in stopwords:
                 break
@@ -264,12 +269,13 @@ def explicit_numeric_phrases(text: str) -> list[MetricValue]:
         if unit_tokens[0] in {"am", "pm"}:
             continue
         unit = "_".join(unit_tokens[:5])
-        raw = f"{raw_value} {' '.join(unit_tokens[:5])}"
+        raw_scale = "" if scale == 1.0 else f" {next(name for name, factor in {'thousand': 1_000.0, 'million': 1_000_000.0, 'billion': 1_000_000_000.0}.items() if factor == scale)}"
+        raw = f"{raw_value}{raw_scale} {' '.join(unit_tokens[:5])}"
         key = raw.lower()
         if key in seen:
             continue
         seen.add(key)
-        output.append(MetricValue(_number(raw_value), unit, raw))
+        output.append(MetricValue(_number(raw_value) * scale, unit, raw))
     return output
 
 

@@ -46,7 +46,7 @@ class ResearchOrchestrator:
         brief = brief.model_copy(deep=True)
         brief.use_case_profile = profile_to_metadata(profile)
         understanding = await DeepUseCaseUnderstandingService().build(brief.raw_use_case, profile, session_id)
-        understanding_validation = UnderstandingValidator().validate(brief.raw_use_case, profile, understanding)
+        understanding_validation = UnderstandingValidator().validate(_brief_validation_context(brief), profile, understanding)
         understanding_merge = UnderstandingMerger().merge(profile, understanding)
         effective_brief = brief.model_copy(deep=True)
         effective_brief.use_case_profile = understanding_merge.profile_metadata
@@ -365,6 +365,18 @@ def _profile_for_research(brief: UseCaseBrief):
     return refine_profile_with_context(
         profile,
         "\n".join([brief.raw_use_case, brief.refined_problem_statement, *[item.text for item in brief.assumptions]]),
+    )
+
+
+def _brief_validation_context(brief: UseCaseBrief) -> str:
+    return "\n".join(
+        part
+        for part in [
+            brief.raw_use_case,
+            brief.refined_problem_statement,
+            *[item.text for item in brief.assumptions if item.user_confirmed],
+        ]
+        if part
     )
 
 

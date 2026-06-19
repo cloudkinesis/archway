@@ -37,6 +37,41 @@ def test_video_payload_without_audience_intent_does_not_select_live_media_pricin
     assert select_pricing_driver_family(profile) is PricingDriverFamily.GENERIC_DIRECTIONAL
 
 
+def test_public_analytics_with_ingested_video_is_not_live_media_streaming():
+    profile = profile_use_case(
+        "A coastal habitat restoration program ingests drone imagery, underwater robot video, "
+        "water sensors, field notes, and permit PDFs. It predicts restoration risk every "
+        "15 minutes, schedules crews for approval, keeps evidence for 25 years, and publishes "
+        "a public progress dashboard for 50,000 monthly visitors and 5,000 concurrent viewers."
+    )
+
+    assert "live_streaming" not in profile.workload_families
+    assert "video_streaming" not in profile.capability_model
+    assert select_pricing_driver_family(profile) is PricingDriverFamily.GENERIC_DIRECTIONAL
+
+
+def test_source_documents_do_not_select_document_rag_without_retrieval_intent():
+    profile = profile_use_case(
+        "A regulator ingests permit PDFs, inspection photos, and field notes as evidence "
+        "for risk scoring, audit retention, and operational approvals."
+    )
+
+    assert "document_intelligence" not in profile.workload_families
+    assert "rag_assistant" not in profile.workload_families
+    assert "document_retrieval" not in profile.capability_model
+    assert select_pricing_driver_family(profile) is PricingDriverFamily.GENERIC_DIRECTIONAL
+
+
+def test_explicit_document_retrieval_intent_still_selects_document_rag():
+    profile = profile_use_case(
+        "A legal team needs RAG question answering with citations over 5,000 contracts, "
+        "clause obligations, semantic document search, and reviewer approval workflows."
+    )
+
+    assert {"document_intelligence", "rag_assistant"} & set(profile.workload_families)
+    assert select_pricing_driver_family(profile) is PricingDriverFamily.DOCUMENT_RAG_WORKFLOW
+
+
 def test_video_distribution_with_viewer_intent_still_selects_live_media_pricing():
     profile = _profile(
         workload_families=["live_streaming"],
@@ -144,6 +179,6 @@ def test_warning_only_diagram_qa_does_not_fail_customer_readiness():
         }],
     }])
 
-    assert [item.code for item in findings] == ["diagram.qa_warning_only"]
-    assert findings[0].severity == "warning"
-    assert findings[0].customer_readiness_impact == "cap_to_workshop"
+    assert [item.code for item in findings] == ["diagram.qa_audit_only"]
+    assert findings[0].severity == "info"
+    assert findings[0].customer_readiness_impact == "none"

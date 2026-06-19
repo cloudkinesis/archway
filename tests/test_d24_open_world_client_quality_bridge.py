@@ -178,6 +178,12 @@ def test_client_pack_carries_workload_facts_and_unbound_pricing_dimensions():
             "pricing_can_be_displayed_as_headline": False,
             "pricing_ledger": {"summary": {"headline_safe": False, "procurement_ready": False}},
             "pricing_driver_closure": {"missing_drivers": [], "procurement_ready": False},
+            "procurement_readiness_gaps": [{
+                "service_name": "Amazon S3",
+                "usage_name": "evidence storage",
+                "reason": "Multiple AWS Price List rates matched.",
+                "next_step": "Confirm the exact storage class and tier required by AWS pricing.",
+            }],
             "service_usage_dimensions": [{
                 "service_name": "Amazon S3",
                 "usage_name": "workload-specific usage not yet bound",
@@ -221,5 +227,7 @@ def test_client_pack_carries_workload_facts_and_unbound_pricing_dimensions():
     assert "Computer vision / imagery processing" in architecture_summary
     assert "unmet" in architecture_summary
     assert "9 MB per image" in pricing_summary
+    assert "Procurement readiness blockers" in pricing_summary
+    assert "Confirm the exact storage class and tier required by AWS pricing" in pricing_summary
     assert "Service dimensions still to bind" in pricing_summary
     assert "Amazon S3" in pricing_summary

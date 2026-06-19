@@ -17,7 +17,7 @@ from app.services.customer_readiness import (
 from app.services.display_labels import display_label, status_display
 
 
-def _report(*, citation_passed=True, docs=True, pricing_evidence=True, status="directional_only", blockers=()):
+def _report(*, citation_passed=True, docs=True, pricing_evidence=True, status="customer_demo_ready_with_caveats", blockers=()):
     return {
         "citation_coverage": {"coverage_percent": 100.0 if citation_passed else 40.0, "passed": citation_passed},
         "metadata": {
@@ -67,8 +67,9 @@ def _tier(report=None, pricing=None, architectures=_ARCH):
 # Tier model
 # --------------------------------------------------------------------------- #
 def test_tier_ordering_and_display_labels():
-    assert READINESS_TIERS == ("internal_only", "demo_ready", "workshop_ready", "procurement_ready")
+    assert READINESS_TIERS == ("internal_only", "directional_only", "demo_ready", "workshop_ready", "procurement_ready")
     assert TIER_DISPLAY["internal_only"] == "Internal only"
+    assert TIER_DISPLAY["directional_only"] == "Directional only"
     assert TIER_DISPLAY["demo_ready"] == "Demo ready"
     assert TIER_DISPLAY["workshop_ready"] == "Workshop ready"
     assert TIER_DISPLAY["procurement_ready"] == "Procurement ready"
@@ -125,6 +126,14 @@ def test_quality_internal_status_caps_at_internal_only():
     capped = _tier(report=_report(status="internal_demo_only"))
     assert capped["tier"] == "internal_only"
     assert any("not suitable even for a controlled demo" in reason for reason in capped["reasons"])
+
+
+def test_quality_directional_status_caps_client_pack_below_workshop():
+    capped = _tier(report=_report(status="directional_only"))
+    assert capped["tier"] == "directional_only"
+    assert capped["display"] == "Directional only"
+    assert capped["estimate_display"] == "Planning estimate"
+    assert any("Golden convergence capped" in reason for reason in capped["reasons"])
 
 
 def test_workshop_ready_requires_evidence_and_citation():
@@ -194,7 +203,7 @@ def test_pricing_summary_copy_matches_tier(monkeypatch):
     from app.services.deep_dossier import DeepDossierService
 
     report = _report()
-    pricing = _pricing(scenario=True)
+    pricing = _pricing(headline=True, scenario=True)
     dossier = DeepDossierService().build(
         session_id="s", brief={"title": "Tier Test", "use_case_profile": {}},
         report=report, pricing=pricing, architectures=_ARCH, diagrams=[],
@@ -216,6 +225,28 @@ def test_pricing_summary_copy_matches_tier(monkeypatch):
         assert "workshop_ready" not in content
         assert "budgetary_range" not in content
         assert lint_markdown(content, "client_pack/x.md") == []
+
+
+def test_client_memo_uses_planning_estimate_when_headline_pricing_is_blocked():
+    from app.services.client_pack import client_pack_files
+    from app.services.deep_dossier import DeepDossierService
+
+    report = _report()
+    pricing = _pricing(headline=False, scenario=True)
+    dossier = DeepDossierService().build(
+        session_id="s", brief={"title": "Tier Test", "use_case_profile": {}},
+        report=report, pricing=pricing, architectures=_ARCH, diagrams=[],
+    )
+    client = client_pack_files(
+        session_name="Tier Test", brief={"title": "Tier Test"}, report=report, pricing=pricing,
+        architectures=_ARCH, diagrams=[], deep_dossier=dossier, decision_records=[],
+    )
+
+    memo = client["01-executive-memo.md"]
+
+    assert "**Readiness tier:** Workshop ready" in memo
+    assert "planning estimate at the workshop ready tier" in memo
+    assert "budgetary range at the workshop ready tier" not in memo
 
 
 def test_rendered_client_pack_matches_codex_fresh_metadata():
@@ -243,6 +274,27 @@ def test_rendered_client_pack_matches_codex_fresh_metadata():
         assert lint_markdown(content, f"client_pack/{path}") == [], path
     # The cap reason is rendered in business language on the memo.
     assert "Evidence/citation gate incomplete" in client["01-executive-memo.md"]
+
+
+def test_rendered_directional_convergence_status_stays_directional():
+    from app.services.client_pack import client_pack_files
+    from app.services.deep_dossier import DeepDossierService
+
+    report = _report(status="directional_only")
+    pricing = _pricing(scenario=True)
+    dossier = DeepDossierService().build(
+        session_id="s", brief={"title": "Directional Case", "use_case_profile": {}},
+        report=report, pricing=pricing, architectures=_ARCH, diagrams=[],
+    )
+    client = client_pack_files(
+        session_name="Directional Case", brief={"title": "Directional Case"}, report=report, pricing=pricing,
+        architectures=_ARCH, diagrams=[], deep_dossier=dossier, decision_records=[],
+    )
+
+    assert "**Readiness tier:** Directional only" in client["01-executive-memo.md"]
+    assert "**Readiness tier:** Directional only" in client["04-pricing-summary.md"]
+    assert "Workshop ready" not in client["01-executive-memo.md"]
+    assert "workshop ready tier" not in client["01-executive-memo.md"].lower()
 
 
 def test_rendered_internal_only_package_has_no_enum_leak():

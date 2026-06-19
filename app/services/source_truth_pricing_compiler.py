@@ -4,6 +4,7 @@ from decimal import Decimal
 import re
 from typing import Any
 
+from app.core.config import get_settings
 from app.domain.quality_findings import finding
 from app.domain.source_of_truth import (
     AssumptionLedger,
@@ -85,6 +86,7 @@ class SourceTruthPricingCompiler:
             "service_usage_dimensions": [item.model_dump(mode="json") for item in usage_dimensions],
             "aws_rate_bindings": [item.model_dump(mode="json") for item in rate_bindings],
             "pricing_ledger": ledger.model_dump(mode="json"),
+            "procurement_readiness_gaps": _procurement_readiness_gaps(ledger, rate_bindings),
             "pricing_sanity_findings": [item.model_dump(mode="json") for item in sanity],
         }
         _annotate_line_items(pricing, usage_dimensions, ledger, rate_bindings)
@@ -164,21 +166,7 @@ def _compile_generic_not_estimated(
         _generic_usage_dimension(line.service, line.unit_basis, pricing.region, facts=facts, bindings=driver_bindings)
         for line in pricing.line_items
     ]
-    rate_bindings = [
-        AwsRateBinding(
-            service_name=dimension.service_name,
-            aws_service_code=dimension.aws_service_code,
-            unit=dimension.unit,
-            source="unbound",
-            confidence="none",
-            binding_status="unsupported",
-            notes=[
-                "No workload-specific usage formula is bound for this pricing family yet.",
-                "Confirm exact service SKU/tier, unit, and quantity before using this line for budget or procurement.",
-            ],
-        )
-        for dimension in usage_dimensions
-    ]
+    rate_bindings = [_generic_rate_binding(dimension, region_code=pricing.region) for dimension in usage_dimensions]
     ledger = PricingLedger(
         line_items=[
             PricingLedgerLineItem(
@@ -253,6 +241,7 @@ def _compile_generic_not_estimated(
         "service_usage_dimensions": [item.model_dump(mode="json") for item in usage_dimensions],
         "aws_rate_bindings": [item.model_dump(mode="json") for item in rate_bindings],
         "pricing_ledger": ledger.model_dump(mode="json"),
+        "procurement_readiness_gaps": _procurement_readiness_gaps(ledger, rate_bindings),
         "pricing_sanity_findings": [item.model_dump(mode="json") for item in sanity],
         "generic_quantity_context": _export_quantity_context(generic_context),
         "pricing_can_be_displayed_as_headline": False,
@@ -288,6 +277,10 @@ def _generic_usage_dimension(
 ) -> ServiceUsageDimension:
     plan = pricing_filter_plan_for_service(service_name, region_code=region_code or "us-east-1")
     service_code = plan.service_code if plan else "unknown"
+    required_rate_dimensions = {
+        key: value for key, value in ((plan.filters if plan else {}) or {}).items()
+        if key != "regionCode"
+    }
     generic = _generic_quantity_context(facts or CanonicalFactsLedger())
     binding_ids = _generic_binding_ids(generic["driver_names"], bindings or [])
     key = _normalized_service(service_name)
@@ -296,7 +289,15 @@ def _generic_usage_dimension(
     usage_name = "workload-specific usage not yet bound"
     formula = "No exact quantity formula is bound; confirm workload driver, AWS usage unit, SKU/tier, and region."
 
-    if any(term in key for term in ("kinesis", "eventbridge", "sqs", "iot", "flink", "msk")) and generic["monthly_events"]:
+    if "kinesis" in key and generic["monthly_events"]:
+        quantity = Decimal(str(round(generic["monthly_events"], 4)))
+        unit = "requests"
+        usage_name = "PUT request payload units for telemetry events"
+        formula = (
+            generic["event_formula"]
+            + " Kinesis Data Streams binding uses PutRequest payload units; confirm payload chunking before procurement."
+        )
+    elif any(term in key for term in ("eventbridge", "sqs", "iot", "flink", "msk")) and generic["monthly_events"]:
         quantity = Decimal(str(round(generic["monthly_events"], 4)))
         unit = "events/month"
         usage_name = "derived telemetry or workload events"
@@ -348,7 +349,31 @@ def _generic_usage_dimension(
         formula=formula,
         driver_binding_ids=binding_ids,
         assumption_ids=[],
-        required_rate_dimensions={},
+        required_rate_dimensions=required_rate_dimensions,
+    )
+
+
+def _generic_rate_binding(dimension: ServiceUsageDimension, *, region_code: str) -> AwsRateBinding:
+    settings = get_settings()
+    live_authority_enabled = bool(
+        settings.enable_aws_pricing_mcp
+        or settings.aws_pricing_mcp_command
+        or settings.aws_pricing_mcp_url
+        or settings.enable_aws_price_list_query_api
+    )
+    if live_authority_enabled:
+        return AwsRateBindingEngine().bind(dimension, region_code=region_code)
+    return AwsRateBinding(
+        service_name=dimension.service_name,
+        aws_service_code=dimension.aws_service_code,
+        unit=dimension.unit,
+        source="unbound",
+        confidence="none",
+        binding_status="unsupported",
+        notes=[
+            "Live pricing authority is disabled for this run, so generic open-world usage dimensions were not bound to AWS SKU/rate data.",
+            "Enable the AWS Pricing MCP or live pricing authority path before using this line for budget or procurement.",
+        ],
     )
 
 
@@ -430,6 +455,7 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
     media_per_base_item = 0.0
     base_items_per_asset_month = 0.0
     media_period_months = 1.0
+    direct_storage_gb_per_month_by_class: dict[str, float] = {}
     retention_months_by_class: dict[str, float] = {}
     text_items_monthly = 0.0
     direct_monthly_events = 0.0
@@ -472,6 +498,12 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
         if _looks_like_media_per_asset(name, unit, source):
             media_per_asset = max(media_per_asset, value)
             media_period_months = max(media_period_months, _period_months(text))
+        storage_class = _storage_class(text)
+        if storage_class:
+            direct_storage_gb_per_month_by_class[storage_class] = max(
+                direct_storage_gb_per_month_by_class.get(storage_class, 0.0),
+                _storage_gb_per_month(value, text),
+            )
         retention_class = _retention_class(text)
         if retention_class:
             retention_months_by_class[retention_class] = max(
@@ -544,6 +576,9 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
         storage_by_class["media"] = monthly_media_items * media_payload_mb / 1024 * max(1, media_retention)
     if monthly_documents or monthly_notes:
         storage_by_class["evidence"] = (monthly_documents + monthly_notes) * 0.05 / 1024 * max(1, evidence_retention)
+    for storage_class, gb_per_month in direct_storage_gb_per_month_by_class.items():
+        retention = retention_months_by_class.get(storage_class, retention_default)
+        storage_by_class[storage_class] = max(storage_by_class.get(storage_class, 0.0), gb_per_month * max(1, retention))
     storage_gb_month = sum(storage_by_class.values())
     plausibility_findings = _quantity_plausibility_findings(
         asset_count=asset_count,
@@ -614,7 +649,7 @@ def _looks_like_asset_count(name: str, unit: str, source: str) -> bool:
         return False
     if any(term in text for term in _PEOPLE_UNITS):
         return False
-    if any(term in text for term in ("asset", "assets", "device", "devices", "site", "sites", "facility", "facilities")):
+    if any(term in text for term in ("asset", "assets", "artifact", "artifacts", "object", "objects", "item", "items", "device", "devices", "site", "sites", "facility", "facilities")):
         return True
     unit_tokens = set(re.findall(r"[a-z]+", unit))
     return bool(unit_tokens) and not unit_tokens.intersection(_PEOPLE_UNITS)
@@ -631,6 +666,8 @@ def _compose_asset_count(candidates: list[tuple[float, str]]) -> float:
         for value, text in candidates
     )
     if has_aggregate:
+        return largest
+    if other_sum and largest >= other_sum * 10:
         return largest
     return sum(value for value, _text in candidates)
 
@@ -680,6 +717,37 @@ def _looks_like_base_item_rate_per_asset(name: str, unit: str, source: str) -> b
 def _looks_like_text_items_per_month(name: str, unit: str, source: str) -> bool:
     text = f"{name} {unit} {source}".lower()
     return any(term in text for term in ("note", "notes", "summary", "summaries")) and any(term in text for term in ("per month", "_per_month", "monthly"))
+
+
+def _storage_class(text: str) -> str | None:
+    if not _looks_like_direct_storage_volume(text):
+        return None
+    if any(term in text for term in ("image", "imagery", "photo", "video", "scan", "clip", "media", "thermal")):
+        return "media"
+    if any(term in text for term in ("evidence", "summary", "summaries", "note", "document", "pdf", "record")):
+        return "evidence"
+    if any(term in text for term in ("raw", "sensor", "telemetry", "event", "reading")):
+        return "telemetry"
+    return "all"
+
+
+def _looks_like_direct_storage_volume(text: str) -> bool:
+    if not re.search(r"\b[gt]b\b|_[gt]b(?:_|$)|\b(?:giga|tera)bytes?\b", text):
+        return False
+    if any(term in text for term in ("per image", "per photo", "per video", "per scan", "each image", "each photo", "each video", "payload", "bitrate")):
+        return False
+    return any(term in text for term in ("storage", "stored", "retain", "retention", "archive", "data", "media", "image", "imagery", "video", "evidence", "raw", "tb_", "gb_"))
+
+
+def _storage_gb_per_month(value: float, text: str) -> float:
+    lower = text.lower()
+    gb = value * 1024 if re.search(r"\btb\b|_tb(?:_|$)|\bterabytes?\b", lower) else value
+    period = _period_months(lower)
+    if period < 1:
+        return gb * 30
+    if period > 1:
+        return gb / period
+    return gb
 
 
 def _period_months(text: str) -> float:
@@ -1068,7 +1136,7 @@ def _pricing_ledger(pricing: PricingAnalysis, usage_dimensions: list[ServiceUsag
         procurement_ready = False
         if rate and rate.binding_status == "bound":
             evidence_class = "sku_tier_backed"
-            procurement_ready = True
+            procurement_ready = not bool(dimension and dimension.assumption_ids)
             if dimension and dimension.quantity is not None and rate.price_per_unit is not None:
                 monthly = (Decimal(dimension.quantity) * Decimal(rate.price_per_unit)).quantize(Decimal("0.01"))
         elif rate and rate.binding_status == "ambiguous":
@@ -1111,6 +1179,45 @@ def _pricing_ledger(pricing: PricingAnalysis, usage_dimensions: list[ServiceUsag
         procurement_ready=bool(line_items) and all(item.procurement_ready for item in line_items),
     )
     return PricingLedger(line_items=line_items, summary=summary)
+
+
+def _procurement_readiness_gaps(ledger: PricingLedger, rate_bindings: list[AwsRateBinding]) -> list[dict[str, Any]]:
+    rate_by_id = {item.id: item for item in rate_bindings}
+    gaps: list[dict[str, Any]] = []
+    for item in ledger.line_items:
+        if item.procurement_ready:
+            continue
+        rate = rate_by_id.get(item.rate_binding_id or "")
+        if item.quantity is None:
+            reason = "Missing confirmed usage quantity."
+            next_step = "Confirm the monthly usage quantity and exact billable unit for this service."
+        elif item.assumptions:
+            reason = "Usage quantity depends on assumptions."
+            next_step = "Replace assumptions with customer-confirmed quantities before procurement use."
+        elif rate and rate.binding_status == "ambiguous":
+            reason = "Multiple AWS Price List rates matched."
+            next_step = "Confirm the exact usage type, operation, tier, storage class, model, or product attribute required by AWS pricing."
+        elif rate and rate.binding_status == "not_found":
+            reason = "No exact AWS SKU/rate matched this usage dimension."
+            next_step = "Refine the service-specific billable unit and required AWS rate dimensions, then re-run pricing authority binding."
+        elif rate and rate.binding_status == "unsupported":
+            reason = "No supported AWS service code is available."
+            next_step = "Map the service to an AWS Price List service code or mark it explicitly out of AWS pricing scope."
+        else:
+            reason = "Exact AWS SKU/rate binding is incomplete."
+            next_step = "Confirm service, quantity, unit, region, operation, and SKU/tier before procurement use."
+        gaps.append({
+            "service_name": item.service_name,
+            "usage_name": item.usage_name,
+            "quantity": str(item.quantity) if item.quantity is not None else None,
+            "quantity_unit": item.quantity_unit,
+            "rate_binding_status": rate.binding_status if rate else "missing",
+            "evidence_class": item.evidence_class,
+            "reason": reason,
+            "next_step": next_step,
+            "limitations": list(item.limitations or []),
+        })
+    return gaps
 
 
 def _sanity_findings(family: str, facts: CanonicalFactsLedger, bindings: list[PricingDriverBinding], usage_dimensions: list[ServiceUsageDimension], ledger: PricingLedger, pricing: PricingAnalysis):
@@ -1239,6 +1346,8 @@ def _ledger_limitations(dimension: ServiceUsageDimension | None, rate: AwsRateBi
         return []
     if evidence_class == "not_estimated":
         return ["No concrete usage quantity and formula were available, so this line is not estimated."]
+    if rate and rate.binding_status == "bound" and dimension and dimension.assumption_ids:
+        return ["AWS SKU/tier rate is bound, but one or more usage quantities are assumed; customer-confirm quantities before procurement use."]
     if rate and rate.binding_status == "ambiguous":
         return ["Multiple plausible AWS Price List rates matched; candidate rate is shown for traceability but is not used for monthly_total because binding_status=ambiguous."]
     if rate and rate.binding_status == "not_found":

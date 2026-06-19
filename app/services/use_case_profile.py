@@ -185,7 +185,9 @@ def refine_profile_with_context(profile: UseCaseProfile, context_text: str) -> U
         profile.latency_target = latency_target
     if not profile.latency_class and capability_result.latency_class:
         profile.latency_class = capability_result.latency_class.value
-    return reconcile_profile_constraints(_apply_explicit_negative_constraints(profile, lower))
+    profile = _apply_explicit_negative_constraints(profile, lower)
+    profile = _reconcile_source_data_capabilities(profile, lower)
+    return reconcile_profile_constraints(profile)
 
 
 def _merge_structured_metrics(existing: dict | None, incoming: dict) -> dict:
@@ -412,7 +414,7 @@ def _rank_workload_families(lower: str, capabilities: list[str]) -> list[str]:
     if any(term in lower for term in ("compound", "drug interaction", "faers", "molecular")):
         scores["graph_analytics"] += 6
         scores["industrial_iot_streaming_ml"] = 0
-    if any(term in lower for term in ("live streams", "live sports", "4k hdr", "concurrent viewers", "drm", "cdn")):
+    if _has_live_media_delivery_intent(lower):
         scores["live_streaming"] += 9
         scores["web_api_application"] = 0
         scores["computer_vision_quality_inspection"] = 0
@@ -463,6 +465,97 @@ def _excluded_families(lower: str, selected: list[str]) -> list[str]:
     if "computer_vision_quality_inspection" not in selected and not any(term in lower for term in ("image", "video", "camera", "vision")):
         excluded.append("computer_vision_quality_inspection")
     return excluded
+
+
+def _has_live_media_delivery_intent(lower: str) -> bool:
+    """Distinguish media-as-product from media-as-source-data.
+
+    Many open-world workloads ingest video or expose a public dashboard. That
+    should not select live-media pricing/diagrams unless the requirement is
+    actually about delivering media streams to an audience.
+    """
+    media_delivery_terms = (
+        "live stream",
+        "live streams",
+        "live streaming",
+        "video streaming",
+        "streaming video",
+        "live sports",
+        "4k hdr",
+        "ott",
+        "cdn",
+        "drm",
+        "playback",
+        "watch time",
+        "glass-to-glass",
+        "glass to glass",
+        "bitrate",
+        "stream delivery",
+        "media delivery",
+    )
+    normalized = lower.replace("-", " ")
+    return any(
+        _contains_marker(lower, term) and not _is_marker_negated(normalized, term)
+        for term in media_delivery_terms
+    )
+
+
+def _reconcile_source_data_capabilities(profile: UseCaseProfile, lower: str) -> UseCaseProfile:
+    removed: set[str] = set()
+    media_delivery_caps = {
+        "video_streaming",
+        "low_latency_media_delivery",
+        "drm_enforcement",
+        "geo_rights_enforcement",
+        "targeted_ad_decisioning",
+    }
+    if not _has_live_media_delivery_intent(lower):
+        removed.update(media_delivery_caps)
+        profile.workload_families = [family for family in profile.workload_families if family != "live_streaming"] or ["web_api_application"]
+
+    document_product_caps = {"document_retrieval", "rag_retrieval", "document_ingestion", "document_rag_assistant"}
+    if not _has_document_workflow_intent(lower):
+        removed.update(document_product_caps)
+        profile.workload_families = [
+            family for family in profile.workload_families if family not in {"rag_assistant", "document_intelligence"}
+        ] or ["web_api_application"]
+
+    if removed:
+        profile.capabilities = [item for item in profile.capabilities if item not in removed]
+        profile.capability_model = [item for item in profile.capability_model if item not in removed]
+        plan = dict(profile.discovery_plan or {})
+        plan["source_data_reconciliation"] = {
+            "rule": "source_data_does_not_select_product_workload",
+            "removed_capabilities": sorted(removed),
+        }
+        profile.discovery_plan = plan
+    return profile
+
+
+def _has_document_workflow_intent(lower: str) -> bool:
+    normalized = lower.replace("-", " ")
+    document_workflow_terms = (
+        "rag",
+        "retrieve",
+        "retrieval",
+        "semantic search",
+        "document search",
+        "knowledge base",
+        "citation",
+        "citations",
+        "q&a",
+        "question answering",
+        "contract review",
+        "clause",
+        "obligation",
+        "legal review",
+        "document assistant",
+        "chatbot over documents",
+    )
+    return any(
+        _contains_marker(lower, term) and not _is_marker_negated(normalized, term)
+        for term in document_workflow_terms
+    )
 
 
 def _is_healthcare_operations_scheduling(lower: str) -> bool:

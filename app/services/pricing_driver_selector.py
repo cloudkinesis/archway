@@ -1,3 +1,4 @@
+import re
 from enum import Enum
 
 from app.services.use_case_profile import UseCaseProfile
@@ -32,7 +33,9 @@ def select_pricing_driver_family(profile: UseCaseProfile) -> PricingDriverFamily
         return PricingDriverFamily.TELECOM_CDR_ANALYTICS
     if {"capital_markets_risk_engine", "monte_carlo_risk_grid", "pre_trade_compliance"} & families:
         return PricingDriverFamily.CAPITAL_MARKETS_RISK_ENGINE
-    if "live_streaming" in families or ("video_streaming" in capabilities and _has_live_media_distribution_intent(profile)):
+    if "live_streaming" in families or (
+        "video_streaming" in capabilities and _has_live_media_distribution_intent(profile)
+    ):
         return PricingDriverFamily.LIVE_MEDIA_STREAMING
     if "hpc_simulation" in families or "hpc_simulation" in capabilities:
         return PricingDriverFamily.HPC_SIMULATION
@@ -42,7 +45,7 @@ def select_pricing_driver_family(profile: UseCaseProfile) -> PricingDriverFamily
         return PricingDriverFamily.GRAPH_ANALYTICS
     if not ({"document_intelligence", "rag_assistant"} & excluded) and (
         {"document_intelligence", "rag_assistant"} & families
-        or {"document_retrieval", "rag_retrieval", "document_ingestion"} & capabilities
+        or ({"document_retrieval", "rag_retrieval", "document_ingestion"} & capabilities and _has_document_workflow_intent(profile))
     ):
         return PricingDriverFamily.DOCUMENT_RAG_WORKFLOW
     if "ota_rollout_orchestration" in capabilities:
@@ -75,16 +78,13 @@ def _profile_text(profile: UseCaseProfile) -> str:
 
 def _has_live_media_distribution_intent(profile: UseCaseProfile) -> bool:
     text = _profile_text(profile)
-    audience_or_distribution_terms = (
-        "audience",
-        "viewer",
-        "viewers",
-        "subscriber",
-        "subscribers",
-        "broadcast",
+    media_delivery_terms = (
+        "live stream",
+        "live streams",
+        "live streaming",
+        "video streaming",
+        "streaming video",
         "ott",
-        "channel",
-        "channels",
         "content delivery",
         "cdn",
         "drm",
@@ -92,7 +92,51 @@ def _has_live_media_distribution_intent(profile: UseCaseProfile) -> bool:
         "playback",
         "stream delivery",
         "media delivery",
-        "concurrent streams",
-        "concurrent viewers",
+        "glass-to-glass",
+        "glass to glass",
+        "bitrate",
     )
-    return any(term in text for term in audience_or_distribution_terms)
+    normalized = text.replace("-", " ")
+    return any(
+        _contains_marker(text, term) and not _is_marker_negated(normalized, term)
+        for term in media_delivery_terms
+    )
+
+
+def _contains_marker(lower: str, marker: str) -> bool:
+    if len(marker) <= 4 and marker.replace(" ", "").isalnum():
+        return re.search(rf"\b{re.escape(marker)}\b", lower) is not None
+    return marker in lower
+
+
+def _is_marker_negated(normalized_lower: str, marker: str) -> bool:
+    marker_pattern = re.escape(marker.replace("-", " ")).replace(r"\ ", r"\s+")
+    prefix = r"(?:not|no|without|exclude|excluding|avoid|avoiding|not\s+a|not\s+an|not\s+the)"
+    return re.search(rf"\b{prefix}\b(?:\W+\w+){{0,6}}\W+{marker_pattern}\b", normalized_lower) is not None
+
+
+def _has_document_workflow_intent(profile: UseCaseProfile) -> bool:
+    text = _profile_text(profile)
+    normalized = text.replace("-", " ")
+    document_workflow_terms = (
+        "rag",
+        "retrieve",
+        "retrieval",
+        "semantic search",
+        "document search",
+        "knowledge base",
+        "citation",
+        "citations",
+        "q&a",
+        "question answering",
+        "contract review",
+        "clause",
+        "obligation",
+        "legal review",
+        "document assistant",
+        "chatbot over documents",
+    )
+    return any(
+        _contains_marker(text, term) and not _is_marker_negated(normalized, term)
+        for term in document_workflow_terms
+    )

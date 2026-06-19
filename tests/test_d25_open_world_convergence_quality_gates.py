@@ -22,7 +22,7 @@ from app.services.architecture_critique import (
 )
 from app.services.architecture_revisions import ArchitectureRevisionService
 from app.services.client_pack import client_pack_files
-from app.services.convergence.golden_convergence_orchestrator import _diagram_findings, _final_status, _pricing_findings
+from app.services.convergence.golden_convergence_orchestrator import _diagram_findings, _final_status, _pricing_findings, _understanding_findings
 from app.services.diagram_compiler_adapter import DiagramCompilerAdapter
 from app.services.export_package import ExportPackageService, _diagram_qa_status, _llm_telemetry_live_audits, _prior_live_call_audits
 from app.services.llm.base import LLMTaskType
@@ -30,6 +30,7 @@ from app.services.pricing import derive_industrial_iot_pricing_model, derive_pri
 from app.services.pricing_driver_selector import PricingDriverFamily, select_pricing_driver_family
 from app.services.source_truth_pricing_compiler import _generic_quantity_context
 from app.services.synthesis import _data_sources, _detect_industry, _problem_statement
+from app.services.metric_extractor import explicit_numeric_phrases
 from app.services.understanding.deep_use_case_understanding import deterministic_understanding
 from app.services.use_case_profile import UseCaseProfile, profile_use_case, reconcile_profile_constraints
 
@@ -113,6 +114,45 @@ def test_generic_quantity_context_derives_annual_monthly_and_retained_usage_with
     assert context["monthly_inferences"] == 236_000
     assert context["storage_gb_month"] > 600_000
     assert "typed workload streams" in context["event_formula"]
+
+
+def test_explicit_numeric_phrases_scale_large_open_world_counts_without_domain_words():
+    metrics = explicit_numeric_phrases(
+        "Digitize 2.4 million fragile artifacts across 40 museums and retain evidence for 30 years."
+    )
+
+    by_unit = {metric.unit: metric.value for metric in metrics}
+    assert by_unit["fragile_artifacts"] == 2_400_000
+    assert by_unit["museums"] == 40
+
+
+def test_generic_quantity_context_prefers_large_item_population_over_container_count():
+    ledger = CanonicalFactsLedger(facts=[
+        CanonicalFact(
+            name="explicit_quantity_fragile_artifacts_1",
+            value=2_400_000,
+            unit="fragile_artifacts",
+            source="user_input",
+            source_text="2.4 million fragile artifacts",
+            confidence="high",
+            used_by=["pricing"],
+            validation_status="confirmed",
+        ),
+        CanonicalFact(
+            name="explicit_quantity_museums_2",
+            value=40,
+            unit="museums",
+            source="user_input",
+            source_text="40 museums",
+            confidence="high",
+            used_by=["pricing"],
+            validation_status="confirmed",
+        ),
+    ])
+
+    context = _generic_quantity_context(ledger)
+
+    assert context["asset_count"] == 2_400_000
 
 
 def test_generic_quantity_context_treats_new_per_noun_units_as_per_item_without_vocabulary_lists():
@@ -729,14 +769,37 @@ def test_diagram_layout_only_warnings_do_not_fail_convergence_or_export_status()
         "diagnostics": [
             {"severity": "error", "code": "too_many_edge_crossings", "message": "layout is dense"},
             {"severity": "warning", "code": "aws_service_catalog_fallback", "message": "catalog fallback"},
+            {"severity": "info", "code": "observability_coverage_added", "message": "coverage added"},
         ],
     }
     gallery = {"mode": "production", "qa_reports": [qa]}
 
     findings = _diagram_findings([gallery])
-    assert [item.code for item in findings] == ["diagram.qa_warning_only"]
-    assert findings[0].customer_readiness_impact == "cap_to_workshop"
+    assert [item.code for item in findings] == ["diagram.qa_audit_only"]
+    assert findings[0].customer_readiness_impact == "none"
     assert _diagram_qa_status([gallery]) == {"status": "present", "passed": True}
+
+
+def test_negated_phi_overproposal_is_audit_only_not_readiness_cap():
+    report = {
+        "metadata": {
+            "understanding_validation": {
+                "passed": True,
+                "issues": [
+                    {
+                        "severity": "warning",
+                        "code": "unsupported_phi",
+                        "message": "PHI capability was proposed even though the user explicitly negated PHI/PII.",
+                    }
+                ],
+            }
+        }
+    }
+
+    findings = _understanding_findings(report)
+
+    assert [item.code for item in findings] == ["understanding.unsupported_phi"]
+    assert findings[0].customer_readiness_impact == "none"
 
 
 def test_non_headline_pricing_caps_to_workshop_not_directional_when_coherent():

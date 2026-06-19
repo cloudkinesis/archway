@@ -1181,9 +1181,9 @@ class ExportPackageService:
             broader = ledger.get("rendered_via_broader_supported_view") or []
             omitted = ledger.get("omitted_with_reason") or []
             if broader:
-                lines.extend(["", "Semantic views represented through broader supported views:"])
+                lines.extend(["", "Additional semantic views covered by the rendered diagrams:"])
                 lines.extend(
-                    f"- {item.get('view_id')}: represented by {item.get('represented_by_view_id') or item.get('compiler_view_id')} - {item.get('reason')}"
+                    f"- {display_label(str(item.get('view_id') or 'semantic view'))}: covered in {display_label(str(item.get('represented_by_view_id') or item.get('compiler_view_id') or 'architecture diagram'))}."
                     for item in broader
                 )
                 lines.append("")

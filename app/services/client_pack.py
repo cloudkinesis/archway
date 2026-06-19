@@ -157,8 +157,9 @@ def _executive_memo(report: dict, dossier, tier: dict, client_plan: ClientFacing
     direction = report.get("recommended_production_direction") or (
         "an AWS-native architecture with governed operations, evidence discipline, and explicit pricing validation"
     )
-    gates = [gate_display(item) for item in dossier.top_validation_gates[:3]]
     cap = tier.get("reasons") or []
+    gates = [_sentence(reason) for reason in cap[:3]] or [gate_display(item) for item in dossier.top_validation_gates[:3]]
+    estimate_display = _client_estimate_display(tier, pricing or {})
     lines = [
         "# Executive Memo",
         "",
@@ -183,9 +184,9 @@ def _executive_memo(report: dict, dossier, tier: dict, client_plan: ClientFacing
         "",
         _sentence(_executive_cost_position(dossier, pricing or {})),
         "",
-        _sentence(f"Treat this as a {tier['estimate_display'].lower()} at the {tier['display'].lower()} tier"),
+        _sentence(f"Treat this as a {estimate_display.lower()} at the {tier['display'].lower()} tier"),
         "",
-        "## What must be validated first",
+        "## Next validation focus",
         "",
         *_bullets(gates),
         "",
@@ -219,6 +220,13 @@ def _executive_cost_position(dossier, pricing: dict) -> str:
             "pricing driver and AWS rate bindings are safe."
         )
     return source_text
+
+
+def _client_estimate_display(tier: dict, pricing: dict) -> str:
+    metadata = pricing.get("metadata") or {}
+    if metadata.get("pricing_can_be_displayed_as_headline") is False:
+        return ESTIMATE_CLASS_DISPLAY.get("planning_estimate", "Planning estimate")
+    return str(tier.get("estimate_display") or ESTIMATE_CLASS_DISPLAY.get("planning_estimate", "Planning estimate"))
 
 
 def _solution_brief(brief: dict, dossier) -> str:
@@ -412,6 +420,14 @@ def _pricing_summary(
             *_bullets(quantity_rows),
             "",
         ])
+    procurement_rows = _procurement_gap_rows(metadata)
+    if procurement_rows:
+        lines.extend([
+            "## Procurement readiness blockers",
+            "",
+            *_bullets(procurement_rows),
+            "",
+        ])
     unbound_rows = _unbound_usage_rows(metadata)
     if unbound_rows:
         lines.extend([
@@ -494,8 +510,8 @@ def _risks_and_gates(dossier, tier: dict, client_plan: ClientFacingPlan | None =
         f"Mitigation: {_sentence(str(risk.mitigation))}"
         for risk in dossier.risks
     ]
-    gates = [gate_display(item) for item in dossier.top_validation_gates]
     cap = [_sentence(reason) for reason in tier.get("reasons") or []]
+    gates = cap or [gate_display(item) for item in dossier.top_validation_gates]
     lines = [
         "# Risks and Validation Gates",
         "",
@@ -774,6 +790,52 @@ def _unbound_usage_rows(metadata: dict) -> list[str]:
         usage = _client_label(item.get("usage_name") or "usage")
         unit = _client_text(item.get("unit") or "unit to confirm")
         rows.append(f"**{service}** — {usage}; unit: {unit}. {_client_sentence(formula or 'Usage quantity requires confirmation')}")
+    return rows[:12]
+
+
+def _procurement_gap_rows(metadata: dict) -> list[str]:
+    explicit = metadata.get("procurement_readiness_gaps")
+    if isinstance(explicit, list) and explicit:
+        rows: list[str] = []
+        for item in explicit:
+            if not isinstance(item, dict):
+                continue
+            service = _client_text(item.get("service_name") or "Service")
+            usage = _client_label(item.get("usage_name") or "usage")
+            reason = _client_sentence(item.get("reason") or "Exact AWS rate binding is incomplete")
+            next_step = _client_sentence(item.get("next_step") or "Confirm exact billing drivers before procurement use")
+            rows.append(f"**{service}** — {usage}: {reason} Next step: {next_step}")
+        return rows[:12]
+
+    bindings = {
+        item.get("id"): item
+        for item in metadata.get("aws_rate_bindings") or []
+        if isinstance(item, dict) and item.get("id")
+    }
+    rows: list[str] = []
+    for item in ((metadata.get("pricing_ledger") or {}).get("line_items") or []):
+        if not isinstance(item, dict) or item.get("procurement_ready"):
+            continue
+        service = _client_text(item.get("service_name") or "Service")
+        usage = _client_label(item.get("usage_name") or "usage")
+        rate = bindings.get(item.get("rate_binding_id")) or {}
+        status = str(rate.get("binding_status") or "missing")
+        if item.get("quantity") in (None, "", 0):
+            reason = "missing confirmed usage quantity"
+        elif item.get("assumptions"):
+            reason = "usage quantity depends on assumptions"
+        elif status == "ambiguous":
+            reason = "multiple AWS rates matched"
+        elif status == "not_found":
+            reason = "no exact AWS rate matched"
+        elif status == "unsupported":
+            reason = "service is outside supported AWS pricing scope"
+        else:
+            reason = "exact AWS SKU and rate binding is incomplete"
+        rows.append(
+            f"**{service}** — {usage}: {_client_sentence(reason)} "
+            "Confirm exact quantity, billable unit, AWS operation, tier, and SKU/rate before procurement use."
+        )
     return rows[:12]
 
 

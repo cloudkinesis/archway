@@ -186,10 +186,10 @@ def diagram_view_mappings(semantic_views: list[str], workload_title: str | None 
         native = compiler_id == view or NATIVE_COMPILER_EQUIVALENTS.get(view) == compiler_id
         fallback_reason = None
         if compiler_id == "unsupported_by_current_compiler":
-            fallback_reason = "The current Archway D2 compiler has no renderer for this semantic view."
+            fallback_reason = "No dedicated rendered view exists for this semantic view yet."
         elif not native:
             fallback_reason = (
-                "The current Archway D2 compiler renders this semantic view through a broader supported view. "
+                "Rendered through the closest supported architecture view. "
                 "The semantic intent is preserved in metadata and diagram titles."
             )
         mappings.append(

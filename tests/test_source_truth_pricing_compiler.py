@@ -1,11 +1,14 @@
 import pytest
 
-from app.domain.source_of_truth import AwsRateBinding
+from app.core.config import get_settings
+from app.domain.source_of_truth import AwsRateBinding, CanonicalFact, CanonicalFactsLedger
 from app.models.domain import AWSServiceSelection, PricingAnalysis
+from app.services.architecture import _architecture_summary
 from app.services.deep_dossier import _cost_range, _dossier_readiness
 from app.models.domain import DossierConsistencyCheck, DossierReadinessStatus
 from app.services.pricing import PricingEngine
 from app.services.pricing_sanity_reviewer import PricingSanityFinding, _drop_stale_confirmed_unknown_findings
+from app.services.source_truth_pricing_compiler import _generic_quantity_context, _generic_usage_dimension
 from app.services.synthesis import SynthesisEngine
 from tests.golden_scenarios.scenarios import GOLDEN_SCENARIOS
 
@@ -143,7 +146,8 @@ async def test_pass1b_binds_cloudfront_rate_and_keeps_unquantified_media_not_est
     cloudfront = next(item for item in ledger["line_items"] if item["service_name"] == "Amazon CloudFront")
     s3 = next(item for item in ledger["line_items"] if item["service_name"] == "Amazon S3")
     assert cloudfront["evidence_class"] == "sku_tier_backed"
-    assert cloudfront["procurement_ready"] is True
+    assert cloudfront["procurement_ready"] is False
+    assert "usage quantities are assumed" in " ".join(cloudfront["limitations"])
     assert cloudfront["unit_price"] == "0.01"
     assert s3["evidence_class"] == "not_estimated"
     assert s3["monthly_total"] is None
@@ -195,6 +199,77 @@ def test_pass1b_dossier_cost_range_suppresses_unsafe_headline():
 
     assert "not headline-safe" in text
     assert "$1-$3" not in text
+
+
+def test_generic_quantity_graph_uses_direct_tb_per_month_storage_without_domain_terms():
+    facts = CanonicalFactsLedger(facts=[
+        CanonicalFact(
+            name="explicit_quantity_tb_artifact_data_per_month",
+            value=2.5,
+            unit="tb_artifact_data_per_month",
+            source="user_input",
+            source_text="2.5 TB artifact data per month",
+            confidence="high",
+            used_by=["pricing"],
+            validation_status="confirmed",
+        ),
+        CanonicalFact(
+            name="retention_years",
+            value=4,
+            unit="years",
+            source="user_input",
+            source_text="4-year retention",
+            confidence="high",
+            used_by=["pricing"],
+            validation_status="confirmed",
+        ),
+    ])
+
+    context = _generic_quantity_context(facts)
+
+    assert context["storage_gb_month_by_class"]["all"] == 2.5 * 1024 * 48
+    assert context["storage_gb_month"] == 2.5 * 1024 * 48
+
+
+def test_generic_s3_dimension_prefers_storage_gb_month_over_record_count_for_direct_storage():
+    facts = CanonicalFactsLedger(facts=[
+        CanonicalFact(
+            name="explicit_quantity_records_per_month",
+            value=10_000,
+            unit="records_per_month",
+            source="user_input",
+            source_text="10,000 records per month",
+            confidence="high",
+            used_by=["pricing"],
+            validation_status="confirmed",
+        ),
+        CanonicalFact(
+            name="explicit_quantity_tb_evidence_per_month",
+            value=1,
+            unit="tb_evidence_per_month",
+            source="user_input",
+            source_text="1 TB evidence per month",
+            confidence="high",
+            used_by=["pricing"],
+            validation_status="confirmed",
+        ),
+        CanonicalFact(
+            name="retention_years",
+            value=2,
+            unit="years",
+            source="user_input",
+            source_text="2-year retention",
+            confidence="high",
+            used_by=["pricing"],
+            validation_status="confirmed",
+        ),
+    ])
+
+    dimension = _generic_usage_dimension("Amazon S3", None, "us-east-1", facts=facts)
+
+    assert dimension.unit == "GB-month"
+    assert dimension.usage_name == "derived object/evidence retention"
+    assert dimension.quantity == 24 * 1024
 
 
 def test_pass1c_drops_stale_confirmed_fact_unknown_finding():
@@ -309,3 +384,88 @@ def test_pass1c_dossier_readiness_respects_internal_only_status():
     )
 
     assert status == DossierReadinessStatus.internal_only
+
+
+@pytest.mark.asyncio
+async def test_generic_open_world_pricing_uses_authority_resolver_when_live_enabled(monkeypatch):
+    monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "true")
+    get_settings.cache_clear()
+    calls = []
+
+    def fake_bind(self, dimension, *, region_code):
+        calls.append((dimension.service_name, dimension.required_rate_dimensions))
+        return AwsRateBinding(
+            service_name=dimension.service_name,
+            aws_service_code=dimension.aws_service_code,
+            sku="SKU-KINESIS",
+            usage_type="USE1-PUT-Units",
+            operation="PutRecords",
+            product_family="Amazon Kinesis Data Streams",
+            rate_code="RATE-KINESIS",
+            unit="requests",
+            price_per_unit="0.01",
+            source="price_list_query_api",
+            confidence="high",
+            binding_status="bound",
+            notes=["test authoritative rate"],
+        )
+
+    monkeypatch.setattr("app.services.aws_rate_binding_engine.AwsRateBindingEngine.bind", fake_bind)
+    brief = SynthesisEngine().create_initial_brief(
+        "Monitor industrial telemetry with 1,000,000 events per month and retain audit evidence for 3 years."
+    )
+
+    estimate = await PricingEngine().estimate(
+        brief,
+        [AWSServiceSelection(service="Amazon Kinesis Data Streams", purpose="stream telemetry", rationale="managed stream")],
+    )
+
+    assert calls
+    assert calls[0][0] == "Amazon Kinesis Data Streams"
+    assert calls[0][1]["productFamily"] == "Kinesis Streams"
+    binding = estimate.metadata["aws_rate_bindings"][0]
+    assert binding["binding_status"] == "bound"
+    assert binding["source"] == "price_list_query_api"
+    assert estimate.metadata["service_usage_dimensions"][0]["required_rate_dimensions"]["productFamily"] == "Kinesis Streams"
+
+
+@pytest.mark.asyncio
+async def test_generic_open_world_pricing_stays_offline_without_live_authority(monkeypatch):
+    monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
+    monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_URL", raising=False)
+    get_settings.cache_clear()
+
+    def fail_bind(self, dimension, *, region_code):
+        raise AssertionError("generic pricing must not call live authority when pricing authority is disabled")
+
+    monkeypatch.setattr("app.services.aws_rate_binding_engine.AwsRateBindingEngine.bind", fail_bind)
+    brief = SynthesisEngine().create_initial_brief(
+        "Monitor 1,000 industrial machines with telemetry every 30 seconds and retain audit evidence for 3 years."
+    )
+
+    estimate = await PricingEngine().estimate(
+        brief,
+        [AWSServiceSelection(service="Amazon Kinesis Data Streams", purpose="stream telemetry", rationale="managed stream")],
+    )
+
+    binding = estimate.metadata["aws_rate_bindings"][0]
+    assert binding["binding_status"] == "unsupported"
+    assert binding["source"] == "unbound"
+    assert "Live pricing authority is disabled" in " ".join(binding["notes"])
+
+
+def test_architecture_summary_drops_low_signal_latency_fragments():
+    summary = _architecture_summary(
+        "Validate bounded workflow",
+        context={
+            "latency_slos": [{"target": "within 2 minutes, seconds, unknown"}],
+            "quantities": ["18,500 assets", "10 seconds", "seconds", "unknown", "10 seconds"],
+        },
+        production=False,
+    )
+
+    assert "within 2 minutes, seconds, unknown" not in summary
+    assert "within 2 minutes" in summary
+    assert "seconds, unknown" not in summary
+    assert "18,500 assets" in summary
