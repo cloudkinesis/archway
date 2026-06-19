@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import json
 import os
 import re
@@ -14,6 +15,97 @@ from app.core.config import get_settings
 from app.domain.pricing_evidence import PriceDimensionEvidence, PriceListParseResult
 from app.domain.source_of_truth import AwsRateBinding, ServiceUsageDimension
 from app.services.aws_price_list_parser import parse_price_list_offer, parse_price_list_query_response
+
+
+TermGroups = tuple[frozenset[str], ...]
+
+
+@dataclass(frozen=True)
+class RateFilterRule:
+    service_code: str
+    canonical_unit: str
+    filters: dict[str, str]
+    required_term_groups: TermGroups = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class UnitCompatibilityRule:
+    service_code: str
+    attribute_contains: dict[str, tuple[str, ...]]
+    required_term_groups: TermGroups
+
+
+SERVICE_CODE_ALIASES = {
+    "AWSStates": "AmazonStates",
+}
+
+
+RATE_FILTER_RULES: tuple[RateFilterRule, ...] = (
+    RateFilterRule("AmazonKinesis", "requests", {"productFamily": "Kinesis Streams"}),
+    RateFilterRule("AmazonS3", "gb", {"productFamily": "Storage"}),
+    RateFilterRule("AWSLambda", "requests", {"group": "AWS-Lambda-Requests"}),
+    RateFilterRule(
+        "AmazonStates",
+        "requests",
+        {"group": "SFN-StateTransitions"},
+        required_term_groups=(
+            frozenset({"state", "statetransition", "statetransitions"}),
+            frozenset({"transition", "transitions", "statetransition", "statetransitions"}),
+        ),
+    ),
+    RateFilterRule(
+        "AmazonStates",
+        "requests",
+        {"group": "SFN-ExpressWorkflows-Requests"},
+        required_term_groups=(frozenset({"express"}), frozenset({"request", "requests", "execution", "executions"})),
+    ),
+    RateFilterRule("AWSEvents", "requests", {"productFamily": "EventBridge"}),
+    RateFilterRule("AWSQueueService", "requests", {"queueType": "Standard"}),
+    RateFilterRule("AmazonSNS", "requests", {"group": "Requests-Tier1"}),
+    RateFilterRule(
+        "AmazonCloudWatch",
+        "requests",
+        {"productFamily": "Data Ingestion"},
+        required_term_groups=(frozenset({"log", "logs", "record", "records"}),),
+    ),
+)
+
+
+UNIT_COMPATIBILITY_RULES: tuple[UnitCompatibilityRule, ...] = (
+    UnitCompatibilityRule(
+        "AmazonStates",
+        {"usage_type": ("statetransition",)},
+        (
+            frozenset({"state", "statetransition", "statetransitions"}),
+            frozenset({"transition", "transitions", "statetransition", "statetransitions"}),
+        ),
+    ),
+    UnitCompatibilityRule(
+        "AmazonStates",
+        {"usage_type": ("stepfunctions-request",)},
+        (frozenset({"express"}), frozenset({"request", "requests", "execution", "executions"})),
+    ),
+    UnitCompatibilityRule(
+        "AmazonStates",
+        {"usage_type": ("gb-second",)},
+        (frozenset({"duration", "gbsecond", "gbseconds", "second", "seconds"}),),
+    ),
+    UnitCompatibilityRule(
+        "AWSEvents",
+        {"unit": ("chunk",), "usage_type": ("chunk",)},
+        (frozenset({"chunk", "chunks", "64k", "kb", "kilobyte", "kilobytes"}),),
+    ),
+    UnitCompatibilityRule(
+        "AWSEvents",
+        {"usage_type": ("scheduledinvocation",), "operation": ("invocation",)},
+        (frozenset({"schedule", "scheduled", "scheduler", "invocation", "invocations"}),),
+    ),
+    UnitCompatibilityRule(
+        "AWSEvents",
+        {"operation": ("piperequest",), "usage_type": ("pipe",)},
+        (frozenset({"pipe", "pipes"}),),
+    ),
+)
 
 
 class PricingAuthorityResolver:
@@ -86,10 +178,7 @@ def _preflight_unbound(dimension: ServiceUsageDimension) -> AwsRateBinding | Non
 
 
 def _normalize_dimension_aliases(dimension: ServiceUsageDimension) -> ServiceUsageDimension:
-    service_code_aliases = {
-        "AWSStates": "AmazonStates",
-    }
-    normalized = service_code_aliases.get(dimension.aws_service_code)
+    normalized = SERVICE_CODE_ALIASES.get(dimension.aws_service_code)
     if normalized:
         return dimension.model_copy(update={"aws_service_code": normalized})
     return dimension
@@ -135,6 +224,12 @@ def _resolve_via_pricing_mcp(dimension: ServiceUsageDimension, region_code: str)
 
 
 def _resolve_via_price_list_query_api(dimension: ServiceUsageDimension, region_code: str) -> PriceListParseResult:
+    if not get_settings().enable_aws_price_list_query_api:
+        return PriceListParseResult(
+            service_code=dimension.aws_service_code,
+            dimensions=[],
+            failures=["AWS Price List Query API fallback is disabled. Set ARCHWAY_ENABLE_AWS_PRICE_LIST_QUERY_API=true for live boto3 pricing authority lookup."],
+        )
     try:
         response = _get_products(dimension, region_code)
         parsed = parse_price_list_query_response(
@@ -502,26 +597,11 @@ def _service_specific_unit_compatible(dimension: ServiceUsageDimension, item: Pr
     dimension lacks the exact billable unit shape that the Price List exposes.
     """
     terms = _tokens(f"{dimension.usage_name} {dimension.formula} {dimension.unit}")
-    if dimension.aws_service_code == "AmazonStates":
-        usage_type = str(item.usage_type or "").lower()
-        if "statetransition" in usage_type:
-            return bool(("state" in terms and terms & {"transition", "transitions"}) or terms & {"statetransition", "statetransitions"})
-        if "stepfunctions-request" in usage_type:
-            return bool("express" in terms and terms & {"request", "requests", "execution", "executions"})
-        if "gb-second" in usage_type:
-            return bool(terms & {"duration", "gbsecond", "gbseconds", "second", "seconds"})
-        return True
-    if dimension.aws_service_code != "AWSEvents":
-        return True
-    unit = str(item.unit or "").lower()
-    usage_type = str(item.usage_type or "").lower()
-    operation = str(item.operation or "").lower()
-    if "chunk" in unit or "chunk" in usage_type:
-        return bool(terms & {"chunk", "chunks", "64k", "kb", "kilobyte", "kilobytes"})
-    if "scheduledinvocation" in usage_type or operation == "invocation":
-        return bool(terms & {"schedule", "scheduled", "scheduler", "invocation", "invocations"})
-    if "piperequest" in operation.lower() or "pipe" in usage_type:
-        return bool(terms & {"pipe", "pipes"})
+    for rule in UNIT_COMPATIBILITY_RULES:
+        if rule.service_code != dimension.aws_service_code:
+            continue
+        if _rule_matches_price_dimension(rule, item):
+            return _term_groups_satisfied(terms, rule.required_term_groups)
     return True
 
 
@@ -597,30 +677,33 @@ def _inferred_rate_dimensions(dimension: ServiceUsageDimension) -> dict[str, str
     filter when the Archway usage dimension has already committed to a concrete
     billable unit shape; ambiguous products remain ambiguous downstream.
     """
-    service_code = dimension.aws_service_code
+    filters: dict[str, str] = {}
     unit = _canonical_unit(dimension.unit)
     usage = _tokens(f"{dimension.usage_name} {dimension.formula} {dimension.service_name}")
-    filters: dict[str, str] = {}
-    if service_code == "AmazonKinesis" and unit == "requests":
-        filters["productFamily"] = "Kinesis Streams"
-    elif service_code == "AmazonS3" and unit == "gb":
-        filters["productFamily"] = "Storage"
-    elif service_code == "AWSLambda" and unit == "requests":
-        filters["group"] = "AWS-Lambda-Requests"
-    elif service_code == "AmazonStates" and unit == "requests":
-        if ("state" in usage and usage & {"transition", "transitions"}) or usage & {"statetransition", "statetransitions"}:
-            filters["group"] = "SFN-StateTransitions"
-        elif "express" in usage and usage & {"request", "requests", "execution", "executions"}:
-            filters["group"] = "SFN-ExpressWorkflows-Requests"
-    elif service_code == "AWSEvents" and unit == "requests":
-        filters["productFamily"] = "EventBridge"
-    elif service_code == "AWSQueueService" and unit == "requests":
-        filters["queueType"] = "Standard"
-    elif service_code == "AmazonSNS" and unit == "requests":
-        filters["group"] = "Requests-Tier1"
-    elif service_code == "AmazonCloudWatch" and ("log" in usage or "logs" in usage or "record" in usage or "records" in usage):
-        filters["productFamily"] = "Data Ingestion"
+    for rule in RATE_FILTER_RULES:
+        if rule.service_code != dimension.aws_service_code or rule.canonical_unit != unit:
+            continue
+        if not _term_groups_satisfied(usage, rule.required_term_groups):
+            continue
+        filters.update(rule.filters)
     return {key: value for key, value in filters.items() if key not in dimension.required_rate_dimensions}
+
+
+def _rule_matches_price_dimension(rule: UnitCompatibilityRule, item: PriceDimensionEvidence) -> bool:
+    values = {
+        "unit": str(item.unit or "").lower(),
+        "usage_type": str(item.usage_type or "").lower(),
+        "operation": str(item.operation or "").lower(),
+        "product_family": str(item.product_family or "").lower(),
+    }
+    return any(
+        any(token in values.get(attribute, "") for token in tokens)
+        for attribute, tokens in rule.attribute_contains.items()
+    )
+
+
+def _term_groups_satisfied(terms: set[str], groups: TermGroups) -> bool:
+    return all(bool(terms & group) for group in groups)
 
 
 def _dedupe_filters(filters: list[dict[str, str]]) -> list[dict[str, str]]:

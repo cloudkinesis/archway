@@ -359,6 +359,7 @@ def _generic_rate_binding(dimension: ServiceUsageDimension, *, region_code: str)
         settings.enable_aws_pricing_mcp
         or settings.aws_pricing_mcp_command
         or settings.aws_pricing_mcp_url
+        or settings.enable_aws_price_list_query_api
     )
     if live_authority_enabled:
         return AwsRateBindingEngine().bind(dimension, region_code=region_code)

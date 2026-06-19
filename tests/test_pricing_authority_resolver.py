@@ -56,6 +56,10 @@ def _price_list(*, sku: str = "SKU1", price: str = "0.023", unit: str = "GB", pr
     }
 
 
+def _enable_query_api(monkeypatch) -> None:
+    monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICE_LIST_QUERY_API", "true")
+
+
 def test_pricing_authority_resolver_binds_single_structured_mcp_rate(monkeypatch):
     monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "true")
     monkeypatch.setenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", "fake-mcp")
@@ -82,6 +86,7 @@ def test_pricing_authority_resolver_binds_single_structured_mcp_rate(monkeypatch
 def test_pricing_authority_resolver_rejects_unstructured_mcp_text_and_falls_back(monkeypatch):
     monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "true")
     monkeypatch.setenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", "fake-mcp")
+    _enable_query_api(monkeypatch)
     get_settings.cache_clear()
     monkeypatch.setattr("app.services.pricing_authority_resolver._resolved_mcp_command", lambda command: "fake-mcp")
     monkeypatch.setattr(
@@ -104,6 +109,7 @@ def test_pricing_authority_resolver_rejects_unstructured_mcp_text_and_falls_back
 def test_pricing_authority_resolver_preflights_missing_mcp_command_and_falls_back(monkeypatch):
     monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "true")
     monkeypatch.setenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", "/missing/bin/uvx")
+    _enable_query_api(monkeypatch)
     get_settings.cache_clear()
     monkeypatch.setattr("app.services.pricing_authority_resolver._get_products", lambda dimension, region_code: _price_list())
 
@@ -117,6 +123,7 @@ def test_pricing_authority_resolver_preflights_missing_mcp_command_and_falls_bac
 def test_pricing_authority_resolver_does_not_choose_ambiguous_rates(monkeypatch):
     monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
     monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    _enable_query_api(monkeypatch)
     get_settings.cache_clear()
     payload = _price_list(sku="SKU1", price="0.01")
     payload["PriceList"].append(_price_list(sku="SKU2", price="0.02")["PriceList"][0])
@@ -132,6 +139,7 @@ def test_pricing_authority_resolver_does_not_choose_ambiguous_rates(monkeypatch)
 def test_pricing_authority_resolver_matches_compact_price_list_request_units(monkeypatch):
     monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
     monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    _enable_query_api(monkeypatch)
     get_settings.cache_clear()
     payload = _price_list(sku="SKU-PUT", price="0.000000014", unit="PutRequest", product_family="Kinesis Streams")
     product = payload["PriceList"][0]["product"]
@@ -159,6 +167,7 @@ def test_pricing_authority_resolver_matches_compact_price_list_request_units(mon
 def test_pricing_authority_resolver_rejects_zero_price_dimensions(monkeypatch):
     monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
     monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    _enable_query_api(monkeypatch)
     get_settings.cache_clear()
     payload = _price_list(sku="SKU-FREE", price="0E-10", unit="Events", product_family="EventBridge")
     product = payload["PriceList"][0]["product"]
@@ -184,6 +193,7 @@ def test_pricing_authority_resolver_rejects_zero_price_dimensions(monkeypatch):
 def test_pricing_authority_resolver_does_not_bind_eventbridge_events_without_chunk_driver(monkeypatch):
     monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
     monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    _enable_query_api(monkeypatch)
     get_settings.cache_clear()
     payload = _price_list(sku="SKU-EVENTS", price="0.000001", unit="64K-Chunks", product_family="EventBridge")
     product = payload["PriceList"][0]["product"]
@@ -208,6 +218,7 @@ def test_pricing_authority_resolver_does_not_bind_eventbridge_events_without_chu
 def test_pricing_authority_resolver_binds_eventbridge_when_chunk_driver_is_explicit(monkeypatch):
     monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
     monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    _enable_query_api(monkeypatch)
     get_settings.cache_clear()
     payload = _price_list(sku="SKU-EVENTS", price="0.000001", unit="64K-Chunks", product_family="EventBridge")
     product = payload["PriceList"][0]["product"]
@@ -233,6 +244,7 @@ def test_pricing_authority_resolver_binds_eventbridge_when_chunk_driver_is_expli
 def test_pricing_authority_resolver_binds_monthly_lambda_requests_with_query_only_group(monkeypatch):
     monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
     monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    _enable_query_api(monkeypatch)
     get_settings.cache_clear()
     payload = _price_list(sku="SKU-LAMBDA-REQ", price="0.0000002", unit="Request", product_family="AWS Lambda")
     product = payload["PriceList"][0]["product"]
@@ -260,6 +272,7 @@ def test_pricing_authority_resolver_binds_monthly_lambda_requests_with_query_onl
 def test_pricing_authority_resolver_binds_step_functions_state_transitions(monkeypatch):
     monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
     monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    _enable_query_api(monkeypatch)
     get_settings.cache_clear()
     plan = pricing_filter_plan_for_service("AWS Step Functions")
     assert plan is not None
@@ -285,6 +298,23 @@ def test_pricing_authority_resolver_binds_step_functions_state_transitions(monke
     assert binding.source == "price_list_query_api"
     assert binding.sku == "SKU-SFN-TRANSITIONS"
     assert binding.unit == "StateTransition"
+
+
+def test_price_list_query_api_fallback_is_default_off(monkeypatch):
+    monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
+    monkeypatch.delenv("ARCHWAY_ENABLE_AWS_PRICE_LIST_QUERY_API", raising=False)
+    monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        "app.services.pricing_authority_resolver._get_products",
+        lambda dimension, region_code: (_ for _ in ()).throw(AssertionError("query API should be gated off")),
+    )
+
+    binding = PricingAuthorityResolver().resolve(_dimension(), region_code="us-east-1")
+
+    assert binding.binding_status == "not_found"
+    assert binding.source == "unbound"
+    assert any("Query API fallback is disabled" in note for note in binding.notes)
 
 
 def test_bound_rate_with_assumed_quantity_is_not_procurement_ready():

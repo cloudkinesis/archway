@@ -12,6 +12,7 @@ def test_rate_binding_engine_binds_single_cloudfront_price_dimension(monkeypatch
         ]
     }
     monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICE_LIST_QUERY_API", "true")
     monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
     get_settings.cache_clear()
     monkeypatch.setattr("app.services.pricing_authority_resolver._get_products", lambda dimension, region_code: response)
@@ -41,6 +42,7 @@ def test_rate_binding_engine_marks_multiple_cloudfront_rates_ambiguous(monkeypat
         ]
     }
     monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICE_LIST_QUERY_API", "true")
     monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
     get_settings.cache_clear()
     monkeypatch.setattr("app.services.pricing_authority_resolver._get_products", lambda dimension, region_code: response)
