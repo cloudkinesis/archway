@@ -86,6 +86,7 @@ class SourceTruthPricingCompiler:
             "service_usage_dimensions": [item.model_dump(mode="json") for item in usage_dimensions],
             "aws_rate_bindings": [item.model_dump(mode="json") for item in rate_bindings],
             "pricing_ledger": ledger.model_dump(mode="json"),
+            "procurement_readiness_gaps": _procurement_readiness_gaps(ledger, rate_bindings),
             "pricing_sanity_findings": [item.model_dump(mode="json") for item in sanity],
         }
         _annotate_line_items(pricing, usage_dimensions, ledger, rate_bindings)
@@ -240,6 +241,7 @@ def _compile_generic_not_estimated(
         "service_usage_dimensions": [item.model_dump(mode="json") for item in usage_dimensions],
         "aws_rate_bindings": [item.model_dump(mode="json") for item in rate_bindings],
         "pricing_ledger": ledger.model_dump(mode="json"),
+        "procurement_readiness_gaps": _procurement_readiness_gaps(ledger, rate_bindings),
         "pricing_sanity_findings": [item.model_dump(mode="json") for item in sanity],
         "generic_quantity_context": _export_quantity_context(generic_context),
         "pricing_can_be_displayed_as_headline": False,
@@ -1176,6 +1178,45 @@ def _pricing_ledger(pricing: PricingAnalysis, usage_dimensions: list[ServiceUsag
         procurement_ready=bool(line_items) and all(item.procurement_ready for item in line_items),
     )
     return PricingLedger(line_items=line_items, summary=summary)
+
+
+def _procurement_readiness_gaps(ledger: PricingLedger, rate_bindings: list[AwsRateBinding]) -> list[dict[str, Any]]:
+    rate_by_id = {item.id: item for item in rate_bindings}
+    gaps: list[dict[str, Any]] = []
+    for item in ledger.line_items:
+        if item.procurement_ready:
+            continue
+        rate = rate_by_id.get(item.rate_binding_id or "")
+        if item.quantity is None:
+            reason = "Missing confirmed usage quantity."
+            next_step = "Confirm the monthly usage quantity and exact billable unit for this service."
+        elif item.assumptions:
+            reason = "Usage quantity depends on assumptions."
+            next_step = "Replace assumptions with customer-confirmed quantities before procurement use."
+        elif rate and rate.binding_status == "ambiguous":
+            reason = "Multiple AWS Price List rates matched."
+            next_step = "Confirm the exact usage type, operation, tier, storage class, model, or product attribute required by AWS pricing."
+        elif rate and rate.binding_status == "not_found":
+            reason = "No exact AWS SKU/rate matched this usage dimension."
+            next_step = "Refine the service-specific billable unit and required AWS rate dimensions, then re-run pricing authority binding."
+        elif rate and rate.binding_status == "unsupported":
+            reason = "No supported AWS service code is available."
+            next_step = "Map the service to an AWS Price List service code or mark it explicitly out of AWS pricing scope."
+        else:
+            reason = "Exact AWS SKU/rate binding is incomplete."
+            next_step = "Confirm service, quantity, unit, region, operation, and SKU/tier before procurement use."
+        gaps.append({
+            "service_name": item.service_name,
+            "usage_name": item.usage_name,
+            "quantity": str(item.quantity) if item.quantity is not None else None,
+            "quantity_unit": item.quantity_unit,
+            "rate_binding_status": rate.binding_status if rate else "missing",
+            "evidence_class": item.evidence_class,
+            "reason": reason,
+            "next_step": next_step,
+            "limitations": list(item.limitations or []),
+        })
+    return gaps
 
 
 def _sanity_findings(family: str, facts: CanonicalFactsLedger, bindings: list[PricingDriverBinding], usage_dimensions: list[ServiceUsageDimension], ledger: PricingLedger, pricing: PricingAnalysis):

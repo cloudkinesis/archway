@@ -23,7 +23,7 @@ _SERVICE_CODE_ALIASES: tuple[tuple[str, str, dict[str, str]], ...] = (
     ("amazon s3", "AmazonS3", {}),
     ("s3", "AmazonS3", {}),
     ("cloudwatch", "AmazonCloudWatch", {}),
-    ("step functions", "AWSStates", {}),
+    ("step functions", "AmazonStates", {}),
     ("eventbridge", "AWSEvents", {}),
     ("simple queue service", "AWSQueueService", {}),
     ("amazon sqs", "AWSQueueService", {}),

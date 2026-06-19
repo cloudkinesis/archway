@@ -26,6 +26,7 @@ class PricingAuthorityResolver:
     """
 
     def resolve(self, dimension: ServiceUsageDimension, *, region_code: str) -> AwsRateBinding:
+        dimension = _normalize_dimension_aliases(dimension)
         preflight = _preflight_unbound(dimension)
         if preflight:
             return preflight
@@ -82,6 +83,16 @@ def _preflight_unbound(dimension: ServiceUsageDimension) -> AwsRateBinding | Non
             notes=["No concrete usage quantity was available, so exact rate binding was skipped."],
         )
     return None
+
+
+def _normalize_dimension_aliases(dimension: ServiceUsageDimension) -> ServiceUsageDimension:
+    service_code_aliases = {
+        "AWSStates": "AmazonStates",
+    }
+    normalized = service_code_aliases.get(dimension.aws_service_code)
+    if normalized:
+        return dimension.model_copy(update={"aws_service_code": normalized})
+    return dimension
 
 
 def _resolve_via_pricing_mcp(dimension: ServiceUsageDimension, region_code: str) -> PriceListParseResult:
@@ -362,37 +373,63 @@ def _get_products(dimension: ServiceUsageDimension, region_code: str) -> dict[st
         config=Config(connect_timeout=5, read_timeout=12, retries={"max_attempts": 2}),
     )
     filters = _filters_for_dimension(dimension, region_code)
-    return client.get_products(ServiceCode=dimension.aws_service_code, Filters=filters, MaxResults=12)
+    price_list: list[Any] = []
+    token: str | None = None
+    for _ in range(3):
+        kwargs: dict[str, Any] = {
+            "ServiceCode": dimension.aws_service_code,
+            "Filters": filters,
+            "MaxResults": 100,
+        }
+        if token:
+            kwargs["NextToken"] = token
+        response = client.get_products(**kwargs)
+        price_list.extend(response.get("PriceList") or [])
+        token = response.get("NextToken")
+        if not token:
+            break
+    return {"PriceList": price_list}
 
 
 def _filters_for_dimension(dimension: ServiceUsageDimension, region_code: str) -> list[dict[str, str]]:
     filters: list[dict[str, str]] = []
     if dimension.aws_service_code != "AmazonCloudFront":
         filters.append({"Type": "TERM_MATCH", "Field": "regionCode", "Value": region_code})
-    for key, value in dimension.required_rate_dimensions.items():
+    required = {**dimension.required_rate_dimensions, **_inferred_rate_dimensions(dimension)}
+    for key, value in required.items():
         if value:
             filters.append({"Type": "TERM_MATCH", "Field": key, "Value": value})
-    return filters
+    return _dedupe_filters(filters)
 
 
 def _matching_dimensions(dimension: ServiceUsageDimension, dimensions: list[PriceDimensionEvidence]) -> list[PriceDimensionEvidence]:
     expected_unit = _canonical_unit(dimension.unit)
     usage_terms = _tokens(f"{dimension.usage_name} {dimension.formula}")
-    matches: list[PriceDimensionEvidence] = []
+    scored: list[tuple[int, PriceDimensionEvidence]] = []
     for item in dimensions:
+        if Decimal(item.price_per_unit) <= 0:
+            continue
         item_unit = _canonical_unit(item.unit)
         if expected_unit and item_unit and expected_unit != item_unit:
             continue
+        if not _service_specific_unit_compatible(dimension, item):
+            continue
         if not _required_dimensions_match(dimension, item):
             continue
-        if usage_terms and not _usage_text_matches(usage_terms, item):
+        score = _candidate_score(dimension, usage_terms, item)
+        if score <= 0:
             continue
-        matches.append(item)
-    return matches[:8]
+        scored.append((score, item))
+    if not scored:
+        return []
+    scored.sort(key=lambda pair: (-pair[0], pair[1].sku, pair[1].rate_code or ""))
+    best_score = scored[0][0]
+    return [item for score, item in scored if score == best_score][:8]
 
 
 def _required_dimensions_match(dimension: ServiceUsageDimension, item: PriceDimensionEvidence) -> bool:
-    if not dimension.required_rate_dimensions:
+    required = {**dimension.required_rate_dimensions, **_inferred_rate_dimensions(dimension)}
+    if not required:
         return True
     fields = {
         "usagetype": item.usage_type,
@@ -402,9 +439,89 @@ def _required_dimensions_match(dimension: ServiceUsageDimension, item: PriceDime
         "regionCode": item.region_code,
         "location": item.location,
     }
-    for key, expected in dimension.required_rate_dimensions.items():
+    for key, expected in required.items():
+        if key not in fields:
+            continue
         if expected and str(fields.get(key) or "").lower() != str(expected).lower():
             return False
+    return True
+
+
+def _candidate_score(dimension: ServiceUsageDimension, usage_terms: set[str], item: PriceDimensionEvidence) -> int:
+    text = _tokens(" ".join(str(value or "") for value in (
+        item.usage_type,
+        item.operation,
+        item.product_family,
+        item.unit,
+    )))
+    if not text:
+        return 0
+    shared = usage_terms & text
+    score = len(shared) * 4
+    expected_unit = _canonical_unit(dimension.unit)
+    item_unit = _canonical_unit(item.unit)
+    if expected_unit and expected_unit == item_unit:
+        score += 5
+    if _generic_billable_intent_matches(dimension, item):
+        score += 6
+    if item.begin_range in {None, "0", "0.0", "0.0000000000"}:
+        score += 1
+    if shared or _generic_billable_intent_matches(dimension, item):
+        return score
+    return 1 if not _meaningful_pricing_terms(usage_terms) else 0
+
+
+def _generic_billable_intent_matches(dimension: ServiceUsageDimension, item: PriceDimensionEvidence) -> bool:
+    expected = _canonical_unit(dimension.unit)
+    if not expected or expected != _canonical_unit(item.unit):
+        return False
+    item_terms = _tokens(" ".join(str(value or "") for value in (
+        item.usage_type,
+        item.operation,
+        item.product_family,
+        item.unit,
+    )))
+    usage_terms = _tokens(f"{dimension.usage_name} {dimension.formula} {dimension.service_name}")
+    if expected == "requests":
+        intent_terms = {"request", "requests", "event", "events", "execution", "executions", "transition", "transitions", "invoke", "invocation", "invocations"}
+        return bool((usage_terms & intent_terms) and (item_terms & intent_terms))
+    if expected == "gb":
+        intent_terms = {"storage", "stored", "timed", "byte", "bytes", "gb", "month"}
+        return bool((usage_terms & {"storage", "retention", "archive", "evidence", "object", "objects", "gb", "month"}) and (item_terms & intent_terms))
+    if expected == "hours":
+        intent_terms = {"hour", "hours", "node", "instance", "kpu", "capacity"}
+        return bool((usage_terms & intent_terms) and (item_terms & intent_terms))
+    return False
+
+
+def _service_specific_unit_compatible(dimension: ServiceUsageDimension, item: PriceDimensionEvidence) -> bool:
+    """Prevent near-match bindings where AWS bills a narrower service dimension.
+
+    This is intentionally keyed by AWS billing semantics, not customer scenario
+    vocabulary. It blocks procurement claims when the source-truth usage
+    dimension lacks the exact billable unit shape that the Price List exposes.
+    """
+    terms = _tokens(f"{dimension.usage_name} {dimension.formula} {dimension.unit}")
+    if dimension.aws_service_code == "AmazonStates":
+        usage_type = str(item.usage_type or "").lower()
+        if "statetransition" in usage_type:
+            return bool(("state" in terms and terms & {"transition", "transitions"}) or terms & {"statetransition", "statetransitions"})
+        if "stepfunctions-request" in usage_type:
+            return bool("express" in terms and terms & {"request", "requests", "execution", "executions"})
+        if "gb-second" in usage_type:
+            return bool(terms & {"duration", "gbsecond", "gbseconds", "second", "seconds"})
+        return True
+    if dimension.aws_service_code != "AWSEvents":
+        return True
+    unit = str(item.unit or "").lower()
+    usage_type = str(item.usage_type or "").lower()
+    operation = str(item.operation or "").lower()
+    if "chunk" in unit or "chunk" in usage_type:
+        return bool(terms & {"chunk", "chunks", "64k", "kb", "kilobyte", "kilobytes"})
+    if "scheduledinvocation" in usage_type or operation == "invocation":
+        return bool(terms & {"schedule", "scheduled", "scheduler", "invocation", "invocations"})
+    if "piperequest" in operation.lower() or "pipe" in usage_type:
+        return bool(terms & {"pipe", "pipes"})
     return True
 
 
@@ -453,19 +570,69 @@ _STOPWORDS = {
 
 def _canonical_unit(unit: str | None) -> str:
     value = str(unit or "").lower().strip()
-    if value in {"gb", "gbs", "gigabyte", "gigabytes", "gb-month", "gb-months", "gb month", "gb months"}:
+    compact = value.replace(" ", "").replace("-", "").lower()
+    if value in {"gb", "gbs", "gigabyte", "gigabytes", "gb-month", "gb-months", "gb month", "gb months", "gb-mo", "gb-mo."} or compact in {"gbmo", "gbmonth", "gbmonths", "gbmonthmo"}:
         return "gb"
-    if value in {"tb", "tbs", "terabyte", "terabytes", "tb-month", "tb-months", "tb month", "tb months"}:
+    if value in {"tb", "tbs", "terabyte", "terabytes", "tb-month", "tb-months", "tb month", "tb months", "tb-mo", "tb-mo."} or compact in {"tbmo", "tbmonth", "tbmonths"}:
         return "tb"
-    if value in {"request", "requests", "invocation", "invocations", "events", "event", "runs", "executions"}:
+    if value in {"request", "requests", "invocation", "invocations", "events", "event", "runs", "executions", "state transition", "state transitions"}:
         return "requests"
-    if value.replace(" ", "").replace("-", "").lower() in {"putrequest", "putrequests", "putrequestpayloadunit", "putrequestpayloadunits"}:
+    if any(term in compact for term in ("request", "requests", "event", "events", "execution", "executions", "invocation", "invocations", "statetransition", "statetransitions")):
         return "requests"
+    if compact in {"putrequest", "putrequests", "putrequestpayloadunit", "putrequestpayloadunits", "request", "requests", "statetransition", "statetransitions"}:
+        return "requests"
+    if "chunk" in compact:
+        return "chunks"
     if value in {"hour", "hours", "hrs", "channel-hours", "channel hours", "node-hours", "node hours"}:
         return "hours"
     if value in {"read/write units proxy", "read write units proxy", "wcu", "rcu"}:
         return "requests"
     return value
+
+
+def _inferred_rate_dimensions(dimension: ServiceUsageDimension) -> dict[str, str]:
+    """Infer safe AWS Price List filters from billable-unit intent.
+
+    These are AWS service/unit mappings, not scenario mappings. They only add a
+    filter when the Archway usage dimension has already committed to a concrete
+    billable unit shape; ambiguous products remain ambiguous downstream.
+    """
+    service_code = dimension.aws_service_code
+    unit = _canonical_unit(dimension.unit)
+    usage = _tokens(f"{dimension.usage_name} {dimension.formula} {dimension.service_name}")
+    filters: dict[str, str] = {}
+    if service_code == "AmazonKinesis" and unit == "requests":
+        filters["productFamily"] = "Kinesis Streams"
+    elif service_code == "AmazonS3" and unit == "gb":
+        filters["productFamily"] = "Storage"
+    elif service_code == "AWSLambda" and unit == "requests":
+        filters["group"] = "AWS-Lambda-Requests"
+    elif service_code == "AmazonStates" and unit == "requests":
+        if ("state" in usage and usage & {"transition", "transitions"}) or usage & {"statetransition", "statetransitions"}:
+            filters["group"] = "SFN-StateTransitions"
+        elif "express" in usage and usage & {"request", "requests", "execution", "executions"}:
+            filters["group"] = "SFN-ExpressWorkflows-Requests"
+    elif service_code == "AWSEvents" and unit == "requests":
+        filters["productFamily"] = "EventBridge"
+    elif service_code == "AWSQueueService" and unit == "requests":
+        filters["queueType"] = "Standard"
+    elif service_code == "AmazonSNS" and unit == "requests":
+        filters["group"] = "Requests-Tier1"
+    elif service_code == "AmazonCloudWatch" and ("log" in usage or "logs" in usage or "record" in usage or "records" in usage):
+        filters["productFamily"] = "Data Ingestion"
+    return {key: value for key, value in filters.items() if key not in dimension.required_rate_dimensions}
+
+
+def _dedupe_filters(filters: list[dict[str, str]]) -> list[dict[str, str]]:
+    output: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for item in filters:
+        key = (item.get("Type", ""), item.get("Field", ""), item.get("Value", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(item)
+    return output
 
 
 def _binding_from_dimension(

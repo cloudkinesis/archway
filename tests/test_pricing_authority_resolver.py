@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from app.core.config import get_settings
 from app.domain.source_of_truth import AwsRateBinding, PricingLedger, PricingLedgerSummary, ServiceUsageDimension
+from app.services.pricing_filter_mapper import pricing_filter_plan_for_service
 from app.services.pricing_authority_resolver import PricingAuthorityResolver
 from app.services.source_truth_pricing_compiler import _ledger_limitations, _pricing_ledger
 
@@ -153,6 +154,137 @@ def test_pricing_authority_resolver_matches_compact_price_list_request_units(mon
     assert binding.source == "price_list_query_api"
     assert binding.usage_type == "PutRequestPayloadUnits"
     assert binding.unit == "PutRequest"
+
+
+def test_pricing_authority_resolver_rejects_zero_price_dimensions(monkeypatch):
+    monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
+    monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    get_settings.cache_clear()
+    payload = _price_list(sku="SKU-FREE", price="0E-10", unit="Events", product_family="EventBridge")
+    product = payload["PriceList"][0]["product"]
+    product["attributes"]["usagetype"] = "USE1-ScheduledInvocation"
+    product["attributes"]["operation"] = "ScheduledInvocation"
+    monkeypatch.setattr("app.services.pricing_authority_resolver._get_products", lambda dimension, region_code: payload)
+
+    binding = PricingAuthorityResolver().resolve(
+        _dimension(
+            service_name="Amazon EventBridge",
+            usage_name="custom events",
+            aws_service_code="AWSEvents",
+            unit="events/month",
+        ),
+        region_code="us-east-1",
+    )
+
+    assert binding.binding_status == "not_found"
+    assert binding.source == "unbound"
+    assert binding.price_per_unit is None
+
+
+def test_pricing_authority_resolver_does_not_bind_eventbridge_events_without_chunk_driver(monkeypatch):
+    monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
+    monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    get_settings.cache_clear()
+    payload = _price_list(sku="SKU-EVENTS", price="0.000001", unit="64K-Chunks", product_family="EventBridge")
+    product = payload["PriceList"][0]["product"]
+    product["attributes"]["usagetype"] = "USE1-Event-64K-Chunks"
+    product["attributes"]["operation"] = "PutEvents"
+    monkeypatch.setattr("app.services.pricing_authority_resolver._get_products", lambda dimension, region_code: payload)
+
+    binding = PricingAuthorityResolver().resolve(
+        _dimension(
+            service_name="Amazon EventBridge",
+            usage_name="custom events",
+            aws_service_code="AWSEvents",
+            unit="events/month",
+        ),
+        region_code="us-east-1",
+    )
+
+    assert binding.binding_status == "not_found"
+    assert binding.source == "unbound"
+
+
+def test_pricing_authority_resolver_binds_eventbridge_when_chunk_driver_is_explicit(monkeypatch):
+    monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
+    monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    get_settings.cache_clear()
+    payload = _price_list(sku="SKU-EVENTS", price="0.000001", unit="64K-Chunks", product_family="EventBridge")
+    product = payload["PriceList"][0]["product"]
+    product["attributes"]["usagetype"] = "USE1-Event-64K-Chunks"
+    product["attributes"]["operation"] = "PutEvents"
+    monkeypatch.setattr("app.services.pricing_authority_resolver._get_products", lambda dimension, region_code: payload)
+
+    binding = PricingAuthorityResolver().resolve(
+        _dimension(
+            service_name="Amazon EventBridge",
+            usage_name="custom events in 64K chunks",
+            aws_service_code="AWSEvents",
+            unit="64K-Chunks/month",
+        ),
+        region_code="us-east-1",
+    )
+
+    assert binding.binding_status == "bound"
+    assert binding.source == "price_list_query_api"
+    assert binding.sku == "SKU-EVENTS"
+
+
+def test_pricing_authority_resolver_binds_monthly_lambda_requests_with_query_only_group(monkeypatch):
+    monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
+    monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    get_settings.cache_clear()
+    payload = _price_list(sku="SKU-LAMBDA-REQ", price="0.0000002", unit="Request", product_family="AWS Lambda")
+    product = payload["PriceList"][0]["product"]
+    product["attributes"]["group"] = "AWS-Lambda-Requests"
+    product["attributes"]["usagetype"] = "USE1-Request"
+    product["attributes"]["operation"] = "Invoke"
+    monkeypatch.setattr("app.services.pricing_authority_resolver._get_products", lambda dimension, region_code: payload)
+
+    binding = PricingAuthorityResolver().resolve(
+        _dimension(
+            service_name="AWS Lambda",
+            usage_name="function invocations",
+            aws_service_code="AWSLambda",
+            unit="requests/month",
+        ),
+        region_code="us-east-1",
+    )
+
+    assert binding.binding_status == "bound"
+    assert binding.source == "price_list_query_api"
+    assert binding.sku == "SKU-LAMBDA-REQ"
+    assert binding.unit == "Request"
+
+
+def test_pricing_authority_resolver_binds_step_functions_state_transitions(monkeypatch):
+    monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)
+    monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
+    get_settings.cache_clear()
+    plan = pricing_filter_plan_for_service("AWS Step Functions")
+    assert plan is not None
+    assert plan.service_code == "AmazonStates"
+    payload = _price_list(sku="SKU-SFN-TRANSITIONS", price="0.000025", unit="StateTransition", product_family="AWS Step Functions")
+    product = payload["PriceList"][0]["product"]
+    product["attributes"]["group"] = "SFN-StateTransitions"
+    product["attributes"]["usagetype"] = "USE1-StateTransition"
+    product["attributes"]["operation"] = "StateTransition"
+    monkeypatch.setattr("app.services.pricing_authority_resolver._get_products", lambda dimension, region_code: payload)
+
+    binding = PricingAuthorityResolver().resolve(
+        _dimension(
+            service_name="AWS Step Functions",
+            usage_name="state transitions",
+            aws_service_code=plan.service_code,
+            unit="state transitions/month",
+        ),
+        region_code="us-east-1",
+    )
+
+    assert binding.binding_status == "bound"
+    assert binding.source == "price_list_query_api"
+    assert binding.sku == "SKU-SFN-TRANSITIONS"
+    assert binding.unit == "StateTransition"
 
 
 def test_bound_rate_with_assumed_quantity_is_not_procurement_ready():
