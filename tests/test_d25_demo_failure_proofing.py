@@ -179,6 +179,6 @@ def test_warning_only_diagram_qa_does_not_fail_customer_readiness():
         }],
     }])
 
-    assert [item.code for item in findings] == ["diagram.qa_warning_only"]
-    assert findings[0].severity == "warning"
-    assert findings[0].customer_readiness_impact == "cap_to_workshop"
+    assert [item.code for item in findings] == ["diagram.qa_audit_only"]
+    assert findings[0].severity == "info"
+    assert findings[0].customer_readiness_impact == "none"

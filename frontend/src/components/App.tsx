@@ -1239,6 +1239,7 @@ function Report({
   const serviceDecisionRecords = (report.metadata?.service_decision_records as Array<{ decision_id?: string; selected_service?: string; capability?: string; required_validation?: string[] }> | undefined) ?? [];
   const serviceValidationNotes = (report.metadata?.service_validation_notes as string[] | undefined) ?? [];
   const competitorStatus = report.metadata?.competitor_scan as Record<string, unknown> | undefined;
+  const diagramsReady = session.active_phase === "diagrams" || session.active_phase === "export" || Boolean(latestExport);
   const evidenceById = useMemo(() => Object.fromEntries(report.evidence_items.map((item) => [item.id, item])), [report.evidence_items]);
   const pricingMaturity = String(report.pricing_analysis.metadata?.pricing_maturity ?? "directional");
   const checkpoint = useQuery({ queryKey: ["pricing-checkpoint", session.id, report.pricing_analysis.metadata?.pricing_maturity], queryFn: () => api.getPricingCheckpoint(session.id) });
@@ -1286,6 +1287,7 @@ function Report({
           onNext={onNext}
           onExport={() => exportRun.mutate()}
           exportBusy={exportRun.isPending || exportJob.isActive}
+          diagramsReady={diagramsReady}
           onRefreshResearch={() => refreshResearch.mutate()}
           refreshBusy={refreshResearch.isPending || researchJob.isActive}
           exportBundle={latestExport}
@@ -1465,6 +1467,7 @@ function ResearchStickyHeader({
   onNext,
   onExport,
   exportBusy,
+  diagramsReady,
   onRefreshResearch,
   refreshBusy,
   exportBundle
@@ -1474,6 +1477,7 @@ function ResearchStickyHeader({
   onNext: () => void;
   onExport: () => void;
   exportBusy: boolean;
+  diagramsReady: boolean;
   onRefreshResearch: () => void;
   refreshBusy: boolean;
   exportBundle: ExportBundle | null;
@@ -1493,7 +1497,9 @@ function ResearchStickyHeader({
         </div>
         <div className="flex flex-wrap gap-2">
           <Button icon={ChevronRight} onClick={onNext}>Review Summary</Button>
-          <Button icon={exportBusy ? Loader2 : Download} variant="secondary" disabled={exportBusy} onClick={onExport}>{exportBusy ? "Exporting" : "Export"}</Button>
+          <Button icon={exportBusy ? Loader2 : Download} variant="secondary" disabled={exportBusy || !diagramsReady} onClick={onExport}>
+            {exportBusy ? "Exporting" : diagramsReady ? "Export package" : "Export after diagrams"}
+          </Button>
           {exportBundle ? (
             <a href={artifactUrl(sessionId, exportBundle.artifact_id)} className="inline-flex min-h-10 items-center justify-center gap-2 border border-awsBorder bg-awsPanelSoft px-3 py-2 text-sm font-semibold text-awsTextPrimary hover:border-awsOrange">
               <Download className="h-4 w-4" /> ZIP ready

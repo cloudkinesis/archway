@@ -267,10 +267,11 @@ def test_client_pack_does_not_diverge_from_source(name):
     if component_count:
         assert f"{component_count} service-selection decisions" in client["03-architecture-summary.md"]
 
-    # Validation gates are the dossier's gates (display-labeled), not new ones.
-    for gate in dossier.top_validation_gates[:3]:
-        from app.services.display_labels import gate_display
-        assert gate_display(gate) in client["01-executive-memo.md"]
+    # Memo validation focus is derived from the same computed readiness tier;
+    # when tier caps exist, do not re-surface stale discovery questions as if
+    # the user failed to answer them.
+    for reason in (tier.get("reasons") or [])[:3]:
+        assert reason.rstrip(".") in client["01-executive-memo.md"]
 
 
 # --------------------------------------------------------------------------- #

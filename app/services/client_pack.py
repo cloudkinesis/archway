@@ -157,8 +157,9 @@ def _executive_memo(report: dict, dossier, tier: dict, client_plan: ClientFacing
     direction = report.get("recommended_production_direction") or (
         "an AWS-native architecture with governed operations, evidence discipline, and explicit pricing validation"
     )
-    gates = [gate_display(item) for item in dossier.top_validation_gates[:3]]
     cap = tier.get("reasons") or []
+    gates = [_sentence(reason) for reason in cap[:3]] or [gate_display(item) for item in dossier.top_validation_gates[:3]]
+    estimate_display = _client_estimate_display(tier, pricing or {})
     lines = [
         "# Executive Memo",
         "",
@@ -183,9 +184,9 @@ def _executive_memo(report: dict, dossier, tier: dict, client_plan: ClientFacing
         "",
         _sentence(_executive_cost_position(dossier, pricing or {})),
         "",
-        _sentence(f"Treat this as a {tier['estimate_display'].lower()} at the {tier['display'].lower()} tier"),
+        _sentence(f"Treat this as a {estimate_display.lower()} at the {tier['display'].lower()} tier"),
         "",
-        "## What must be validated first",
+        "## Next validation focus",
         "",
         *_bullets(gates),
         "",
@@ -219,6 +220,13 @@ def _executive_cost_position(dossier, pricing: dict) -> str:
             "pricing driver and AWS rate bindings are safe."
         )
     return source_text
+
+
+def _client_estimate_display(tier: dict, pricing: dict) -> str:
+    metadata = pricing.get("metadata") or {}
+    if metadata.get("pricing_can_be_displayed_as_headline") is False:
+        return ESTIMATE_CLASS_DISPLAY.get("planning_estimate", "Planning estimate")
+    return str(tier.get("estimate_display") or ESTIMATE_CLASS_DISPLAY.get("planning_estimate", "Planning estimate"))
 
 
 def _solution_brief(brief: dict, dossier) -> str:
@@ -494,8 +502,8 @@ def _risks_and_gates(dossier, tier: dict, client_plan: ClientFacingPlan | None =
         f"Mitigation: {_sentence(str(risk.mitigation))}"
         for risk in dossier.risks
     ]
-    gates = [gate_display(item) for item in dossier.top_validation_gates]
     cap = [_sentence(reason) for reason in tier.get("reasons") or []]
+    gates = cap or [gate_display(item) for item in dossier.top_validation_gates]
     lines = [
         "# Risks and Validation Gates",
         "",

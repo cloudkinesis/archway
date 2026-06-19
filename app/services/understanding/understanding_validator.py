@@ -38,8 +38,14 @@ class UnderstandingValidator:
             issues.append(_issue("critical", "deployment_posture_conflict", "Deep understanding defaulted to public cloud despite deterministic hybrid/edge/sovereign posture signals."))
         if "semiconductor" in lower and understanding.industry == "healthcare" and not any(term in lower for term in ("patient", "clinical", "ehr", "hospital")):
             issues.append(_issue("critical", "semiconductor_as_healthcare", "Semiconductor workload cannot be classified as healthcare without clinical terms."))
-        if "phi_data" in understanding.capabilities and not any(term in lower for term in ("patient", "clinical", "ehr", "hospital", "hipaa", " phi ")):
-            issues.append(_issue("critical", "unsupported_phi", "PHI capability appeared without patient/EHR/clinical terms."))
+        if "phi_data" in understanding.capabilities and not _has_affirmative_phi_context(lower):
+            severity = "warning" if _explicitly_negates_sensitive_data(lower) else "critical"
+            message = (
+                "PHI capability was proposed even though the user explicitly negated PHI/PII."
+                if severity == "warning"
+                else "PHI capability appeared without patient/EHR/clinical terms."
+            )
+            issues.append(_issue(severity, "unsupported_phi", message))
         if "video_streaming" in understanding.capabilities and not any(term in lower for term in ("video", "viewer", "4k", "hdr", "drm", "streaming video")):
             issues.append(_issue("critical", "unsupported_video", "Video streaming capability appeared without media/video terms."))
         if "financial_market_compliance" in understanding.capabilities and not any(term in lower for term in ("trading", "derivatives", "exchange", "mifid", "sec", "finra", "mas", "solvency")):
@@ -58,3 +64,17 @@ class UnderstandingValidator:
 
 def _issue(severity: str, code: str, message: str) -> UnderstandingValidationIssue:
     return UnderstandingValidationIssue(severity=severity, code=code, message=message)
+
+
+def _has_affirmative_phi_context(text: str) -> bool:
+    positive_markers = ("patient", "clinical", "ehr", "hospital", "hipaa", "protected health information")
+    return any(term in text for term in positive_markers) or bool(re.search(r"(?<!no real )(?<!no )\bphi\b", text))
+
+
+def _explicitly_negates_sensitive_data(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:no|without|exclude|excludes|excluding|not|non)\s+(?:real\s+)?(?:phi|pii|patient|clinical|protected health information)\b",
+            text,
+        )
+    )

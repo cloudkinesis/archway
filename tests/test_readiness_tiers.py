@@ -203,7 +203,7 @@ def test_pricing_summary_copy_matches_tier(monkeypatch):
     from app.services.deep_dossier import DeepDossierService
 
     report = _report()
-    pricing = _pricing(scenario=True)
+    pricing = _pricing(headline=True, scenario=True)
     dossier = DeepDossierService().build(
         session_id="s", brief={"title": "Tier Test", "use_case_profile": {}},
         report=report, pricing=pricing, architectures=_ARCH, diagrams=[],
@@ -225,6 +225,28 @@ def test_pricing_summary_copy_matches_tier(monkeypatch):
         assert "workshop_ready" not in content
         assert "budgetary_range" not in content
         assert lint_markdown(content, "client_pack/x.md") == []
+
+
+def test_client_memo_uses_planning_estimate_when_headline_pricing_is_blocked():
+    from app.services.client_pack import client_pack_files
+    from app.services.deep_dossier import DeepDossierService
+
+    report = _report()
+    pricing = _pricing(headline=False, scenario=True)
+    dossier = DeepDossierService().build(
+        session_id="s", brief={"title": "Tier Test", "use_case_profile": {}},
+        report=report, pricing=pricing, architectures=_ARCH, diagrams=[],
+    )
+    client = client_pack_files(
+        session_name="Tier Test", brief={"title": "Tier Test"}, report=report, pricing=pricing,
+        architectures=_ARCH, diagrams=[], deep_dossier=dossier, decision_records=[],
+    )
+
+    memo = client["01-executive-memo.md"]
+
+    assert "**Readiness tier:** Workshop ready" in memo
+    assert "planning estimate at the workshop ready tier" in memo
+    assert "budgetary range at the workshop ready tier" not in memo
 
 
 def test_rendered_client_pack_matches_codex_fresh_metadata():

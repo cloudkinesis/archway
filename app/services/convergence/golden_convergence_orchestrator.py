@@ -259,15 +259,19 @@ def _understanding_findings(report: dict | None) -> list[QualityFinding]:
     for issue in validation.get("issues", []):
         severity = "critical" if issue.get("severity") == "critical" else "warning"
         category = "metrics" if issue.get("code") == "numbers_without_metrics" else "understanding"
+        description = str(issue.get("message", ""))
+        impact = "cap_to_internal_only" if severity == "critical" else "cap_to_directional"
+        if severity != "critical" and issue.get("code") == "unsupported_phi" and "explicitly negated" in description.lower():
+            impact = "none"
         findings.append(finding(
             code=f"{category}.{issue.get('code')}",
             severity=severity,
             category=category,
             title=str(issue.get("code", "Understanding issue")).replace("_", " ").title(),
-            description=str(issue.get("message", "")),
+            description=description,
             evidence=["raw use case", "deep_use_case_understanding"],
             auto_repairable=False,
-            customer_readiness_impact="cap_to_internal_only" if severity == "critical" else "cap_to_directional",
+            customer_readiness_impact=impact,
         ))
     return findings
 
@@ -319,6 +323,8 @@ def _diagram_findings(diagrams: list | None) -> list[QualityFinding]:
             if not qa.get("passed", False):
                 if _qa_failure_is_view_coverage_only(qa, broader_rendered):
                     findings.append(finding(code="diagram.qa_view_coverage_only", severity="info", category="diagram", title="Diagram QA covered by broader view", description=f"Requested view {qa.get('view_id')} was represented through a broader supported diagram.", evidence=[str(qa.get("diagnostics") or [])], affected_sections=[str(gallery.get("mode"))], auto_repairable=False, customer_readiness_impact="none"))
+                elif _qa_failure_is_layout_or_catalog_only(qa):
+                    findings.append(finding(code="diagram.qa_audit_only", severity="info", category="diagram", title="Diagram QA advisory recorded", description=f"Diagram QA for {qa.get('view_id')} recorded layout/catalog advisory diagnostics; rendered artifacts remain usable.", evidence=[str(qa.get("diagnostics") or [])], affected_sections=[str(gallery.get("mode"))], auto_repairable=False, customer_readiness_impact="none"))
                 elif _qa_failure_is_non_blocking(qa):
                     findings.append(finding(code="diagram.qa_warning_only", severity="warning", category="diagram", title="Diagram QA recorded non-blocking warnings", description=f"Diagram QA for {qa.get('view_id')} reported warning/info diagnostics, but no render-blocking failure.", evidence=[str(qa.get("diagnostics") or [])], affected_sections=[str(gallery.get("mode"))], auto_repairable=False, customer_readiness_impact="cap_to_workshop"))
                 else:
@@ -348,6 +354,21 @@ def _qa_failure_is_view_coverage_only(qa: dict, broader_rendered: set[str]) -> b
     view_gap_terms = ("missing requested", "requested view", "not rendered", "did not emit", "semantic view", "broader supported")
     render_failure_terms = ("blank", "empty svg", "compile", "syntax", "renderer", "png", "svg failed")
     return any(term in diagnostics for term in view_gap_terms) and not any(term in diagnostics for term in render_failure_terms)
+
+
+def _qa_failure_is_layout_or_catalog_only(qa: dict) -> bool:
+    diagnostics = qa.get("diagnostics") or []
+    if not diagnostics:
+        return False
+    advisory_codes = {"too_many_edge_crossings", "aws_service_catalog_fallback"}
+    for item in diagnostics:
+        code = str(item.get("code") if isinstance(item, dict) else "").lower()
+        severity = str(item.get("severity") if isinstance(item, dict) else "").lower()
+        if code in advisory_codes:
+            continue
+        if severity != "info":
+            return False
+    return True
 
 
 def _qa_failure_is_non_blocking(qa: dict) -> bool:
