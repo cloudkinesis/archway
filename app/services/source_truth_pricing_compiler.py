@@ -452,6 +452,7 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
     media_per_base_item = 0.0
     base_items_per_asset_month = 0.0
     media_period_months = 1.0
+    direct_storage_gb_per_month_by_class: dict[str, float] = {}
     retention_months_by_class: dict[str, float] = {}
     text_items_monthly = 0.0
     direct_monthly_events = 0.0
@@ -494,6 +495,12 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
         if _looks_like_media_per_asset(name, unit, source):
             media_per_asset = max(media_per_asset, value)
             media_period_months = max(media_period_months, _period_months(text))
+        storage_class = _storage_class(text)
+        if storage_class:
+            direct_storage_gb_per_month_by_class[storage_class] = max(
+                direct_storage_gb_per_month_by_class.get(storage_class, 0.0),
+                _storage_gb_per_month(value, text),
+            )
         retention_class = _retention_class(text)
         if retention_class:
             retention_months_by_class[retention_class] = max(
@@ -566,6 +573,9 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
         storage_by_class["media"] = monthly_media_items * media_payload_mb / 1024 * max(1, media_retention)
     if monthly_documents or monthly_notes:
         storage_by_class["evidence"] = (monthly_documents + monthly_notes) * 0.05 / 1024 * max(1, evidence_retention)
+    for storage_class, gb_per_month in direct_storage_gb_per_month_by_class.items():
+        retention = retention_months_by_class.get(storage_class, retention_default)
+        storage_by_class[storage_class] = max(storage_by_class.get(storage_class, 0.0), gb_per_month * max(1, retention))
     storage_gb_month = sum(storage_by_class.values())
     plausibility_findings = _quantity_plausibility_findings(
         asset_count=asset_count,
@@ -704,6 +714,37 @@ def _looks_like_base_item_rate_per_asset(name: str, unit: str, source: str) -> b
 def _looks_like_text_items_per_month(name: str, unit: str, source: str) -> bool:
     text = f"{name} {unit} {source}".lower()
     return any(term in text for term in ("note", "notes", "summary", "summaries")) and any(term in text for term in ("per month", "_per_month", "monthly"))
+
+
+def _storage_class(text: str) -> str | None:
+    if not _looks_like_direct_storage_volume(text):
+        return None
+    if any(term in text for term in ("image", "imagery", "photo", "video", "scan", "clip", "media", "thermal")):
+        return "media"
+    if any(term in text for term in ("evidence", "summary", "summaries", "note", "document", "pdf", "record")):
+        return "evidence"
+    if any(term in text for term in ("raw", "sensor", "telemetry", "event", "reading")):
+        return "telemetry"
+    return "all"
+
+
+def _looks_like_direct_storage_volume(text: str) -> bool:
+    if not re.search(r"\b[gt]b\b|_[gt]b(?:_|$)|\b(?:giga|tera)bytes?\b", text):
+        return False
+    if any(term in text for term in ("per image", "per photo", "per video", "per scan", "each image", "each photo", "each video", "payload", "bitrate")):
+        return False
+    return any(term in text for term in ("storage", "stored", "retain", "retention", "archive", "data", "media", "image", "imagery", "video", "evidence", "raw", "tb_", "gb_"))
+
+
+def _storage_gb_per_month(value: float, text: str) -> float:
+    lower = text.lower()
+    gb = value * 1024 if re.search(r"\btb\b|_tb(?:_|$)|\bterabytes?\b", lower) else value
+    period = _period_months(lower)
+    if period < 1:
+        return gb * 30
+    if period > 1:
+        return gb / period
+    return gb
 
 
 def _period_months(text: str) -> float:

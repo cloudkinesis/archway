@@ -59,9 +59,10 @@ def test_pricing_authority_resolver_binds_single_structured_mcp_rate(monkeypatch
     monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "true")
     monkeypatch.setenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", "fake-mcp")
     get_settings.cache_clear()
+    monkeypatch.setattr("app.services.pricing_authority_resolver._resolved_mcp_command", lambda command: "fake-mcp")
     monkeypatch.setattr(
         "app.services.pricing_authority_resolver._call_aws_labs_pricing_mcp",
-        lambda dimension, region_code: {"content": [{"type": "text", "text": __import__("json").dumps(_price_list())}]},
+        lambda dimension, region_code, **kwargs: {"content": [{"type": "text", "text": __import__("json").dumps(_price_list())}]},
     )
     monkeypatch.setattr(
         "app.services.pricing_authority_resolver._get_products",
@@ -81,9 +82,10 @@ def test_pricing_authority_resolver_rejects_unstructured_mcp_text_and_falls_back
     monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "true")
     monkeypatch.setenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", "fake-mcp")
     get_settings.cache_clear()
+    monkeypatch.setattr("app.services.pricing_authority_resolver._resolved_mcp_command", lambda command: "fake-mcp")
     monkeypatch.setattr(
         "app.services.pricing_authority_resolver._call_aws_labs_pricing_mcp",
-        lambda dimension, region_code: {"content": [{"type": "text", "text": "Storage is usually charged per GB-month."}]},
+        lambda dimension, region_code, **kwargs: {"content": [{"type": "text", "text": "Storage is usually charged per GB-month."}]},
     )
     monkeypatch.setattr(
         "app.services.pricing_authority_resolver._get_products",
@@ -96,6 +98,19 @@ def test_pricing_authority_resolver_rejects_unstructured_mcp_text_and_falls_back
     assert binding.source == "price_list_query_api"
     assert binding.sku == "SKU2"
     assert any("text summaries are not rate authority" in note for note in binding.notes)
+
+
+def test_pricing_authority_resolver_preflights_missing_mcp_command_and_falls_back(monkeypatch):
+    monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "true")
+    monkeypatch.setenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", "/missing/bin/uvx")
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.services.pricing_authority_resolver._get_products", lambda dimension, region_code: _price_list())
+
+    binding = PricingAuthorityResolver().resolve(_dimension(), region_code="us-east-1")
+
+    assert binding.binding_status == "bound"
+    assert binding.source == "price_list_query_api"
+    assert any("configured but not executable" in note for note in binding.notes)
 
 
 def test_pricing_authority_resolver_does_not_choose_ambiguous_rates(monkeypatch):

@@ -1,13 +1,14 @@
 import pytest
 
 from app.core.config import get_settings
-from app.domain.source_of_truth import AwsRateBinding
+from app.domain.source_of_truth import AwsRateBinding, CanonicalFact, CanonicalFactsLedger
 from app.models.domain import AWSServiceSelection, PricingAnalysis
 from app.services.architecture import _architecture_summary
 from app.services.deep_dossier import _cost_range, _dossier_readiness
 from app.models.domain import DossierConsistencyCheck, DossierReadinessStatus
 from app.services.pricing import PricingEngine
 from app.services.pricing_sanity_reviewer import PricingSanityFinding, _drop_stale_confirmed_unknown_findings
+from app.services.source_truth_pricing_compiler import _generic_quantity_context, _generic_usage_dimension
 from app.services.synthesis import SynthesisEngine
 from tests.golden_scenarios.scenarios import GOLDEN_SCENARIOS
 
@@ -198,6 +199,77 @@ def test_pass1b_dossier_cost_range_suppresses_unsafe_headline():
 
     assert "not headline-safe" in text
     assert "$1-$3" not in text
+
+
+def test_generic_quantity_graph_uses_direct_tb_per_month_storage_without_domain_terms():
+    facts = CanonicalFactsLedger(facts=[
+        CanonicalFact(
+            name="explicit_quantity_tb_artifact_data_per_month",
+            value=2.5,
+            unit="tb_artifact_data_per_month",
+            source="user_input",
+            source_text="2.5 TB artifact data per month",
+            confidence="high",
+            used_by=["pricing"],
+            validation_status="confirmed",
+        ),
+        CanonicalFact(
+            name="retention_years",
+            value=4,
+            unit="years",
+            source="user_input",
+            source_text="4-year retention",
+            confidence="high",
+            used_by=["pricing"],
+            validation_status="confirmed",
+        ),
+    ])
+
+    context = _generic_quantity_context(facts)
+
+    assert context["storage_gb_month_by_class"]["all"] == 2.5 * 1024 * 48
+    assert context["storage_gb_month"] == 2.5 * 1024 * 48
+
+
+def test_generic_s3_dimension_prefers_storage_gb_month_over_record_count_for_direct_storage():
+    facts = CanonicalFactsLedger(facts=[
+        CanonicalFact(
+            name="explicit_quantity_records_per_month",
+            value=10_000,
+            unit="records_per_month",
+            source="user_input",
+            source_text="10,000 records per month",
+            confidence="high",
+            used_by=["pricing"],
+            validation_status="confirmed",
+        ),
+        CanonicalFact(
+            name="explicit_quantity_tb_evidence_per_month",
+            value=1,
+            unit="tb_evidence_per_month",
+            source="user_input",
+            source_text="1 TB evidence per month",
+            confidence="high",
+            used_by=["pricing"],
+            validation_status="confirmed",
+        ),
+        CanonicalFact(
+            name="retention_years",
+            value=2,
+            unit="years",
+            source="user_input",
+            source_text="2-year retention",
+            confidence="high",
+            used_by=["pricing"],
+            validation_status="confirmed",
+        ),
+    ])
+
+    dimension = _generic_usage_dimension("Amazon S3", None, "us-east-1", facts=facts)
+
+    assert dimension.unit == "GB-month"
+    assert dimension.usage_name == "derived object/evidence retention"
+    assert dimension.quantity == 24 * 1024
 
 
 def test_pass1c_drops_stale_confirmed_fact_unknown_finding():

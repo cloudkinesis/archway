@@ -4,6 +4,7 @@ import json
 import os
 import re
 import select
+import shutil
 import subprocess
 from decimal import Decimal
 from typing import Any
@@ -91,8 +92,15 @@ def _resolve_via_pricing_mcp(dimension: ServiceUsageDimension, region_code: str)
             dimensions=[],
             failures=["AWS Pricing MCP stdio command is not configured."],
         )
+    command = _resolved_mcp_command(settings.aws_pricing_mcp_command)
+    if not command:
+        return PriceListParseResult(
+            service_code=dimension.aws_service_code,
+            dimensions=[],
+            failures=[f"AWS Pricing MCP command is configured but not executable: {settings.aws_pricing_mcp_command}."],
+        )
     try:
-        result = _call_aws_labs_pricing_mcp(dimension, region_code)
+        result = _call_aws_labs_pricing_mcp(dimension, region_code, command=command)
         payload = _structured_payload_from_mcp_result(result)
         if not payload:
             return PriceListParseResult(
@@ -132,7 +140,17 @@ def _resolve_via_price_list_query_api(dimension: ServiceUsageDimension, region_c
         )
 
 
-def _call_aws_labs_pricing_mcp(dimension: ServiceUsageDimension, region_code: str) -> dict[str, Any]:
+def _resolved_mcp_command(command: str | None) -> str | None:
+    if not command:
+        return None
+    if os.path.sep in command:
+        if os.path.isfile(command) and os.access(command, os.X_OK):
+            return command
+        return shutil.which(os.path.basename(command))
+    return shutil.which(command)
+
+
+def _call_aws_labs_pricing_mcp(dimension: ServiceUsageDimension, region_code: str, *, command: str | None = None) -> dict[str, Any]:
     settings = get_settings()
     env = {
         **os.environ,
@@ -141,7 +159,7 @@ def _call_aws_labs_pricing_mcp(dimension: ServiceUsageDimension, region_code: st
         "AWS_REGION": settings.aws_pricing_mcp_aws_region,
     }
     process = subprocess.Popen(
-        [settings.aws_pricing_mcp_command or "", *settings.aws_pricing_mcp_args],
+        [command or settings.aws_pricing_mcp_command or "", *settings.aws_pricing_mcp_args],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
