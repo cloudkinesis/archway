@@ -30,6 +30,14 @@ def _tavily_budget_default() -> int:
     return 0
 
 
+def _bedrock_main_model_id() -> str | None:
+    return os.getenv("ARCHWAY_BEDROCK_MAIN_MODEL_ID") or os.getenv("ARCHWAY_BEDROCK_MODEL_ID") or None
+
+
+def _bedrock_judge_model_id() -> str | None:
+    return os.getenv("ARCHWAY_BEDROCK_JUDGE_MODEL_ID") or os.getenv("ARCHWAY_LLM_JUDGE_MODEL_ID") or None
+
+
 class Settings(BaseModel):
     env: str = Field(default_factory=lambda: os.getenv("ARCHWAY_ENV", "development"))
     cors_origins: list[str] = Field(
@@ -124,7 +132,13 @@ class Settings(BaseModel):
     )
     llm_provider: str = Field(default_factory=lambda: os.getenv("ARCHWAY_LLM_PROVIDER", "deterministic"))
     bedrock_region: str = Field(default_factory=lambda: os.getenv("ARCHWAY_BEDROCK_REGION", "us-east-1"))
-    bedrock_model_id: str | None = Field(default_factory=lambda: os.getenv("ARCHWAY_BEDROCK_MODEL_ID") or None)
+    # Backward-compatible alias for the primary Bedrock model. New deployments can
+    # prefer ARCHWAY_BEDROCK_MAIN_MODEL_ID; existing scripts using
+    # ARCHWAY_BEDROCK_MODEL_ID continue to work unchanged.
+    bedrock_model_id: str | None = Field(default_factory=_bedrock_main_model_id)
+    bedrock_main_model_id: str | None = Field(default_factory=_bedrock_main_model_id)
+    bedrock_judge_model_id: str | None = Field(default_factory=_bedrock_judge_model_id)
+    enable_llm_judge: bool = Field(default_factory=lambda: os.getenv("ARCHWAY_ENABLE_LLM_JUDGE", "false") == "true")
     bedrock_use_inference_profile: bool = Field(default_factory=lambda: os.getenv("ARCHWAY_BEDROCK_USE_INFERENCE_PROFILE", "false") == "true")
     bedrock_max_tokens: int = Field(default_factory=lambda: int(os.getenv("ARCHWAY_BEDROCK_MAX_TOKENS", "8192")))
     bedrock_timeout_seconds: int = Field(default_factory=lambda: int(os.getenv("ARCHWAY_BEDROCK_TIMEOUT_SECONDS", "120")))
