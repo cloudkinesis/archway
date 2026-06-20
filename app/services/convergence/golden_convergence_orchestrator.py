@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -14,6 +15,7 @@ from app.services.architecture_revisions import ArchitectureRevisionService
 from app.services.artifacts import ArtifactStore
 from app.services.convergence.architecture_repairer import ArchitectureRepairer
 from app.services.convergence.repair_planner import RepairPlan, RepairPlanner
+from app.services.diagram_qa_policy import diagram_qa_is_layout_or_catalog_only, diagram_qa_is_render_blocking
 from app.services.pricing_sanity_reviewer import PricingSanityReview
 from app.services.understanding.deep_use_case_understanding import DeepUseCaseUnderstanding, deterministic_understanding
 
@@ -168,6 +170,7 @@ class GoldenConvergenceOrchestrator:
         pricing = (report.get("pricing_analysis") or context.get("pricing"))
         understanding = _understanding_from_report(report, use_case)
         output: list[QualityFinding] = []
+        output.extend(_architecture_domain_contamination_findings(use_case, report, specs))
         for issue in self.revisions.validate(specs):
             output.append(finding(
                 code=f"architecture.{issue.code}",
@@ -384,46 +387,11 @@ def _qa_failure_is_view_coverage_only(qa: dict, broader_rendered: set[str]) -> b
 
 
 def _qa_failure_is_layout_or_catalog_only(qa: dict) -> bool:
-    diagnostics = qa.get("diagnostics") or []
-    if not diagnostics:
-        return False
-    advisory_codes = {"too_many_edge_crossings", "aws_service_catalog_fallback"}
-    for item in diagnostics:
-        code = str(item.get("code") if isinstance(item, dict) else "").lower()
-        severity = str(item.get("severity") if isinstance(item, dict) else "").lower()
-        if code in advisory_codes:
-            continue
-        if severity != "info":
-            return False
-    return True
+    return diagram_qa_is_layout_or_catalog_only(qa)
 
 
 def _qa_failure_is_non_blocking(qa: dict) -> bool:
-    diagnostics = qa.get("diagnostics") or []
-    if not diagnostics:
-        return False
-    text = " ".join(str(item) for item in diagnostics).lower()
-    render_failure_terms = (
-        "blank",
-        "empty svg",
-        "compile",
-        "syntax",
-        "renderer failed",
-        "png failed",
-        "svg failed",
-        "missing artifact",
-        "file not found",
-    )
-    if any(term in text for term in render_failure_terms):
-        return False
-    for item in diagnostics:
-        code = str(item.get("code") if isinstance(item, dict) else "").lower()
-        if code in {"too_many_edge_crossings", "aws_service_catalog_fallback"}:
-            continue
-        severity = str(item.get("severity") if isinstance(item, dict) else "").lower()
-        if severity in {"critical", "error", "fatal"}:
-            return False
-    return True
+    return not diagram_qa_is_render_blocking(qa)
 
 
 def _dossier_findings(consistency: dict | None) -> list[QualityFinding]:
@@ -454,6 +422,138 @@ def _parse_specs(payload: list | None) -> list[ArchitectureSpec]:
         except Exception:
             continue
     return specs
+
+
+def _architecture_domain_contamination_findings(use_case: str, report: dict | None, specs: list[ArchitectureSpec]) -> list[QualityFinding]:
+    """Detect stale domain topology that is unsupported by the current session.
+
+    This is a provenance guard, not a scenario rule. A domain-specific topology
+    may appear only when the current user facts or accepted profile support that
+    domain. If a later generator pulls in a service inventory from another
+    vertical, the package must fail closed instead of polishing the wrong story.
+    """
+    context_text = _current_session_context_text(use_case, report)
+    spec_text_by_mode = {spec.mode: _architecture_spec_text(spec) for spec in specs}
+    findings: list[QualityFinding] = []
+    for domain, rule in _DOMAIN_CONTAMINATION_RULES.items():
+        if _contains_any(context_text, rule["support"]):
+            continue
+        leaked: dict[str, list[str]] = {}
+        for mode, text in spec_text_by_mode.items():
+            terms = sorted({term for term in rule["forbidden"] if _contains_phrase(text, term)})
+            if terms:
+                leaked[mode] = terms
+        if not leaked:
+            continue
+        evidence = [
+            f"{mode}: {', '.join(terms[:8])}"
+            for mode, terms in leaked.items()
+        ]
+        findings.append(finding(
+            code=f"architecture.{domain}_domain_contamination",
+            severity="critical",
+            category="architecture",
+            title="Unsupported domain topology detected",
+            description=(
+                "Architecture introduced domain-specific services or prose that "
+                "are not supported by the current session facts."
+            ),
+            evidence=evidence,
+            affected_sections=sorted(leaked.keys()),
+            auto_repairable=False,
+            repair_strategy="Regenerate architecture from the current-session profile and accepted candidate only; do not reuse stale domain pattern services.",
+            customer_readiness_impact="cap_to_internal_only",
+        ))
+    return findings
+
+
+_DOMAIN_CONTAMINATION_RULES = {
+    "healthcare": {
+        "support": (
+            "healthcare", "hospital", "patient", "clinical", "hipaa", "phi",
+            "ehr", "epic", "surgery", "surgical", "operating room",
+            "sterile processing", "anesthesia", "perioperative",
+        ),
+        "forbidden": (
+            "epic", "ehr", "patient", "clinical", "hospital", "surgery",
+            "surgical", "operating room", "or command center",
+            "sterile processing", "instrument tray", "anesthesia",
+            "charge nurse", "phi-safe", "hospital-system",
+        ),
+    },
+    "field_service": {
+        "support": (
+            "field service", "crew dispatch", "dispatch crew", "depot",
+            "warehouse inventory", "workforce management", "truck roll",
+            "pre-position equipment",
+        ),
+        "forbidden": (
+            "field crew", "crew dispatch", "dispatch workflow",
+            "workforce management system", "depot inventory",
+            "pre-position equipment",
+        ),
+    },
+}
+
+
+def _current_session_context_text(use_case: str, report: dict | None) -> str:
+    metadata = (report or {}).get("metadata") or {}
+    profile = metadata.get("use_case_profile") or {}
+    parts: list[str] = [
+        use_case,
+        str((report or {}).get("use_case_interpretation") or ""),
+        " ".join(str(item) for item in profile.get("workload_families") or []),
+        " ".join(str(item) for item in profile.get("excluded_families") or []),
+        " ".join(str(item) for item in profile.get("capabilities") or []),
+        " ".join(str(item) for item in profile.get("entities") or []),
+        " ".join(str(item) for item in profile.get("signals") or []),
+        " ".join(str(item) for item in profile.get("actions") or []),
+    ]
+    snapshot = metadata.get("canonical_fact_snapshot") or {}
+    if isinstance(snapshot, dict):
+        parts.append(str(snapshot))
+    return " ".join(parts).lower()
+
+
+def _architecture_spec_text(spec: ArchitectureSpec) -> str:
+    pieces: list[str] = [
+        spec.title,
+        spec.summary,
+        spec.scaling_strategy,
+        spec.resilience_strategy,
+        spec.cost_optimization_strategy,
+        " ".join(str(item) for item in spec.assumptions),
+        " ".join(str(item) for item in spec.risks),
+    ]
+    for component in spec.components:
+        pieces.extend([
+            component.id,
+            component.name,
+            component.service,
+            component.scope,
+            component.logical_group or "",
+            str(component.metadata or {}),
+        ])
+    for flow in spec.flows:
+        pieces.extend([
+            flow.source,
+            flow.target,
+            flow.label or "",
+            flow.protocol or "",
+            str(flow.metadata or {}),
+        ])
+    for rec in spec.selected_services:
+        pieces.extend([rec.service, rec.purpose, rec.rationale, " ".join(rec.alternatives_considered)])
+    return " ".join(pieces).lower()
+
+
+def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
+    return any(_contains_phrase(text, term) for term in terms)
+
+
+def _contains_phrase(text: str, term: str) -> bool:
+    escaped = re.escape(term.lower()).replace("\\ ", r"\s+")
+    return re.search(rf"(?<![a-z0-9]){escaped}(?![a-z0-9])", text.lower()) is not None
 
 
 def _understanding_from_report(report: dict, use_case: str) -> DeepUseCaseUnderstanding:

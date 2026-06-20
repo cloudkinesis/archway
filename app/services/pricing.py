@@ -1,4 +1,5 @@
 from dataclasses import asdict, dataclass, field
+import re
 from typing import Any
 
 from app.domain.assumption_profiles import INDUSTRIAL_IOT_DEFAULT_ASSUMPTIONS
@@ -1540,6 +1541,12 @@ def _generic_monitored_asset_count(profile: UseCaseProfile) -> int:
         "requests", "events", "messages", "transactions", "inferences",
         "resident", "residents", "user", "users", "people", "customers", "patients", "viewers",
     }
+    actor_terms = {
+        "user", "users", "person", "people", "staff", "operator", "operators",
+        "curator", "curators", "coordinator", "coordinators", "analyst", "analysts",
+        "worker", "workers", "responder", "responders", "viewer", "viewers",
+        "customer", "customers", "patient", "patients", "team", "teams",
+    }
     candidates: list[int] = []
     volume_or_cadence_terms = (
         "event", "events", "read", "reads", "scan", "scans", "cycle", "cycles",
@@ -1560,6 +1567,8 @@ def _generic_monitored_asset_count(profile: UseCaseProfile) -> int:
             continue
         joined = f"{label} {unit} {raw}"
         if any(term in joined for term in volume_or_cadence_terms):
+            continue
+        if any(re.search(rf"\b{re.escape(term)}\b", joined) for term in actor_terms):
             continue
         if any(blocked == unit or unit.startswith(f"{blocked}_") or unit.endswith(f"_{blocked}") for blocked in blocked_units):
             continue

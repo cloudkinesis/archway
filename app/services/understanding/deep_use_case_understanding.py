@@ -83,6 +83,7 @@ class DeepUseCaseUnderstandingService:
         if result.validated and isinstance(result.parsed, DeepUseCaseUnderstanding):
             parsed = result.parsed
             _merge_deterministic_metrics(parsed, deterministic)
+            _merge_deterministic_deployment_posture(parsed, deterministic)
             parsed.enhancement_status = f"{result.provider}_validated"
             return parsed
         deterministic.concerns.extend(result.warnings)
@@ -179,6 +180,18 @@ def _merge_deterministic_metrics(parsed: DeepUseCaseUnderstanding, deterministic
         if metric.name not in existing:
             parsed.extracted_metrics.append(metric)
             existing.add(metric.name)
+
+
+def _merge_deterministic_deployment_posture(parsed: DeepUseCaseUnderstanding, deterministic: DeepUseCaseUnderstanding) -> None:
+    """Preserve deterministic edge/hybrid/sovereign posture over model defaults."""
+    deterministic_posture = deterministic.deployment_posture
+    if not deterministic_posture or deterministic_posture == "public_cloud":
+        return
+    if parsed.deployment_posture in {"", "unknown", "public_cloud", None}:
+        parsed.deployment_posture = deterministic_posture
+        note = f"Deployment posture reconciled to deterministic extraction: {deterministic_posture}."
+        if note not in parsed.concerns:
+            parsed.concerns.append(note)
 
 
 def _action_type(action: str) -> str:

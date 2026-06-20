@@ -36,10 +36,12 @@ class BedrockProvider:
         retry_count = 0
         token_usage = None
         transport_error = False
-        model_id = settings.bedrock_model_id or ""
+        model_id = _model_id_for_task(settings, task)
         try:
             if not model_id:
-                raise RuntimeError("ARCHWAY_BEDROCK_MODEL_ID is not configured.")
+                if task.model_role == "judge":
+                    raise RuntimeError("ARCHWAY_BEDROCK_JUDGE_MODEL_ID is not configured or ARCHWAY_ENABLE_LLM_JUDGE is not true.")
+                raise RuntimeError("ARCHWAY_BEDROCK_MAIN_MODEL_ID/ARCHWAY_BEDROCK_MODEL_ID is not configured.")
             import boto3
             from botocore.config import Config
 
@@ -111,8 +113,8 @@ class BedrockProvider:
 
     async def health_check(self) -> tuple[bool, str, dict[str, Any]]:
         settings = get_settings()
-        if not settings.bedrock_model_id:
-            return False, "Bedrock model/inference profile is not configured.", {"configured": False}
+        if not settings.bedrock_main_model_id:
+            return False, "Bedrock main model/inference profile is not configured.", {"configured": False}
         result = await self.complete(
             LLMTask(task_type=LLMTaskType.metric_sanity_review, session_id="health_probe", name="bedrock_structured_health"),
             [
@@ -127,7 +129,10 @@ class BedrockProvider:
         details = {
             "configured": True,
             "region": settings.bedrock_region,
-            "model_id": settings.bedrock_model_id,
+            "model_id": settings.bedrock_main_model_id,
+            "main_model_id": settings.bedrock_main_model_id,
+            "judge_model_id": settings.bedrock_judge_model_id,
+            "judge_enabled": settings.enable_llm_judge,
             "structured_output": settings.bedrock_enable_structured_output,
             "usage": result.token_usage,
             "warnings": result.warnings,
@@ -146,6 +151,14 @@ class BedrockProvider:
         else:
             status = "failed"
         return False, f"Bedrock structured health check {status}.", {**details, "status": status}
+
+
+def _model_id_for_task(settings, task: LLMTask) -> str:
+    if task.model_role == "judge":
+        if settings.enable_llm_judge and settings.bedrock_judge_model_id:
+            return settings.bedrock_judge_model_id
+        return ""
+    return settings.bedrock_main_model_id or settings.bedrock_model_id or ""
 
 
 def _converse_messages(messages: list[LLMMessage], response_schema: type[BaseModel] | None) -> tuple[list[dict], list[dict]]:

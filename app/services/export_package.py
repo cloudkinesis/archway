@@ -17,6 +17,7 @@ from app.services.build_status import BuildStatusService
 from app.services.convergence.golden_convergence_orchestrator import GoldenConvergenceOrchestrator, quality_summary_markdown
 from app.services.client_pack import audit_pack_files, clean_presentation_text, client_pack_files, front_door_readme
 from app.services.deep_dossier import DeepDossierService
+from app.services.diagram_qa_policy import diagram_qa_is_render_blocking
 from app.services.display_labels import display_label, format_usd, status_display
 from app.models.domain import ArchitectureSpec, ArchitectureValidationIssue
 from app.services.diagnostic_diagrams import diagnostic_diagram_gallery
@@ -37,36 +38,43 @@ from app.services.agentic.repair_planner import (
 from app.services.agentic.evaluation import evaluation_gate_markdown, evaluation_gate_payload
 from app.services.agentic.contracts import ArtifactCompletenessState
 from app.services.agentic.research_agent import (
+    DeterministicFixtureResearchProvider,
     build_research_agent_trace,
     build_research_input_context,
     research_summary_markdown,
 )
 from app.services.agentic.use_case_analyst import (
+    DeterministicFixtureUseCaseAnalystProvider,
     build_use_case_analyst_context,
     build_use_case_analyst_trace,
     use_case_analyst_summary_markdown,
 )
 from app.services.agentic.pricing_dimension_agent import (
+    DeterministicFixturePricingDimensionProvider,
     build_pricing_dimension_context,
     build_pricing_dimension_trace,
     pricing_dimension_summary_markdown,
 )
 from app.services.agentic.narrative_agent import (
+    DeterministicFixtureNarrativeProvider,
     build_narrative_context,
     build_narrative_trace,
     narrative_summary_markdown,
 )
 from app.services.agentic.reviewer_agent import (
+    DeterministicFixtureReviewerProvider,
     build_reviewer_context,
     build_reviewer_trace,
     reviewer_summary_markdown as agentic_reviewer_summary_markdown,
 )
 from app.services.agentic.diagram_planning_agent import (
+    DeterministicFixtureDiagramPlanningProvider,
     build_diagram_planning_context,
     build_diagram_planning_trace,
     diagram_planning_summary_markdown,
 )
 from app.services.agentic.architecture_candidate_agent import (
+    DeterministicFixtureArchitectureCandidateProvider,
     architecture_candidate_summary_markdown,
     build_architecture_candidate_context,
     build_architecture_candidate_trace,
@@ -526,6 +534,7 @@ class ExportPackageService:
                 diagrams=diagrams,
                 reviewer_findings=reviewer_report.findings,
             ),
+            provider=DeterministicFixtureUseCaseAnalystProvider(),
             live_run_context=live_run_context,
             session_id=session.id,
         )
@@ -546,6 +555,7 @@ class ExportPackageService:
                 architectures=architectures,
                 use_case_analyst_trace=use_case_analyst_trace,
             ),
+            provider=DeterministicFixturePricingDimensionProvider(),
             live_run_context=live_run_context,
             session_id=session.id,
             sensitivity_text=raw_use_case,
@@ -570,6 +580,7 @@ class ExportPackageService:
                 diagrams=diagrams,
                 reviewer_findings=reviewer_report.findings,
             ),
+            provider=DeterministicFixtureResearchProvider(),
             live_run_context=live_run_context,
             session_id=session.id,
             sensitivity_text=raw_use_case,
@@ -592,6 +603,7 @@ class ExportPackageService:
                 architectures=architectures,
                 reviewer_findings=reviewer_report.findings,
             ),
+            provider=DeterministicFixtureNarrativeProvider(),
             live_run_context=live_run_context,
             session_id=session.id,
             sensitivity_text=raw_use_case,
@@ -613,6 +625,7 @@ class ExportPackageService:
                 pricing=pricing,
                 reviewer_report=reviewer_report,
             ),
+            provider=DeterministicFixtureReviewerProvider(),
             live_run_context=live_run_context,
             session_id=session.id,
             sensitivity_text=raw_use_case,
@@ -634,6 +647,7 @@ class ExportPackageService:
                 diagrams=diagrams,
                 diagram_fidelity=_diagram_fidelity(architectures, diagrams),
             ),
+            provider=DeterministicFixtureDiagramPlanningProvider(),
             live_run_context=live_run_context,
             session_id=session.id,
             sensitivity_text=raw_use_case,
@@ -655,6 +669,7 @@ class ExportPackageService:
                 pricing=pricing,
                 report=report,
             ),
+            provider=DeterministicFixtureArchitectureCandidateProvider(),
             live_run_context=live_run_context,
             session_id=session.id,
             sensitivity_text=raw_use_case,
@@ -1556,33 +1571,7 @@ def _diagram_qa_status(diagrams) -> dict:
 
 
 def _diagram_qa_render_blocking(qa: dict) -> bool:
-    if qa.get("passed", False):
-        return False
-    diagnostics = qa.get("diagnostics") or []
-    if not diagnostics:
-        return True
-    text = " ".join(str(item) for item in diagnostics).lower()
-    render_failure_terms = (
-        "blank",
-        "empty svg",
-        "compile",
-        "syntax",
-        "renderer failed",
-        "png failed",
-        "svg failed",
-        "missing artifact",
-        "file not found",
-    )
-    if any(term in text for term in render_failure_terms):
-        return True
-    for item in diagnostics:
-        code = str(item.get("code") if isinstance(item, dict) else "").lower()
-        if code in {"too_many_edge_crossings", "aws_service_catalog_fallback"}:
-            continue
-        severity = str(item.get("severity") if isinstance(item, dict) else "").lower()
-        if severity in {"critical", "error", "fatal"}:
-            return True
-    return False
+    return diagram_qa_is_render_blocking(qa)
 
 
 def _pricing_headline_status(pricing) -> dict:

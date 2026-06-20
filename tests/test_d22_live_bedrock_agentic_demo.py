@@ -306,7 +306,7 @@ def test_live_call_bridge_works_inside_running_event_loop(monkeypatch, tmp_path)
     assert isinstance(result.parsed, UseCaseAnalystProposal)
 
 
-def test_export_completes_with_setup_required_live_records(monkeypatch, tmp_path):
+def test_export_completes_without_starting_setup_required_live_records(monkeypatch, tmp_path):
     monkeypatch.setenv("ARCHWAY_DATA_DIR", str(tmp_path / ".archway"))
     monkeypatch.setenv("ARCHWAY_AGENTIC_MODE", "live_demo")
     monkeypatch.setenv("ARCHWAY_LLM_PROVIDER", "deterministic")
@@ -339,13 +339,12 @@ def test_export_completes_with_setup_required_live_records(monkeypatch, tmp_path
     assert "manifest.json" in names
     assert "raw/live_agent_calls.json" in names
     assert "audit_pack/live-agent-calls.md" in names
-    assert len(live_calls) == len(_D22_TASKS)
-    assert {item["status"] for item in live_calls} == {"setup_required"}
+    assert live_calls == []
 
 
 def test_live_status_endpoint_summarizes_latest_export(monkeypatch, tmp_path):
     _configure_live_demo(monkeypatch, tmp_path)
-    monkeypatch.setattr("app.services.agentic.live_bedrock_harness.ModelRouter.complete", _fake_complete)
+    monkeypatch.setattr("app.services.agentic.live_bedrock_harness.ModelRouter.complete", _unexpected_complete)
     store = SessionStore()
     brief = SynthesisEngine().create_initial_brief("Build an AWS support assistant for field teams.")
     session = store.create("Build an AWS support assistant for field teams.", brief)
@@ -356,15 +355,15 @@ def test_live_status_endpoint_summarizes_latest_export(monkeypatch, tmp_path):
     status = _latest_live_agent_status(session.id)
 
     assert status["has_export_trace"] is True
-    assert status["bedrock_accepted"] == len(_D22_TASKS)
+    assert status["bedrock_accepted"] == 0
     assert status["setup_required"] == 0
     assert status["failed"] == 0
-    assert "live Bedrock agent call" in status["message"]
+    assert "audit-only or skipped" in status["message"]
 
 
-def test_export_records_live_bedrock_calls_raw_and_audit_only(monkeypatch, tmp_path):
+def test_export_writes_live_call_file_raw_and_audit_only_without_fresh_bedrock(monkeypatch, tmp_path):
     _configure_live_demo(monkeypatch, tmp_path)
-    monkeypatch.setattr("app.services.agentic.live_bedrock_harness.ModelRouter.complete", _fake_complete)
+    monkeypatch.setattr("app.services.agentic.live_bedrock_harness.ModelRouter.complete", _unexpected_complete)
     store = SessionStore()
     brief = SynthesisEngine().create_initial_brief("Build a claims intake assistant for a healthcare operations team.")
     session = store.create("Build a claims intake assistant for a healthcare operations team.", brief)
@@ -381,13 +380,10 @@ def test_export_records_live_bedrock_calls_raw_and_audit_only(monkeypatch, tmp_p
     assert "raw/live_agent_calls.json" in names
     assert "audit_pack/live-agent-calls.md" in names
     assert "client_pack/live-agent-calls.md" not in names
-    assert len(live_calls) == len(_D22_TASKS)
-    assert {item["status"] for item in live_calls} == {"accepted"}
-    assert {item["provider"] for item in live_calls} == {"bedrock"}
-    assert all(item["token_usage_unavailable"] is True for item in live_calls)
+    assert live_calls == []
 
     manifest = json.loads((export_dir / "dossier_manifest.json").read_text(encoding="utf-8"))
     flags = manifest["identity"]["feature_flags"]
     assert flags["agentic_mode"] == "live_demo"
-    assert flags["live_bedrock_call_count"] == len(_D22_TASKS)
+    assert flags["live_bedrock_call_count"] == 0
     assert "raw/live_agent_calls.json" in {item["path"] for item in manifest["artifact_inventory"]}

@@ -60,6 +60,7 @@ export function ArchitectureViewer({
 }: ArchitectureViewerProps) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, ArchitectureDraft>>({});
+  const [hydratedLatestJobId, setHydratedLatestJobId] = useState<string | null>(null);
 
   useEffect(() => {
     const latest = latestJobs.architecture;
@@ -81,6 +82,33 @@ export function ArchitectureViewer({
     mutationFn: () => api.generateArchitecture(session.id),
     onSuccess: (result) => setJobId(result.job.id)
   });
+
+  useEffect(() => {
+    const latest = latestJobs.architecture;
+    if (architectures.length > 0 || latest?.status !== "succeeded" || latest.id === hydratedLatestJobId) {
+      return;
+    }
+    setHydratedLatestJobId(latest.id);
+    api.hydrateSession(session.id)
+      .then((result) => {
+        setSession(result.session);
+        setArchitectures(result.architecture?.architectures ?? []);
+        setArchitectureValidationIssues(result.architecture?.validation_issues ?? []);
+        setArchitectureRevisions(result.architecture?.revisions ?? []);
+        setLatestJobs(result.jobs ?? {});
+      })
+      .catch(() => setHydratedLatestJobId(null));
+  }, [
+    architectures.length,
+    hydratedLatestJobId,
+    latestJobs.architecture,
+    session.id,
+    setArchitectureRevisions,
+    setArchitectureValidationIssues,
+    setArchitectures,
+    setLatestJobs,
+    setSession
+  ]);
 
   const save = useMutation({
     mutationFn: () => api.updateArchitecture(session.id, {

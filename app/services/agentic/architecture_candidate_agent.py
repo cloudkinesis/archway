@@ -304,13 +304,14 @@ class LiveArchitectureCandidateProvider:
 
     def propose(self, context: dict[str, Any]) -> ArchitectureCandidateProposal:
         input_hash = stable_json_hash(context)
+        compact_context = _compact_architecture_candidate_context(context)
         messages = [
             LLMMessage(role="system", content=(
                 "You are Archway's live architecture candidate generator. Return JSON only. "
-                "Propose candidate components, flows, trust boundaries, controls, assumptions, risks, and open questions. "
-                "Keep human_review_required=true and procurement_cap=true."
+                "Propose only the highest-signal candidate components, flows, trust boundaries, controls, assumptions, risks, "
+                "and open questions. Keep the answer compact. Keep human_review_required=true and procurement_cap=true."
             )),
-            LLMMessage(role="user", content=json.dumps(context, default=str)[:22000]),
+            LLMMessage(role="user", content=json.dumps(compact_context, default=str)[:7000]),
         ]
         result = live_call(
             LLMTaskType.live_architecture_candidate,
@@ -321,6 +322,25 @@ class LiveArchitectureCandidateProvider:
             run_context=self.run_context,
             sensitivity_text=self.sensitivity_text,
         )
+        if _should_retry_architecture_call(result.audit):
+            retry_context = _minimal_architecture_candidate_context(compact_context)
+            retry_messages = [
+                LLMMessage(role="system", content=(
+                    "Return compact JSON only for Archway's architecture candidate schema. "
+                    "Use no more than four components, four flows, and six controls. "
+                    "Keep human_review_required=true and procurement_cap=true."
+                )),
+                LLMMessage(role="user", content=json.dumps(retry_context, default=str)[:3500]),
+            ]
+            result = live_call(
+                LLMTaskType.live_architecture_candidate,
+                retry_messages,
+                ArchitectureCandidateProposal,
+                session_id=self.session_id,
+                lane="architecture",
+                run_context=self.run_context,
+                sensitivity_text=self.sensitivity_text,
+            )
         self.last_call = result.audit
         if isinstance(result.parsed, ArchitectureCandidateProposal):
             proposal = result.parsed
@@ -413,6 +433,61 @@ def build_architecture_candidate_context(
         "readiness_status": readiness.get("status") or readiness.get("tier"),
         "architecture_critique_ref": critique_payloads,
     }
+
+
+def _compact_architecture_candidate_context(context: dict[str, Any]) -> dict[str, Any]:
+    """Keep live architecture prompts small enough for reliable demo calls.
+
+    The architecture candidate lane is audit-only; it does not need the entire
+    deterministic architecture payload. It needs stable refs, services, data
+    classes, critique highlights, pricing posture, and readiness. This preserves
+    authority while avoiding large prompt bodies that trigger model timeouts.
+    """
+    return {
+        "deterministic_component_ids": list(context.get("deterministic_component_ids") or [])[:18],
+        "deterministic_services": list(context.get("deterministic_services") or [])[:18],
+        "deterministic_flow_ids": list(context.get("deterministic_flow_ids") or [])[:18],
+        "known_data_classes": list(context.get("known_data_classes") or [])[:12],
+        "known_trust_boundaries": list(context.get("known_trust_boundaries") or [])[:12],
+        "pricing_services": list(context.get("pricing_services") or [])[:18],
+        "procurement_ready": context.get("procurement_ready") is True,
+        "readiness_status": context.get("readiness_status"),
+        "architecture_critique_ref": _compact_critique_ref(context.get("architecture_critique_ref") or []),
+    }
+
+
+def _minimal_architecture_candidate_context(context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "deterministic_services": list(context.get("deterministic_services") or [])[:10],
+        "known_data_classes": list(context.get("known_data_classes") or [])[:6],
+        "known_trust_boundaries": list(context.get("known_trust_boundaries") or [])[:6],
+        "procurement_ready": context.get("procurement_ready") is True,
+        "readiness_status": context.get("readiness_status"),
+        "instruction": "Suggest only audit-only gaps, controls, and review questions. Do not mutate deterministic architecture.",
+    }
+
+
+def _compact_critique_ref(items: list[Any]) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for item in items[:4]:
+        if not isinstance(item, dict):
+            continue
+        critique = item.get("critique") if isinstance(item.get("critique"), dict) else {}
+        findings = critique.get("findings") if isinstance(critique.get("findings"), list) else []
+        output.append({
+            "mode": item.get("mode"),
+            "architecture_id": item.get("architecture_id"),
+            "status": critique.get("status") or critique.get("structural_status"),
+            "findings": findings[:4],
+        })
+    return output
+
+
+def _should_retry_architecture_call(audit: LiveCallAudit | None) -> bool:
+    if not audit or audit.status in {"accepted", "skipped", "setup_required"}:
+        return False
+    error = f"{audit.error_type or ''} {audit.error_message or ''}".lower()
+    return audit.status in {"failed", "timeout"} and ("timeout" in error or "readtimeout" in error or "connection" in error)
 
 
 def build_architecture_candidate_trace(

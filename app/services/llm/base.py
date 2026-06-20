@@ -31,12 +31,14 @@ class LLMTaskType(str, Enum):
     live_narrative_synthesis = "live_narrative_synthesis"
     live_reviewer_critique = "live_reviewer_critique"
     open_world_understanding = "open_world_understanding"
+    llm_judge_review = "llm_judge_review"
 
 
 class LLMTask(BaseModel):
     task_type: LLMTaskType
     session_id: str | None = None
     name: str | None = None
+    model_role: Literal["main", "judge"] = "main"
 
 
 class LLMMessage(BaseModel):

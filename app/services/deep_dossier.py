@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from app.services.display_labels import dedupe_canonical, display_label, gate_display
+from app.services.diagram_qa_policy import diagram_qa_is_render_blocking
 from app.models.domain import (
     AssumptionRecord,
     DeepResearchDossier,
@@ -969,28 +970,7 @@ def _diagram_qa_failed(diagrams: list[dict]) -> bool:
 
 
 def _diagram_qa_is_render_blocking(qa: dict) -> bool:
-    diagnostics = qa.get("diagnostics") or []
-    if not diagnostics:
-        return True
-    text = " ".join(str(item) for item in diagnostics).lower()
-    render_failure_terms = (
-        "blank",
-        "empty svg",
-        "compile",
-        "syntax",
-        "renderer failed",
-        "png failed",
-        "svg failed",
-        "missing artifact",
-        "file not found",
-    )
-    if any(term in text for term in render_failure_terms):
-        return True
-    return any(
-        str(item.get("severity") if isinstance(item, dict) else "").lower() in {"critical", "error", "fatal"}
-        and str(item.get("code") if isinstance(item, dict) else "").lower() not in {"too_many_edge_crossings", "aws_service_catalog_fallback"}
-        for item in diagnostics
-    )
+    return diagram_qa_is_render_blocking(qa)
 
 
 def _diagram_requested_views_missing(diagrams: list[dict]) -> bool:

@@ -25,11 +25,19 @@ class UnderstandingValidator:
         issues: list[UnderstandingValidationIssue] = []
         extracted_names = {metric.name for metric in understanding.extracted_metrics}
         deterministic_names = set()
+        derived_names = set()
         for bucket in ("asset_counts", "business_targets"):
-            deterministic_names.update(((profile.structured_metrics or {}).get(bucket) or {}).keys())
+            for name, payload in ((profile.structured_metrics or {}).get(bucket) or {}).items():
+                deterministic_names.add(name)
+                if isinstance(payload, dict) and payload.get("derived") is True:
+                    derived_names.add(name)
         missed = sorted(name for name in deterministic_names if name not in extracted_names)
-        if missed:
-            issues.append(_issue("critical", "explicit_metrics_missed", f"Explicit deterministic metrics were not present in deep understanding: {', '.join(missed[:8])}."))
+        missed_user_facts = [name for name in missed if name not in derived_names]
+        missed_derived = [name for name in missed if name in derived_names]
+        if missed_user_facts:
+            issues.append(_issue("critical", "explicit_metrics_missed", f"Explicit deterministic metrics were not present in deep understanding: {', '.join(missed_user_facts[:8])}."))
+        if missed_derived:
+            issues.append(_issue("warning", "derived_metrics_missed", f"Derived deterministic helper metrics were not present in deep understanding: {', '.join(missed_derived[:8])}."))
         if re.search(r"\d", raw_use_case) and not understanding.extracted_metrics:
             issues.append(_issue("critical", "numbers_without_metrics", "Raw use case contains numbers, but understanding extracted no metrics."))
         if profile.domain and understanding.domain not in {profile.domain, "unknown", None} and profile.domain != understanding.industry:

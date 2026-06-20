@@ -206,14 +206,21 @@ class HealthService:
 
     async def _bedrock_sonnet_check(self) -> HealthCheckResult:
         settings = get_settings()
-        if not settings.bedrock_model_id:
+        if not settings.bedrock_main_model_id:
             return HealthCheckResult(
                 id="bedrock_sonnet",
                 label="Bedrock semantic reviewer",
                 status=HealthStatus.degraded,
                 required=False,
-                reason="ARCHWAY_BEDROCK_MODEL_ID is not configured. Deterministic semantic review remains active.",
-                details={"provider": settings.llm_provider, "configured": False, "region": settings.bedrock_region},
+                reason="ARCHWAY_BEDROCK_MAIN_MODEL_ID/ARCHWAY_BEDROCK_MODEL_ID is not configured. Deterministic semantic review remains active.",
+                details={
+                    "provider": settings.llm_provider,
+                    "configured": False,
+                    "region": settings.bedrock_region,
+                    "main_model_id": None,
+                    "judge_model_id": settings.bedrock_judge_model_id,
+                    "judge_enabled": settings.enable_llm_judge,
+                },
             )
         ok, reason, details = await BedrockProvider().health_check()
         return HealthCheckResult(
@@ -231,7 +238,7 @@ class HealthService:
             settings.enable_open_world_understanding
             and settings.agentic_mode == "live_demo"
             and settings.llm_provider == "bedrock"
-            and bool(settings.bedrock_model_id)
+            and bool(settings.bedrock_main_model_id or settings.bedrock_model_id)
         )
         reason = (
             "Live Bedrock open-world intake is enabled for use-case classification."
@@ -248,7 +255,10 @@ class HealthService:
                 "enable_open_world_understanding": settings.enable_open_world_understanding,
                 "agentic_mode": settings.agentic_mode,
                 "llm_provider": settings.llm_provider,
-                "bedrock_model_id": settings.bedrock_model_id,
+                "bedrock_model_id": settings.bedrock_main_model_id or settings.bedrock_model_id,
+                "bedrock_main_model_id": settings.bedrock_main_model_id,
+                "bedrock_judge_model_id": settings.bedrock_judge_model_id,
+                "llm_judge_enabled": settings.enable_llm_judge,
             },
         )
 

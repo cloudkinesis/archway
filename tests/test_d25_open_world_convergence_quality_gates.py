@@ -816,6 +816,7 @@ def test_diagram_layout_only_warnings_do_not_fail_convergence_or_export_status()
         "passed": False,
         "diagnostics": [
             {"severity": "error", "code": "too_many_edge_crossings", "message": "layout is dense"},
+            {"severity": "error", "code": "too_many_visible_edges", "message": "25 visible edges exceeds the limit of 24"},
             {"severity": "warning", "code": "aws_service_catalog_fallback", "message": "catalog fallback"},
             {"severity": "info", "code": "observability_coverage_added", "message": "coverage added"},
         ],

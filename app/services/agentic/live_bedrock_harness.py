@@ -17,7 +17,7 @@ from app.services.llm.model_router import ModelRouter
 
 
 SETUP_REQUIRED_MESSAGE = (
-    "Live agentic demo unavailable: ARCHWAY_BEDROCK_MODEL_ID is not configured "
+    "Live agentic demo unavailable: ARCHWAY_BEDROCK_MAIN_MODEL_ID/ARCHWAY_BEDROCK_MODEL_ID is not configured "
     "(llm_provider must be 'bedrock'). Continuing in deterministic mode; a "
     "diagnostic package will still be generated."
 )
@@ -62,7 +62,7 @@ def reset_live_budget(session_id: str | None = None) -> None:
 
 def live_demo_setup_ready(settings: Settings | None = None) -> bool:
     settings = settings or get_settings()
-    return settings.agentic_mode == "live_demo" and settings.llm_provider.lower() == "bedrock" and bool(settings.bedrock_model_id)
+    return settings.agentic_mode == "live_demo" and settings.llm_provider.lower() == "bedrock" and bool(settings.bedrock_main_model_id or settings.bedrock_model_id)
 
 
 def live_demo_sensitivity_reason(text: str | None) -> str | None:
@@ -101,7 +101,7 @@ def live_call(
             budget_state=_budget_state(settings, run_context),
         ))
 
-    if settings.llm_provider.lower() != "bedrock" or not settings.bedrock_model_id:
+    if settings.llm_provider.lower() != "bedrock" or not (settings.bedrock_main_model_id or settings.bedrock_model_id):
         return _finish(run_context, LiveCallAudit(
             provider="setup_required",
             task_type=task_type,
@@ -155,7 +155,7 @@ def live_call(
     except Exception as exc:  # noqa: BLE001 - live lanes must downgrade, not abort
         return _finish(run_context, LiveCallAudit(
             provider="bedrock",
-            model_id=settings.bedrock_model_id,
+            model_id=settings.bedrock_main_model_id or settings.bedrock_model_id,
             task_type=task_type,
             lane=lane,
             session_id=session_id,
@@ -186,7 +186,7 @@ def _result_from_llm(
     if token_unavailable:
         warnings.append("token_usage_unavailable")
     provider = result.provider
-    model_id = result.model_id or settings.bedrock_model_id
+    model_id = result.model_id or settings.bedrock_main_model_id or settings.bedrock_model_id
     parsed = result.parsed
     validated = bool(result.validated and isinstance(parsed, response_schema))
     original_response_hash = response_hash
@@ -217,7 +217,7 @@ def _result_from_llm(
             validated = bool(repair.validated and isinstance(parsed, response_schema))
             token_unavailable = repair.token_usage is None
             provider = repair.provider
-            model_id = repair.model_id or settings.bedrock_model_id
+            model_id = repair.model_id or settings.bedrock_main_model_id or settings.bedrock_model_id
     status = "accepted" if provider == "bedrock" and validated else "rejected"
     # Distinguish a transport/connectivity failure (provider unreachable) from a genuine
     # schema-invalid response. Both arrive here as not-validated, but conflating them

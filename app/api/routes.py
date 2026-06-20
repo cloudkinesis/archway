@@ -693,7 +693,10 @@ def _latest_live_agent_status(session_id: str):
         return {
             "agentic_mode": settings.agentic_mode,
             "configured_provider": settings.llm_provider,
-            "configured_model": settings.bedrock_model_id,
+            "configured_model": settings.bedrock_main_model_id or settings.bedrock_model_id,
+            "configured_main_model": settings.bedrock_main_model_id,
+            "configured_judge_model": settings.bedrock_judge_model_id,
+            "judge_enabled": settings.enable_llm_judge,
             "has_export_trace": False,
             "total_records": 0,
             "bedrock_accepted": 0,
@@ -727,7 +730,10 @@ def _latest_live_agent_status(session_id: str):
     return {
         "agentic_mode": settings.agentic_mode,
         "configured_provider": settings.llm_provider,
-        "configured_model": settings.bedrock_model_id,
+        "configured_model": settings.bedrock_main_model_id or settings.bedrock_model_id,
+        "configured_main_model": settings.bedrock_main_model_id,
+        "configured_judge_model": settings.bedrock_judge_model_id,
+        "judge_enabled": settings.enable_llm_judge,
         "has_export_trace": True,
         "export_name": live_files[0].parents[1].name,
         "total_records": len(records),

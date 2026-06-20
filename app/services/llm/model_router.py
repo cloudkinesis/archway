@@ -29,6 +29,7 @@ SONNET_TASKS = {
     LLMTaskType.live_narrative_synthesis,
     LLMTaskType.live_reviewer_critique,
     LLMTaskType.open_world_understanding,
+    LLMTaskType.llm_judge_review,
 }
 
 

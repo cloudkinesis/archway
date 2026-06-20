@@ -370,6 +370,11 @@ def _generic_usage_dimension(
         unit = "requests/month"
         usage_name = "derived workflow/API executions"
         formula = generic["action_formula"]
+    elif any(term in key for term in ("sns", "notification")) and generic["monthly_actions"]:
+        quantity = Decimal(str(round(generic["monthly_actions"], 4)))
+        unit = "requests/month"
+        usage_name = "derived notification publish and fan-out requests"
+        formula = generic["action_formula"] + " Notification fan-out must be confirmed before procurement."
     elif "s3" in key:
         if generic["storage_gb_month"]:
             quantity = Decimal(str(round(generic["storage_gb_month"], 4)))
