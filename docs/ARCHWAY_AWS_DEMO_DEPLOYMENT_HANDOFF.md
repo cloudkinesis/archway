@@ -52,6 +52,74 @@ Use a private security posture where possible:
 - Nginx terminates TLS and proxies `/api`.
 - Store secrets in AWS Systems Manager Parameter Store or Secrets Manager, not in Git.
 
+### 2B. Serverless-Managed Demo Option: ECS Fargate + EFS
+
+If the goal is "no EC2 host to patch or babysit" while avoiding application refactors, use ECS Fargate with a single running task and an EFS mount.
+
+Recommended shape:
+
+```text
+Browser
+  -> HTTPS
+  -> Application Load Balancer with ACM certificate
+  -> ECS Fargate service, desired count = 1
+       container serves frontend static files and proxies/runs FastAPI
+       or runs FastAPI behind a small in-container Nginx
+  -> EFS mounted at /var/lib/archway
+  -> Bedrock, Tavily, AWS Docs/Pricing MCP, AWS Price List APIs as outbound calls
+```
+
+This is the best "serverless" fit for the current codebase because Fargate still gives Archway a long-lived process. That matters because:
+
+- `app/services/jobs.py` keeps background job state in process memory.
+- The frontend polls those in-memory job IDs.
+- `ARCHWAY_DATA_DIR` stores SQLite, JSON artifacts, diagram outputs, and ZIP exports on a filesystem.
+- Diagram rendering shells out to a `d2` executable.
+
+Fargate preserves those assumptions. Lambda/API Gateway does not.
+
+Use these constraints for the Fargate demo:
+
+- ECS service desired count: `1`.
+- Disable autoscaling until job state is externalized.
+- Mount EFS at `/var/lib/archway`.
+- Set `ARCHWAY_DATA_DIR=/var/lib/archway`.
+- Keep one uvicorn worker in the container.
+- Put the task in private subnets with outbound access through NAT or VPC endpoints as appropriate.
+- Put the ALB in public subnets, or behind an internal access path if this is private beta only.
+- Store secrets in SSM Parameter Store or Secrets Manager and inject them as ECS task secrets.
+- Bake the `d2` binary into the image and verify `d2 --version` at build or container startup.
+
+Important warning: do not set desired count above `1` for the current app. If Fargate runs two tasks, research/architecture/export jobs can start on task A while polling hits task B, causing "job not found" or stale status. SQLite on EFS is also acceptable only for this single-task demo posture. Before scaling horizontally, refactor:
+
+- job state from memory to SQS/Step Functions/DynamoDB or another shared job store,
+- session index from SQLite to DynamoDB/RDS,
+- artifact storage from local filesystem/EFS to S3 or an intentional shared artifact layer.
+
+Minimal container expectations:
+
+```text
+Image contains:
+  Python 3.11+
+  Node-built frontend assets
+  Python dependencies from requirements.txt
+  in-repo packages/archway_diagram_compiler
+  d2 executable on PATH
+
+Runtime command:
+  python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+
+Container port:
+  8000
+
+Health path:
+  /api/health
+```
+
+ALB target group health checks should use `/api/health`. If optional providers such as Tavily or AWS Pricing MCP are degraded, the health endpoint can still be usable as long as required checks are not failed; inspect the JSON response before declaring the deployment broken.
+
+For a production product, ECS Fargate is still only the first step. Real multi-tenant production should add authentication, tenant isolation, shared durable job state, managed database/storage, observability, secret rotation, and horizontal scaling.
+
 ## 3. Repository Layout
 
 Important files and directories:
