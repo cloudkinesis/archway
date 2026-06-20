@@ -85,7 +85,7 @@ export function SynthesisTab({ session, setSession, readiness, setReadiness, set
             </div>
             <p className="mt-1 text-xs text-awsTextMuted">Answers feed the brief, research, pricing, architecture, diagrams, and export package.</p>
           </div>
-          <span className="border border-awsBorder bg-white px-2 py-1 text-xs text-awsTextMuted">{interviewCount} answers captured</span>
+          <span className="border border-awsBorder bg-white px-2 py-1 text-xs text-awsTextMuted">{interviewCount} inputs captured</span>
         </div>
       </div>
       <div ref={scrollRef} onScroll={onConversationScroll} className="archway-scroll relative flex-1 overflow-y-auto px-5 py-5">
@@ -183,8 +183,10 @@ function Banner({ tone, text }: { tone: "info" | "warning" | "danger"; text: str
 }
 
 function interviewTurnCount(session: Session) {
-  const profile = session.current_summary?.use_case_profile as { interview?: { turn_count?: number; answered?: string[] } } | undefined;
-  return profile?.interview?.turn_count ?? profile?.interview?.answered?.length ?? 0;
+  const profile = session.current_summary?.use_case_profile as { interview?: { turn_count?: number; answered?: string[]; clarifications?: string[] } } | undefined;
+  const answered = profile?.interview?.turn_count ?? profile?.interview?.answered?.length ?? 0;
+  const clarifications = profile?.interview?.clarifications?.length ?? 0;
+  return answered + clarifications;
 }
 
 function interviewPromptFromReadiness(readiness: Readiness | null) {
@@ -205,6 +207,7 @@ function interviewPromptFromReadiness(readiness: Readiness | null) {
 
 function interviewTurnsFromSession(session: Session, opening: string) {
   const turns: Array<{ role: "user" | "assistant"; text: string }> = [{ role: "user", text: session.initial_use_case }];
+  const profile = session.current_summary?.use_case_profile as { interview?: { clarifications?: string[] } } | undefined;
   const assumptions = session.current_summary?.assumptions ?? [];
   const capturedAnswers = assumptions
     .map((item) => {
@@ -215,6 +218,10 @@ function interviewTurnsFromSession(session: Session, opening: string) {
   capturedAnswers.forEach((item, index) => {
     turns.push({ role: "assistant", text: index === 0 ? item.question : `Next question: ${item.question}` });
     turns.push({ role: "user", text: item.answer });
+  });
+  (profile?.interview?.clarifications ?? []).forEach((text) => {
+    turns.push({ role: "assistant", text: "Additional clarification captured." });
+    turns.push({ role: "user", text });
   });
   turns.push({ role: "assistant", text: opening });
   return turns;
