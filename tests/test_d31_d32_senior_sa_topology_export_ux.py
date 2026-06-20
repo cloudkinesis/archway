@@ -143,7 +143,12 @@ def test_generic_approval_workflow_does_not_inherit_healthcare_or_topology():
     assert "sterile processing" not in text
     assert "surgical" not in text
     assert "hospital" not in text.lower()
-    assert "Operational Event Stream" in text
+    # This profile genuinely streams (real_time_anomaly_detection family + freezer
+    # telemetry), so the telemetry topology must still be present — but it now arrives via
+    # the positively-justified streaming path rather than a workflow family aliasing to the
+    # operational-event-prediction pattern. Assert the telemetry topology by intent, not by
+    # the old pattern's component label.
+    assert "Kinesis" in text or "telemetry ingestion" in text.lower()
     assert "Governed recovery" in text or "Tool Governance Workflow" in text
     assert any("Seed Lots" in spec.title or "Cold Room Vaults" in spec.title for spec in specs)
 

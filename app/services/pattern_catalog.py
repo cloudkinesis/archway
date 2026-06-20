@@ -446,11 +446,57 @@ PATTERNS: dict[str, WorkloadPattern] = {
 }
 
 
+# Patterns whose topology is telemetry/stream-heavy (Kinesis/Flink/SageMaker/IoT). They
+# must only be applied when the workload genuinely streams. Any other workload that picks
+# one up — through a mis-mapped family or coarse capability tag — is the borrowed-template
+# bug, so these are dropped unless positively justified by streaming evidence.
+_STREAMING_HEAVY_PATTERN_IDS = frozenset({
+    "operational_event_prediction_workflow",
+    "industrial_iot_streaming_ml",
+})
+
+# Families that genuinely denote a streaming/telemetry workload. Presence of one is
+# trustworthy streaming evidence (unlike capabilities, which are over-tagged).
+_STREAMING_EVIDENCE_FAMILIES = frozenset({
+    "operational_event_prediction_workflow",
+    "industrial_iot_streaming_ml",
+    "real_time_anomaly_detection",
+    "telecom_network_analytics",
+    "cdr_congestion_prediction",
+    "live_streaming",
+})
+
+
+def _has_streaming_evidence(profile: UseCaseProfile) -> bool:
+    """Positive justification for a telemetry/streaming topology.
+
+    Trusts the workload-family classification and the typed quantity graph (a real
+    cadence/frequency metric over monitored assets), NOT the capability tags, which are
+    over-generated and routinely mislabel document/approval workloads as streaming.
+    """
+    if set(profile.workload_families or []) & _STREAMING_EVIDENCE_FAMILIES:
+        return True
+    structured = getattr(profile, "structured_metrics", None) or {}
+    for bucket in ("asset_counts", "business_targets", "telemetry_signals"):
+        for name in (structured.get(bucket) or {}):
+            lowered = str(name).lower()
+            if any(token in lowered for token in ("telemetry", "frequency_seconds", "per_second", "events_per_second", "_eps")):
+                return True
+    return False
+
+
 def selected_patterns(profile: UseCaseProfile) -> list[WorkloadPattern]:
     pattern_ids: list[str] = []
     for family in profile.workload_families:
         pattern_ids.extend(_pattern_ids_for_family(family))
     patterns = [PATTERNS[family] for family in pattern_ids if family in PATTERNS]
+    # Durable guard: a stream-heavy pattern may only stand if streaming is positively
+    # evidenced. This prevents ANY family (now or future) from silently pulling a
+    # telemetry topology into a workload that does not stream.
+    if not _has_streaming_evidence(profile):
+        filtered = [pattern for pattern in patterns if pattern.id not in _STREAMING_HEAVY_PATTERN_IDS]
+        if filtered != patterns:
+            patterns = filtered or [PATTERNS["agentic_workflow"] if profile.actions else PATTERNS["web_api_application"]]
     if not patterns:
         patterns = [PATTERNS["web_api_application"]]
     return _dedupe_patterns(patterns)
@@ -887,13 +933,17 @@ def _pattern_ids_for_family(family: str) -> list[str]:
     aliases = {
         "surgical_scheduling_prediction": ["healthcare_operations_scheduling"],
         "clinical_workflow_decision_support": ["healthcare_operations_scheduling"],
-        # These families are generic. They must not route through the
-        # healthcare OR pattern unless the profile already selected an
-        # explicitly clinical/surgical family. Otherwise an approval-gated
-        # workflow in any domain can inherit stale EHR/OR topology.
+        # These families are generic ORCHESTRATION families, not streaming/telemetry
+        # families. They must map to the governed-workflow (agentic_workflow) pattern —
+        # Lambda/Step Functions/Bedrock/DynamoDB — NOT the operational-event-prediction
+        # telemetry pattern (Kinesis/Flink/SageMaker). A document/permit/approval workflow
+        # is not a telemetry workload; the telemetry pattern is added only when a genuine
+        # streaming family co-occurs (it contributes its own pattern), and the
+        # streaming-evidence guard in selected_patterns() drops any telemetry pattern that
+        # is not positively justified.
         "computer_vision_metadata_processing": ["computer_vision_quality_inspection"],
-        "approval_gated_workflow_automation": ["operational_event_prediction_workflow"],
-        "event_driven_workflow": ["operational_event_prediction_workflow"],
+        "approval_gated_workflow_automation": ["agentic_workflow"],
+        "event_driven_workflow": ["agentic_workflow"],
         "telecom_network_analytics": ["real_time_anomaly_detection", "data_platform_analytics"],
         "cdr_congestion_prediction": ["real_time_anomaly_detection", "data_platform_analytics"],
         "capital_markets_risk_engine": ["capital_markets_risk_engine"],
