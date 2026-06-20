@@ -15,6 +15,7 @@ from app.services.architecture_revisions import ArchitectureRevisionService
 from app.services.artifacts import ArtifactStore
 from app.services.convergence.architecture_repairer import ArchitectureRepairer
 from app.services.convergence.repair_planner import RepairPlan, RepairPlanner
+from app.services.diagram_qa_policy import diagram_qa_is_layout_or_catalog_only, diagram_qa_is_render_blocking
 from app.services.pricing_sanity_reviewer import PricingSanityReview
 from app.services.understanding.deep_use_case_understanding import DeepUseCaseUnderstanding, deterministic_understanding
 
@@ -386,46 +387,11 @@ def _qa_failure_is_view_coverage_only(qa: dict, broader_rendered: set[str]) -> b
 
 
 def _qa_failure_is_layout_or_catalog_only(qa: dict) -> bool:
-    diagnostics = qa.get("diagnostics") or []
-    if not diagnostics:
-        return False
-    advisory_codes = {"too_many_edge_crossings", "aws_service_catalog_fallback"}
-    for item in diagnostics:
-        code = str(item.get("code") if isinstance(item, dict) else "").lower()
-        severity = str(item.get("severity") if isinstance(item, dict) else "").lower()
-        if code in advisory_codes:
-            continue
-        if severity != "info":
-            return False
-    return True
+    return diagram_qa_is_layout_or_catalog_only(qa)
 
 
 def _qa_failure_is_non_blocking(qa: dict) -> bool:
-    diagnostics = qa.get("diagnostics") or []
-    if not diagnostics:
-        return False
-    text = " ".join(str(item) for item in diagnostics).lower()
-    render_failure_terms = (
-        "blank",
-        "empty svg",
-        "compile",
-        "syntax",
-        "renderer failed",
-        "png failed",
-        "svg failed",
-        "missing artifact",
-        "file not found",
-    )
-    if any(term in text for term in render_failure_terms):
-        return False
-    for item in diagnostics:
-        code = str(item.get("code") if isinstance(item, dict) else "").lower()
-        if code in {"too_many_edge_crossings", "aws_service_catalog_fallback"}:
-            continue
-        severity = str(item.get("severity") if isinstance(item, dict) else "").lower()
-        if severity in {"critical", "error", "fatal"}:
-            return False
-    return True
+    return not diagram_qa_is_render_blocking(qa)
 
 
 def _dossier_findings(consistency: dict | None) -> list[QualityFinding]:

@@ -42,9 +42,9 @@ class ArchitectureCritiqueService:
                     response_schema=ArchitectureCritique,
                     temperature=0.1,
                     max_tokens=1200,
-                    timeout_seconds=8,
+                    timeout_seconds=35,
                 ),
-                timeout=12,
+                timeout=40,
             )
         except Exception as exc:
             deterministic.enhancement_status = f"deterministic_fallback:{exc.__class__.__name__}"

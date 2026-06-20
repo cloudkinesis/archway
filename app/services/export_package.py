@@ -17,6 +17,7 @@ from app.services.build_status import BuildStatusService
 from app.services.convergence.golden_convergence_orchestrator import GoldenConvergenceOrchestrator, quality_summary_markdown
 from app.services.client_pack import audit_pack_files, clean_presentation_text, client_pack_files, front_door_readme
 from app.services.deep_dossier import DeepDossierService
+from app.services.diagram_qa_policy import diagram_qa_is_render_blocking
 from app.services.display_labels import display_label, format_usd, status_display
 from app.models.domain import ArchitectureSpec, ArchitectureValidationIssue
 from app.services.diagnostic_diagrams import diagnostic_diagram_gallery
@@ -1570,33 +1571,7 @@ def _diagram_qa_status(diagrams) -> dict:
 
 
 def _diagram_qa_render_blocking(qa: dict) -> bool:
-    if qa.get("passed", False):
-        return False
-    diagnostics = qa.get("diagnostics") or []
-    if not diagnostics:
-        return True
-    text = " ".join(str(item) for item in diagnostics).lower()
-    render_failure_terms = (
-        "blank",
-        "empty svg",
-        "compile",
-        "syntax",
-        "renderer failed",
-        "png failed",
-        "svg failed",
-        "missing artifact",
-        "file not found",
-    )
-    if any(term in text for term in render_failure_terms):
-        return True
-    for item in diagnostics:
-        code = str(item.get("code") if isinstance(item, dict) else "").lower()
-        if code in {"too_many_edge_crossings", "aws_service_catalog_fallback"}:
-            continue
-        severity = str(item.get("severity") if isinstance(item, dict) else "").lower()
-        if severity in {"critical", "error", "fatal"}:
-            return True
-    return False
+    return diagram_qa_is_render_blocking(qa)
 
 
 def _pricing_headline_status(pricing) -> dict:

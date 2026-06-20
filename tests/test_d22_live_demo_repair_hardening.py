@@ -20,7 +20,7 @@ from app.models.domain import (
 from app.services.agentic.live_bedrock_harness import LiveRunContext, live_call, reset_live_budget
 from app.services.agentic.use_case_analyst import UseCaseAnalystProposal
 from app.services.architecture import ArchitecturePlanner
-from app.services.architecture_critique import ArchitectureCritiqueFinding, ArchitectureCritiqueService, _downgrade_unconfirmed_model_criticals
+from app.services.architecture_critique import ArchitectureCritique, ArchitectureCritiqueFinding, ArchitectureCritiqueService, _downgrade_unconfirmed_model_criticals
 from app.services.architecture_revisions import ArchitectureRevisionService
 from app.services.convergence.golden_convergence_orchestrator import GoldenConvergenceOrchestrator
 from app.services.diagnostic_diagrams import diagnostic_diagram_gallery
@@ -504,6 +504,39 @@ async def test_architecture_critique_timeout_falls_back_without_blocking_user(mo
 
     assert critique.enhancement_status == "deterministic_fallback:TimeoutError"
     assert isinstance(critique.passed, bool)
+
+
+@pytest.mark.asyncio
+async def test_architecture_critique_uses_live_sized_timeout_budget(monkeypatch):
+    observed: dict[str, int] = {}
+
+    async def complete_with_budget(*_args, **kwargs):
+        observed["timeout_seconds"] = kwargs.get("timeout_seconds")
+        parsed = ArchitectureCritique(passed=True, findings=[])
+        return LLMResult(
+            provider="bedrock",
+            model_id="test-model",
+            text=parsed.model_dump_json(),
+            parsed=parsed,
+            validated=True,
+        )
+
+    monkeypatch.setattr("app.services.architecture_critique.ModelRouter.complete", complete_with_budget)
+    brief = SynthesisEngine().create_initial_brief(AQUACULTURE_USE_CASE)
+    report = _minimal_report(brief)
+    spec = ArchitecturePlanner().generate(report)[0]
+    understanding = deterministic_understanding(report.use_case_interpretation)
+
+    critique = await ArchitectureCritiqueService().critique(
+        report.use_case_interpretation,
+        understanding,
+        spec,
+        report.pricing_analysis,
+        session_id="test_timeout_budget",
+    )
+
+    assert observed["timeout_seconds"] >= 30
+    assert critique.enhancement_status == "bedrock_validated"
 
 
 def test_live_call_repairs_malformed_structured_output(monkeypatch, tmp_path):
