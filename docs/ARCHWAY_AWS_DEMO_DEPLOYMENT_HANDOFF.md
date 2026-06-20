@@ -58,7 +58,7 @@ Important files and directories:
 
 ```text
 app/main.py
-  FastAPI app factory. Adds CORS, security headers, request limit, rate limit, safe error handler, and API router.
+  FastAPI module-level app instance. Adds CORS, security headers, request limit, rate limit, safe error handler, and API router.
 
 app/api/routes.py
   Main API controller. Owns session creation, synthesis, research jobs, pricing checkpoint, architecture jobs,
@@ -289,7 +289,7 @@ ARCHWAY_ENABLE_OPEN_WORLD_UNDERSTANDING=true
 ARCHWAY_DISABLE_DOMAIN_REFINERS=true
 
 ARCHWAY_BEDROCK_REGION=us-east-1
-ARCHWAY_BEDROCK_MAIN_MODEL_ID=amazon.nova-pro-v1:0
+ARCHWAY_BEDROCK_MAIN_MODEL_ID=us.amazon.nova-pro-v1:0
 
 ARCHWAY_ENABLE_LLM_JUDGE=true
 ARCHWAY_BEDROCK_JUDGE_MODEL_ID=us.amazon.nova-2-lite-v1:0
@@ -322,7 +322,8 @@ ARCHWAY_COMPILER_MAX_CONCURRENT_JOBS=1
 
 Notes:
 
-- `ARCHWAY_BEDROCK_MAIN_MODEL_ID` may also be an inference profile ID if your AWS account requires cross-region inference profiles.
+- `ARCHWAY_BEDROCK_MAIN_MODEL_ID` should usually use the inference-profile form, for example `us.amazon.nova-pro-v1:0`, because many AWS accounts cannot invoke Nova Pro through the bare on-demand model ID.
+- Use the bare model ID, for example `amazon.nova-pro-v1:0`, only if on-demand invocation for that model is enabled in the target AWS account and region.
 - The judge only runs when `ARCHWAY_ENABLE_LLM_JUDGE=true` and a judge model or inference profile is configured.
 - Use `ARCHWAY_BEDROCK_JUDGE_INFERENCE_PROFILE_ID` instead of `ARCHWAY_BEDROCK_JUDGE_MODEL_ID` if the judge model is exposed through an inference profile.
 - Tavily health intentionally avoids live probes when budget is zero to preserve quota.
@@ -525,6 +526,8 @@ server {
 }
 ```
 
+The Nginx body limit is intentionally higher than the backend request limit. The backend still rejects request bodies above `64_000` bytes with HTTP 413 through `RequestLimitMiddleware`; this protects the app even if Nginx is configured more generously.
+
 Enable TLS before external stakeholder use. Use your normal certificate flow or Certbot. After TLS, set:
 
 ```bash
@@ -596,7 +599,7 @@ Expected:
 - `log_dir`: ready
 - `diagram_compiler`: ready
 - `open_world_live_mode`: ready when live demo flags and Bedrock config are active
-- `bedrock_sonnet`: ready when Bedrock model access works
+- `bedrock_sonnet`: ready when Bedrock model access works. This is a legacy health-check key name; it checks the configured main Bedrock model, not necessarily Claude Sonnet.
 - Tavily/AWS Docs/Pricing may show degraded if intentionally disabled or budgeted to zero
 
 Use:
