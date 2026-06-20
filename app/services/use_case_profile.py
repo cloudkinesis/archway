@@ -5,6 +5,31 @@ from app.services.capability_extractor import explicit_negative_constraints, ext
 from app.services.metric_extractor import extract_metrics
 
 
+# D27 INV-3: the fixed, known catalog of workload-family slugs the system recognizes.
+# This is reference data (the catalog), NOT a judge: the open-world LLM PICKS from this
+# vocabulary (positive justification). Any classification that does not name one of these
+# — including the explicit ``open_world_other`` escape — routes to the generic default
+# rather than being keyword-squeezed into a wrong specialized family. Keep this in sync
+# with what _rank_workload_families can emit and what pricing_driver_selector matches on.
+WORKLOAD_FAMILY_VOCABULARY = frozenset({
+    "healthcare_operations_scheduling", "surgical_scheduling_prediction",
+    "clinical_workflow_decision_support", "financial_fraud_detection",
+    "telecom_network_analytics", "cdr_congestion_prediction", "capital_markets_risk_engine",
+    "monte_carlo_risk_grid", "pre_trade_compliance", "low_latency_trading",
+    "live_streaming", "video_streaming", "hpc_simulation", "federated_ml",
+    "federated_learning", "graph_analytics", "document_intelligence", "rag_assistant",
+    "document_retrieval", "operational_event_prediction_workflow",
+    "industrial_iot_streaming_ml", "real_time_anomaly_detection", "anomaly_detection",
+    "data_platform_analytics", "batch_analytics", "time_series_analytics",
+    "agentic_workflow", "approval_gated_workflow_automation", "event_driven_workflow",
+    "field_service_automation", "supply_chain_optimization", "inventory_optimization",
+    "ota_fleet_orchestration", "ota_rollout_orchestration", "computer_vision",
+    "computer_vision_quality_inspection", "generative_ai", "predictive_ml",
+    "enterprise_integration", "real_time_ingestion", "web_api_application",
+    "api_application",
+})
+
+
 @dataclass(frozen=True)
 class ExtractedMetric:
     label: str
@@ -36,6 +61,12 @@ class UseCaseProfile:
     capability_decision: dict = field(default_factory=dict)
     profile_source: str = "deterministic"
     open_world_understanding: dict = field(default_factory=dict)
+    # D27 INV-2: whether the classification driving this profile is authoritative
+    # (open-world LLM accepted) or a non-authoritative fallback (provider unavailable,
+    # schema-invalid, disabled). Non-authoritative profiles must never drive a
+    # customer-facing deliverable; convergence caps them to internal_only.
+    understanding_authoritative: bool = False
+    understanding_unavailable_reason: str | None = None
 
     @property
     def primary_family(self) -> str:
@@ -133,6 +164,8 @@ def profile_to_metadata(profile: UseCaseProfile) -> dict:
         "capability_decision": profile.capability_decision,
         "profile_source": profile.profile_source,
         "open_world_understanding": profile.open_world_understanding,
+        "understanding_authoritative": profile.understanding_authoritative,
+        "understanding_unavailable_reason": profile.understanding_unavailable_reason,
     }
 
 
@@ -162,6 +195,8 @@ def profile_from_metadata(metadata: dict | None, raw_use_case: str) -> UseCasePr
         capability_decision=dict(values.get("capability_decision") or {}),
         profile_source=values.get("profile_source") or "deterministic",
         open_world_understanding=dict(values.get("open_world_understanding") or {}),
+        understanding_authoritative=bool(values.get("understanding_authoritative", False)),
+        understanding_unavailable_reason=values.get("understanding_unavailable_reason"),
     )
     return reconcile_profile_constraints(refine_profile_with_context(profile, raw_use_case))
 

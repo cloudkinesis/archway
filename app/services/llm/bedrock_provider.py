@@ -35,6 +35,7 @@ class BedrockProvider:
         validated = False
         retry_count = 0
         token_usage = None
+        transport_error = False
         model_id = settings.bedrock_model_id or ""
         try:
             if not model_id:
@@ -78,6 +79,15 @@ class BedrockProvider:
         except Exception as exc:
             status = "failed"
             warnings.append(f"Bedrock call failed: {type(exc).__name__}: {exc}")
+            # Classify connectivity/transport failures by EXCEPTION CLASS NAME only
+            # (never the message). botocore connectivity errors all carry "Connection"
+            # or "Timeout" in the class name (EndpointConnectionError, ConnectTimeoutError,
+            # ReadTimeoutError, ConnectionClosedError, ConnectionError). Permanent client
+            # errors (ClientError, ValidationException, AccessDeniedException,
+            # ThrottlingException, ResourceNotFoundException) do NOT — so they stay
+            # non-transport and surface as real failures.
+            exc_name = type(exc).__name__
+            transport_error = "connection" in exc_name.lower() or "timeout" in exc_name.lower()
         completed = datetime.now(timezone.utc)
         duration_ms = int((time.monotonic() - t0) * 1000)
         llm_telemetry_store.add(LLMCallTelemetry(
@@ -97,7 +107,7 @@ class BedrockProvider:
             prompt_hash=hash_payload({"messages": [message.model_dump() for message in messages]}),
             warnings=warnings,
         ))
-        return LLMResult(provider=self.provider_name, model_id=model_id or "not_configured", text=text, parsed=parsed, validated=validated, retry_count=retry_count, duration_ms=duration_ms, token_usage=token_usage, warnings=warnings)
+        return LLMResult(provider=self.provider_name, model_id=model_id or "not_configured", text=text, parsed=parsed, validated=validated, retry_count=retry_count, duration_ms=duration_ms, token_usage=token_usage, warnings=warnings, transport_error=transport_error)
 
     async def health_check(self) -> tuple[bool, str, dict[str, Any]]:
         settings = get_settings()

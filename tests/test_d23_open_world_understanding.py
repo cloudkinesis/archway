@@ -246,8 +246,13 @@ def test_synthesis_uses_live_open_world_understanding_without_seeded_profile(mon
     brief = SynthesisEngine().create_initial_brief(AIRPORT_USE_CASE)
 
     assert brief.use_case_profile["profile_source"] == "open_world_understanding"
+    # No deterministic profile is seeded into the prompt as the answer...
     assert "deterministic_profile" not in captured_prompt["text"]
-    assert "industrial_iot_streaming_ml" not in captured_prompt["text"]
+    assert "deterministically_extracted_facts" in captured_prompt["text"]
+    # ...but D27 INV-3 DOES offer the controlled workload-family vocabulary as a menu the
+    # model picks from (positive justification). The family slugs appear only inside that
+    # allowed-vocabulary list, never as a preselected single-family answer.
+    assert "allowed_workload_family_slugs" in captured_prompt["text"]
     assert any("bag scan events" in question.text.lower() for question in brief.open_questions)
     get_settings.cache_clear()
 
