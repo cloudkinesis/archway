@@ -1,6 +1,6 @@
 # Archway System and AWS Demo Deployment Handoff
 
-Status: current as of `master` commit `515ced4b6f1b2367aa1a486608915a941bad241d`
+Status: current as of `master` commit `85a7acb436098644681bd0c117d23d4f15328b81`
 Audience: deployment engineer, AWS operator, or external system taking over demo hosting
 Scope: demo-grade AWS deployment with strong performance and sane security, not a fully multi-tenant production architecture
 
@@ -360,7 +360,7 @@ ARCHWAY_BEDROCK_REGION=us-east-1
 ARCHWAY_BEDROCK_MAIN_MODEL_ID=us.amazon.nova-pro-v1:0
 
 ARCHWAY_ENABLE_LLM_JUDGE=true
-ARCHWAY_BEDROCK_JUDGE_MODEL_ID=us.amazon.nova-2-lite-v1:0
+ARCHWAY_BEDROCK_JUDGE_INFERENCE_PROFILE_ID=us.amazon.nova-2-lite-v1:0
 
 ARCHWAY_BEDROCK_MAX_TOKENS=8192
 ARCHWAY_BEDROCK_TIMEOUT_SECONDS=120
@@ -394,6 +394,7 @@ Notes:
 - Use the bare model ID, for example `amazon.nova-pro-v1:0`, only if on-demand invocation for that model is enabled in the target AWS account and region.
 - The judge only runs when `ARCHWAY_ENABLE_LLM_JUDGE=true` and a judge model or inference profile is configured.
 - Use `ARCHWAY_BEDROCK_JUDGE_INFERENCE_PROFILE_ID` instead of `ARCHWAY_BEDROCK_JUDGE_MODEL_ID` if the judge model is exposed through an inference profile.
+- Before deployment, verify both the main and judge profile IDs are available in the target AWS account and `ARCHWAY_BEDROCK_REGION`; model/profile availability is account and region dependent.
 - Tavily health intentionally avoids live probes when budget is zero to preserve quota.
 - `ARCHWAY_ENABLE_AWS_PRICE_LIST_QUERY_API` defaults to false. Turning it on makes live boto3 Price List Query API calls. Leave it false for reproducible demo behavior unless specifically validating live pricing authority.
 - MCP tokens are only sent to trusted endpoints. External MCP hosts require `ARCHWAY_MCP_ALLOWED_HOSTS` or `ARCHWAY_MCP_ALLOW_EXTERNAL=true`. Prefer allowlisting exact hosts.
@@ -970,7 +971,7 @@ Any change in those areas should run full pytest, frontend build, and RC2 golden
 
 Current validated state before this handoff:
 
-- `master` pushed to GitHub at `515ced4b6f1b2367aa1a486608915a941bad241d`.
+- `master` pushed to GitHub at `85a7acb436098644681bd0c117d23d4f15328b81`.
 - Full pytest passed: `789 passed`.
 - Frontend build passed.
 - RC2 golden validation passed: `READY`, `known_fail=0`, `new_fail=0`.
