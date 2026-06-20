@@ -56,11 +56,27 @@ def test_telemetry_quantity_basis_justifies_streaming():
     assert selected_patterns(prof)
 
 
-def test_guard_is_generic_not_per_family():
+def test_guard_strips_future_wrong_alias_without_streaming_evidence(monkeypatch):
     # A hypothetical future workflow family that (wrongly) aliases to a stream-heavy
     # pattern is still stripped when no streaming evidence exists — proving the guard is
     # not a per-family special case.
     from app.services import pattern_catalog
-    assert "operational_event_prediction_workflow" in pattern_catalog._STREAMING_HEAVY_PATTERN_IDS
-    prof = _profile(["operational_event_prediction_workflow"])  # the family IS streaming evidence
+
+    original = pattern_catalog._pattern_ids_for_family
+
+    def fake_pattern_ids_for_family(family):
+        if family == "future_generic_workflow":
+            return ["operational_event_prediction_workflow"]
+        return original(family)
+
+    monkeypatch.setattr(pattern_catalog, "_pattern_ids_for_family", fake_pattern_ids_for_family)
+
+    services = _services(_profile(["future_generic_workflow"]))
+
+    assert not any(any(s in svc for s in _STREAM_SERVICES) for svc in services), services
+    assert "AWS Step Functions" in services
+
+
+def test_native_streaming_pattern_family_remains_streaming():
+    prof = _profile(["operational_event_prediction_workflow"])
     assert any("Kinesis" in c.service for p in selected_patterns(prof) for c in p.services)
