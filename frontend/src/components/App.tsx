@@ -137,8 +137,16 @@ export function App() {
     setArchitectureValidationIssues(data.architecture?.validation_issues ?? []);
     setArchitectureRevisions(data.architecture?.revisions ?? []);
     setGalleries(data.diagrams ?? []);
-    setLatestExport(data.diagnostics?.latest_export ?? null);
+    const hydratedExport = data.diagnostics?.latest_export ?? null;
+    setLatestExport(hydratedExport);
     setLatestJobs(data.jobs ?? {});
+    if (!hydratedExport && (data.session.active_phase === "export" || data.session.status === "complete")) {
+      api.getExport(data.session.id)
+        .then((result) => setLatestExport(result.export))
+        .catch(() => {
+          // The package link is best-effort during hydration; explicit export errors still surface in the export job UI.
+        });
+    }
     if (hydratedSessionRef.current !== data.session.id) {
       hydratedSessionRef.current = data.session.id;
       setView(furthestCompletedView(data));
@@ -605,10 +613,11 @@ function DiagramView({ session, setSession, galleries, setGalleries, latestExpor
     }
   });
   const exportJob = useJobPolling(session.id, exportJobId, async () => {
-    const result = await api.hydrateSession(session.id);
-    setSession(result.session);
-    setLatestExport(result.diagnostics?.latest_export ?? null);
-    setLatestJobs(result.jobs ?? {});
+    const exportResult = await api.getExport(session.id);
+    setLatestExport(exportResult.export);
+    const hydrated = await api.hydrateSession(session.id);
+    setSession(hydrated.session);
+    setLatestJobs(hydrated.jobs ?? {});
   });
   const exportRun = useMutation({ mutationFn: () => api.generateExport(session.id), onSuccess: (result) => setExportJobId(result.job.id) });
   const diagramsReady = galleries.length > 0 || latestJobs.diagrams?.status === "succeeded";
@@ -625,12 +634,12 @@ function DiagramView({ session, setSession, galleries, setGalleries, latestExpor
             {exportRun.isPending || exportJob.isActive ? "Exporting" : diagramsReady ? "Export package" : "Export after diagrams"}
           </Button>
           {latestExport ? (
-            <a href={artifactUrl(session.id, latestExport.artifact_id)} className="inline-flex min-h-10 items-center justify-center gap-2 border border-awsBorder bg-awsPanelSoft px-3 py-2 text-sm font-semibold text-awsTextPrimary hover:border-awsOrange">
-              <Download className="h-4 w-4" /> ZIP ready
+            <a href={artifactUrl(session.id, latestExport.artifact_id)} download className="inline-flex min-h-10 items-center justify-center gap-2 border border-awsBorder bg-awsPanelSoft px-3 py-2 text-sm font-semibold text-awsTextPrimary hover:border-awsOrange">
+              <Download className="h-4 w-4" /> Download ZIP
             </a>
           ) : null}
           {latestExport ? (
-            <a href={artifactUrl(session.id, latestExport.manifest_artifact_id)} className="inline-flex min-h-10 items-center justify-center gap-2 border border-awsBorder bg-awsPanelSoft px-3 py-2 text-sm font-semibold text-awsTextPrimary hover:border-awsOrange">
+            <a href={artifactUrl(session.id, latestExport.manifest_artifact_id)} download className="inline-flex min-h-10 items-center justify-center gap-2 border border-awsBorder bg-awsPanelSoft px-3 py-2 text-sm font-semibold text-awsTextPrimary hover:border-awsOrange">
               <FileText className="h-4 w-4" /> Manifest
             </a>
           ) : null}
@@ -966,6 +975,9 @@ function findIncludedArtifact(bundle: ExportBundle, suffix: string) {
 function SolutionBrief({ session, readiness }: { session: Session | null; readiness: Readiness | null }) {
   const brief = session?.current_summary;
   const buildStatus = useQuery({ queryKey: ["build-status"], queryFn: api.buildStatus, refetchInterval: 15000 });
+  const worthConfirming = readiness?.can_proceed
+    ? (readiness.recommended_minimum_questions ?? []).map((item) => item.prompt)
+    : (brief?.open_questions ?? []).map((item) => item.text);
   return (
     <div className="h-full bg-[#eef2f7] p-4">
       <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.14em] text-awsTextMuted"><FileText className="h-4 w-4" /> Live solution brief</h2>
@@ -976,7 +988,7 @@ function SolutionBrief({ session, readiness }: { session: Session | null; readin
           <BriefSection title="AI behavior" items={brief.ai_capabilities.map((item) => `${item.name} (${item.risk_level})`)} />
           <BriefSection title="Data and integrations" items={[...brief.data_sources.map((item) => `${item.name}: ${item.sensitivity}`), ...brief.integrations.map((item) => `${item.name}: ${item.direction}`)]} />
           <BriefSection title="Assumptions so far" items={brief.assumptions.map((item) => presentationText(item.text))} />
-          <BriefSection title="Worth confirming" items={brief.open_questions.map((item) => item.text)} />
+          {worthConfirming.length ? <BriefSection title="Worth confirming" items={worthConfirming} /> : null}
           <div className="border border-awsBorder bg-surface p-3">
             <div className="text-xs uppercase tracking-[0.12em] text-awsTextMuted">Readiness</div>
             <div className="mt-1 text-awsTextPrimary">{readiness?.can_proceed ? "Good enough to proceed" : "Proceed with assumptions"}</div>
