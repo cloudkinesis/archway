@@ -466,6 +466,42 @@ async def test_generic_open_world_pricing_uses_authority_resolver_when_live_enab
 
 
 @pytest.mark.asyncio
+async def test_generic_open_world_pricing_binds_notification_quantity_when_actions_exist(monkeypatch):
+    monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "true")
+    get_settings.cache_clear()
+    calls = []
+
+    def fake_bind(self, dimension, *, region_code):  # noqa: ARG001
+        calls.append(dimension)
+        return AwsRateBinding(
+            service_name=dimension.service_name,
+            aws_service_code=dimension.aws_service_code,
+            unit=dimension.unit,
+            source="unbound",
+            confidence="none",
+            binding_status="unsupported",
+            notes=["test stops before live rate binding"],
+        )
+
+    monkeypatch.setattr("app.services.aws_rate_binding_engine.AwsRateBindingEngine.bind", fake_bind)
+    brief = SynthesisEngine().create_initial_brief(
+        "Monitor 75 vaults with telemetry every 20 seconds, notify curators, and require approval for status changes."
+    )
+
+    estimate = await PricingEngine().estimate(
+        brief,
+        [AWSServiceSelection(service="Amazon SNS", purpose="notify curators", rationale="managed notifications")],
+    )
+
+    dimension = estimate.metadata["service_usage_dimensions"][0]
+    assert calls
+    assert dimension["service_name"] == "Amazon SNS"
+    assert dimension["quantity"] is not None
+    assert dimension["unit"] == "requests/month"
+    assert "notification publish" in dimension["usage_name"]
+
+
+@pytest.mark.asyncio
 async def test_generic_open_world_pricing_stays_offline_without_live_authority(monkeypatch):
     monkeypatch.setenv("ARCHWAY_ENABLE_AWS_PRICING_MCP", "false")
     monkeypatch.delenv("ARCHWAY_AWS_PRICING_MCP_COMMAND", raising=False)

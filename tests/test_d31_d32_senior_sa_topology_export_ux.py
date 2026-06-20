@@ -6,7 +6,9 @@ from app.models.domain import AWSServiceRecommendation, PricingAnalysis, Researc
 from app.services.convergence.golden_convergence_orchestrator import _architecture_domain_contamination_findings
 from app.services.architecture import ArchitecturePlanner
 from app.services.export_package import ExportPackageService
+from app.services.pricing import derive_pricing_drivers
 from app.services.synthesis import SynthesisEngine
+from app.services.use_case_profile import profile_from_metadata
 
 
 NOVEL_CUSTODY_TELEMETRY_USE_CASE = (
@@ -143,6 +145,19 @@ def test_generic_approval_workflow_does_not_inherit_healthcare_or_topology():
     assert "hospital" not in text.lower()
     assert "Operational Event Stream" in text
     assert "Governed recovery" in text or "Tool Governance Workflow" in text
+    assert any("Seed Lots" in spec.title or "Cold Room Vaults" in spec.title for spec in specs)
+
+
+def test_actor_counts_do_not_override_monitored_asset_count_for_open_world_pricing():
+    brief = SynthesisEngine().create_initial_brief(
+        "A seed bank tracks 75 cold-room vaults with telemetry every 20 seconds and has 250 curator users."
+    )
+    profile = profile_from_metadata(brief.use_case_profile, brief.raw_use_case)
+
+    drivers = derive_pricing_drivers(profile)
+
+    assert drivers.asset_count == 75
+    assert drivers.asset_count != 250
 
 
 def test_architecture_domain_contamination_blocks_unsupported_healthcare_leakage():

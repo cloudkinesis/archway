@@ -73,6 +73,14 @@ class ArchitecturePlanner:
 
 
 def _workload_title(profile) -> str:
+    entity = _workload_entity_label(profile)
+    action = _workload_action_label(profile)
+    if entity != "Workload" and action != "Workload Decision":
+        return f"{entity} {action}"
+    if entity != "Workload":
+        return f"{entity} Platform"
+    if action != "Workload Decision":
+        return f"{action} Platform"
     return " + ".join(family.replace("_", " ").title() for family in profile.workload_families[:3])
 
 
@@ -156,7 +164,7 @@ def _architecture_summary(base: str, *, context: dict | None, production: bool) 
 def _clean_base_architecture_summary(base: str, context: dict | None) -> str:
     text = " ".join(str(base or "").split()).strip()
     profile_text = str((context or {}).get("profile_text") or "").lower()
-    if "anomaly" in profile_text or "fraud" in profile_text:
+    if "fraud" in profile_text:
         return text
     replacements = {
         "false positives, false negatives, and alert latency": "decision quality, operator workflow accuracy, and alert latency",
@@ -169,7 +177,21 @@ def _clean_base_architecture_summary(base: str, context: dict | None) -> str:
     }
     for source, target in replacements.items():
         text = re.sub(re.escape(source), target, text, flags=re.IGNORECASE)
+    entity = _context_title_fragment(context, "entities")
+    action = _context_title_fragment(context, "actions")
+    if entity and action and not text.lower().startswith(entity.lower()):
+        text = f"For {entity.lower()} operations, {text[0].lower() + text[1:] if text else text}"
+    if action and action.lower() not in text.lower():
+        text = f"{text.rstrip('.')}. Keep the {action.lower()} path explicit for review"
     return text
+
+
+def _context_title_fragment(context: dict | None, key: str) -> str:
+    values = (context or {}).get(key) if isinstance(context, dict) else None
+    if not isinstance(values, list):
+        return ""
+    candidates = _clean_architecture_fact_list(values, limit=1)
+    return _title_fragment(candidates[0]) if candidates else ""
 
 
 def _clean_architecture_fact_list(values: list[Any], *, limit: int) -> list[str]:
