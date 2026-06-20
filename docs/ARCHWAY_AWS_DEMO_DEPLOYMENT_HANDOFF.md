@@ -678,7 +678,106 @@ curl -s -X POST https://YOUR_DEMO_DOMAIN/api/health/retry
 
 when changing external provider config; regular health checks cache remote checks briefly.
 
-## 14. Browser Smoke Test
+## 14. Active Monitoring and Logs
+
+Archway has two logging layers. Operators should check both during a live session.
+
+### Runtime / Server Logs
+
+The backend writes structured JSON-style audit events and server messages to stdout/stderr through Python logging. The logging setup is in `app/core/logging.py`.
+
+For EC2/systemd deployment:
+
+```bash
+journalctl -u archway -f
+journalctl -u archway --since "30 minutes ago"
+```
+
+For ECS Fargate deployment, configure the task definition with the `awslogs` log driver. Recommended values:
+
+```text
+logConfiguration:
+  logDriver: awslogs
+  options:
+    awslogs-group: /archway/demo
+    awslogs-region: us-east-1
+    awslogs-stream-prefix: archway
+```
+
+Then inspect:
+
+```text
+CloudWatch Logs group: /archway/demo
+CloudWatch Logs stream pattern: archway/<container-name>/<task-id>
+```
+
+Useful runtime events to watch for:
+
+- FastAPI/Uvicorn startup and request errors.
+- Bedrock failures, timeouts, or schema validation retries.
+- Tavily or MCP lookup failures.
+- Job failures from research, architecture, diagrams, or export.
+- D2 diagram compiler errors or timeouts.
+- Export ZIP creation errors.
+
+### Per-Session Audit Logs
+
+Each Archway session also gets its own audit log file. This is the best place to inspect what happened during a specific user run.
+
+If `ARCHWAY_DATA_DIR=/var/lib/archway`, the file is:
+
+```text
+/var/lib/archway/sessions/<session_id>/logs/audit.jsonl
+```
+
+Local default:
+
+```text
+.archway/sessions/<session_id>/logs/audit.jsonl
+```
+
+This file is JSONL: one redacted event per line. It records phase transitions and tool events such as:
+
+- `synthesis/session_created`
+- `synthesis/message_processed`
+- `research/job_submitted`, `research/job_started`, `research/job_completed`, `research/job_failed`
+- Tavily search started/completed events
+- MCP tool call events
+- architecture job events
+- diagram compiler timing events
+- export job events
+
+The same session log is exposed through:
+
+```text
+GET /api/sessions/<session_id>/diagnostics
+GET /api/sessions/<session_id>/export
+```
+
+The export ZIP also includes diagnostic and raw trace artifacts, including audit/diagnostic data.
+
+### Recommended Demo Alarms
+
+For a short-lived demo, at minimum monitor:
+
+- ECS task or EC2 process health.
+- ALB target 5xx count.
+- ALB target response time.
+- CloudWatch Logs filter for `job_failed`.
+- CloudWatch Logs filter for `Bedrock call failed`.
+- CloudWatch Logs filter for `d2_render_failed` or `d2_render_timeout`.
+- Disk or EFS usage for `/var/lib/archway`.
+
+If a user reports that a session is stuck, first find the session id in the UI/sidebar, then check:
+
+```bash
+journalctl -u archway --since "30 minutes ago" | grep <session_id>
+cat /var/lib/archway/sessions/<session_id>/logs/audit.jsonl
+```
+
+For Fargate, search the CloudWatch Logs group `/archway/demo` for the same `session_id`.
+
+## 15. Browser Smoke Test
 
 Use a brand-new scenario, not a known golden fixture.
 
@@ -709,7 +808,7 @@ Use a brand-new scenario, not a known golden fixture.
 
 The desired demo outcome is usually `workshop_ready`. Do not force `procurement_ready`; that should happen only when exact pricing quantities and authoritative rate bindings are confirmed.
 
-## 15. Test Commands
+## 16. Test Commands
 
 Run from repository root.
 
@@ -774,7 +873,7 @@ ARCHWAY_LLM_PROVIDER=bedrock \
 
 Only run live eval when Bedrock credentials/model access and quota are available.
 
-## 16. Deployment Update Procedure
+## 17. Deployment Update Procedure
 
 For a docs/code update:
 
@@ -800,7 +899,7 @@ curl -s https://YOUR_DEMO_DOMAIN/api/health
 curl -s https://YOUR_DEMO_DOMAIN/api/build/status
 ```
 
-## 17. Troubleshooting
+## 18. Troubleshooting
 
 ### Health says Bedrock is degraded
 
@@ -851,7 +950,7 @@ This is often correct. Inspect:
 
 If rates are unbound or quantities are assumed, Archway should withhold procurement-ready claims.
 
-## 18. What Not To Change Casually
+## 19. What Not To Change Casually
 
 Do not casually change these without tests:
 
@@ -867,7 +966,7 @@ Do not casually change these without tests:
 
 Any change in those areas should run full pytest, frontend build, and RC2 golden validation.
 
-## 19. Current Confidence and Honest Limits
+## 20. Current Confidence and Honest Limits
 
 Current validated state before this handoff:
 
@@ -886,7 +985,7 @@ Honest limits:
 - Procurement-ready pricing requires authoritative rates and confirmed quantities; many arbitrary use cases will be workshop-ready or directional until pricing evidence is complete.
 - AWS deployment should be treated as private beta/demo unless an authentication and tenancy layer is added.
 
-## 20. Quick Operator Checklist
+## 21. Quick Operator Checklist
 
 Before a stakeholder demo:
 
