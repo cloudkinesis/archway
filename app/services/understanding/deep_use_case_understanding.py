@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.core.config import get_settings
 from app.services.llm.base import LLMMessage, LLMTask, LLMTaskType
 from app.services.llm.model_router import ModelRouter
 from app.services.metric_extractor import extract_metrics
@@ -47,6 +48,19 @@ class ActionFlowUnderstanding(BaseModel):
     recommended_failure_behavior: Literal["block", "queue_for_review", "allow_with_audit", "rollback", "recommendation_only"] = "queue_for_review"
 
 
+class FamilyTopologyJudgeReview(BaseModel):
+    status: Literal["not_attempted", "accepted", "failed"] = "not_attempted"
+    decision: Literal["accept", "downgrade", "reject", "needs_review", "not_attempted"] = "not_attempted"
+    fit_confidence: Literal["low", "medium", "high"] = "low"
+    accepted_families: list[str] = Field(default_factory=list)
+    rejected_families: list[str] = Field(default_factory=list)
+    rationale: str = ""
+    risks: list[str] = Field(default_factory=list)
+    evidence_gaps: list[str] = Field(default_factory=list)
+    judge_model_id: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
 class DeepUseCaseUnderstanding(BaseModel):
     industry: str
     domain: str
@@ -65,6 +79,7 @@ class DeepUseCaseUnderstanding(BaseModel):
     confidence: Literal["low", "medium", "high"] = "medium"
     concerns: list[str] = Field(default_factory=list)
     enhancement_status: str = "deterministic"
+    family_topology_judge: FamilyTopologyJudgeReview | None = None
 
 
 class DeepUseCaseUnderstandingService:
@@ -85,6 +100,7 @@ class DeepUseCaseUnderstandingService:
             _merge_deterministic_metrics(parsed, deterministic)
             _merge_deterministic_deployment_posture(parsed, deterministic)
             parsed.enhancement_status = f"{result.provider}_validated"
+            parsed.family_topology_judge = await _review_family_topology_fit(raw_use_case, profile, parsed, session_id)
             return parsed
         deterministic.concerns.extend(result.warnings)
         deterministic.enhancement_status = "deterministic_fallback"
@@ -173,6 +189,63 @@ def deterministic_understanding(raw_use_case: str, profile: UseCaseProfile | Non
     )
 
 
+async def _review_family_topology_fit(
+    raw_use_case: str,
+    deterministic_profile: UseCaseProfile,
+    understanding: DeepUseCaseUnderstanding,
+    session_id: str | None,
+) -> FamilyTopologyJudgeReview:
+    settings = get_settings()
+    if not settings.enable_llm_judge:
+        return FamilyTopologyJudgeReview(
+            status="not_attempted",
+            decision="not_attempted",
+            rationale="LLM judge is disabled.",
+            judge_model_id=settings.bedrock_judge_model_id,
+        )
+    if not settings.bedrock_judge_model_id:
+        return FamilyTopologyJudgeReview(
+            status="failed",
+            decision="needs_review",
+            rationale="LLM judge is enabled but ARCHWAY_BEDROCK_JUDGE_MODEL_ID is not configured.",
+            judge_model_id=None,
+            warnings=["judge_model_not_configured"],
+        )
+    result = await ModelRouter().complete(
+        LLMTask(task_type=LLMTaskType.llm_judge_review, session_id=session_id, name="family_topology_fit", model_role="judge"),
+        [
+            LLMMessage(role="system", content=_judge_system_prompt()),
+            LLMMessage(
+                role="user",
+                content=(
+                    f"Raw use case:\n{raw_use_case}\n\n"
+                    f"Deterministic extraction:\n{profile_to_metadata(deterministic_profile)}\n\n"
+                    f"Main-model proposed understanding:\n{understanding.model_dump(mode='json', exclude={'family_topology_judge'})}\n\n"
+                    "Review whether the proposed workload families/topology intent fits the use case. "
+                    "Do not propose prices. Do not add AWS service facts unless directly implied by the use case. "
+                    "If the family appears borrowed from telemetry/ML/streaming without evidence, downgrade or reject it."
+                ),
+            ),
+        ],
+        response_schema=FamilyTopologyJudgeReview,
+        temperature=0,
+        timeout_seconds=settings.bedrock_timeout_seconds,
+    )
+    if result.validated and isinstance(result.parsed, FamilyTopologyJudgeReview):
+        review = result.parsed
+        review.status = "accepted"
+        review.judge_model_id = result.model_id
+        review.warnings.extend(result.warnings)
+        return review
+    return FamilyTopologyJudgeReview(
+        status="failed",
+        decision="needs_review",
+        rationale="LLM judge response did not validate; LLM family authority must not be promoted by judge.",
+        judge_model_id=result.model_id,
+        warnings=result.warnings or ["judge_response_invalid"],
+    )
+
+
 def _merge_deterministic_metrics(parsed: DeepUseCaseUnderstanding, deterministic: DeepUseCaseUnderstanding) -> None:
     """Preserve deterministic numeric facts when a live model omits them."""
     existing = {metric.name for metric in parsed.extracted_metrics}
@@ -230,4 +303,15 @@ def _system_prompt() -> str:
         "You are Archway's AWS solution-understanding reviewer. Return JSON only. "
         "Use only the provided use case and deterministic extraction. Do not invent prices, AWS facts, or compliance. "
         "If unsure, mark requires_validation or add a concern."
+    )
+
+
+def _judge_system_prompt() -> str:
+    return (
+        "You are Archway's independent topology-fit judge. Return JSON only. "
+        "Your job is not to design a new architecture. Judge whether the main model's "
+        "workload families and topology intent fit the user's stated use case. "
+        "Accept only when the proposed family is directly supported by the use case. "
+        "Downgrade or reject borrowed telemetry, ML, streaming, healthcare, finance, or other domain topology "
+        "when the use case does not provide evidence for it. Prefer needs_review over false confidence."
     )
