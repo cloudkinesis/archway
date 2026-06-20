@@ -19,6 +19,7 @@ from app.domain.source_of_truth import (
     ServiceUsageDimension,
 )
 from app.models.domain import PricingAnalysis
+from app.services.canonical_intent import is_document_size_or_count, is_latency_seconds
 from app.services.aws_rate_binding_engine import AwsRateBindingEngine
 from app.services.pricing_driver_closure import build_pricing_driver_closure
 from app.services.pricing_driver_selector import PricingDriverFamily
@@ -360,6 +361,11 @@ def _generic_usage_dimension(
         unit = "inferences/month"
         usage_name = "derived model scoring requests"
         formula = generic["ml_inference_formula"]
+    elif "textract" in key and generic.get("monthly_document_pages"):
+        quantity = Decimal(str(round(generic["monthly_document_pages"], 4)))
+        unit = "pages/month"
+        usage_name = "derived document extraction pages"
+        formula = "applications_or_documents_per_month * pages_per_document_or_packet; exact Textract feature type and page tier must be confirmed before procurement."
     elif any(term in key for term in ("rekognition", "textract", "bedrock", "comprehend")) and generic["monthly_inferences"]:
         quantity = Decimal(str(round(generic["monthly_inferences"], 4)))
         unit = "inferences/month"
@@ -516,6 +522,7 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
     direct_storage_gb_per_month_by_class: dict[str, float] = {}
     retention_months_by_class: dict[str, float] = {}
     text_items_monthly = 0.0
+    document_pages_per_item = 0.0
     direct_monthly_events = 0.0
     direct_daily_events = 0.0
     direct_hourly_events = 0.0
@@ -570,6 +577,8 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
             )
         if _looks_like_text_items_per_month(name, unit, source):
             text_items_monthly += value
+        if _looks_like_document_pages_per_item(name, unit, source):
+            document_pages_per_item = max(document_pages_per_item, value)
         if fact.source == "derived":
             if key == "monthly_base":
                 derived_monthly_events = max(derived_monthly_events, value)
@@ -617,10 +626,11 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
         monthly_media_items = direct_event_monthly
     else:
         monthly_media_items = values.get("images_per_month", 0)
-    monthly_documents = values.get("documents_per_month", 0)
+    monthly_documents = values.get("documents_per_month", 0) or (monthly_base if document_pages_per_item else 0)
+    monthly_document_pages = monthly_documents * document_pages_per_item if monthly_documents and document_pages_per_item else 0
     monthly_notes = values.get("notes_per_month", 0) + text_items_monthly
-    monthly_inferences = monthly_media_items + monthly_documents + monthly_notes
-    ml_inferences = monthly_events or monthly_inferences
+    monthly_inferences = monthly_media_items + (monthly_document_pages or monthly_documents) + monthly_notes
+    ml_inferences = monthly_inferences or monthly_events
     monthly_actions = monthly_events or monthly_base or monthly_inferences
 
     retention_default = max(retention_months_by_class.values() or [12])
@@ -632,8 +642,12 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
         storage_by_class["telemetry"] = monthly_events * telemetry_payload_kb / (1024 * 1024) * max(1, telemetry_retention)
     if monthly_media_items and media_payload_mb:
         storage_by_class["media"] = monthly_media_items * media_payload_mb / 1024 * max(1, media_retention)
-    if monthly_documents or monthly_notes:
-        storage_by_class["evidence"] = (monthly_documents + monthly_notes) * 0.05 / 1024 * max(1, evidence_retention)
+    if monthly_document_pages or monthly_documents or monthly_notes:
+        # Use a conservative generic document-page size when the user gives page
+        # counts but not MB. This keeps storage in the right data class without
+        # pretending to know exact scan/image compression.
+        document_storage_items = monthly_document_pages or monthly_documents
+        storage_by_class["evidence"] = (document_storage_items + monthly_notes) * 0.05 / 1024 * max(1, evidence_retention)
     for storage_class, gb_per_month in direct_storage_gb_per_month_by_class.items():
         retention = retention_months_by_class.get(storage_class, retention_default)
         storage_by_class[storage_class] = max(storage_by_class.get(storage_class, 0.0), gb_per_month * max(1, retention))
@@ -653,6 +667,8 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
     return {
         "monthly_events": monthly_events,
         "monthly_inferences": monthly_inferences,
+        "monthly_document_pages": monthly_document_pages,
+        "monthly_documents": monthly_documents,
         "ml_inferences": ml_inferences,
         "monthly_actions": monthly_actions,
         "monthly_media_items": monthly_media_items,
@@ -670,7 +686,7 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
         "driver_names": driver_names,
         "event_formula": "Derived from typed workload streams; telemetry uses asset_count * seconds_per_month / cadence_seconds, while direct annual/monthly/daily volumes stay separate.",
         "inference_formula": "Derived from typed media/document/note streams; per-asset media uses asset_count * per_asset_multiplier / period_in_months.",
-        "ml_inference_formula": "Derived from the selected scoring stream; telemetry scoring uses monthly telemetry events unless a narrower scoring-window driver is confirmed.",
+        "ml_inference_formula": "Derived from the selected scoring or extraction stream; document extraction uses page/document volume, while telemetry scoring uses monthly telemetry events only when supported by typed stream evidence.",
         "action_formula": "Derived from typed workload events or workflow action counts; keep non-headline until workflow/API unit and rate binding is exact.",
         "storage_formula": "Sum per data class: item_count * normalized_payload_size * retention_months, converted to GB-month.",
     }
@@ -706,6 +722,8 @@ def _generic_fact_key(name: str, unit: str, source: str) -> str:
 
 def _looks_like_asset_count(name: str, unit: str, source: str) -> bool:
     text = f"{name} {unit} {source}".lower()
+    if is_document_size_or_count(name, unit, source):
+        return False
     if any(term in text for term in ("per_", " per ", "second", "minute", "hour", "day", "month", "year", "kb", "mb", "gb", "tb", "percent", "retention", "retain")):
         return False
     if any(term in text for term in _PEOPLE_UNITS):
@@ -735,6 +753,10 @@ def _compose_asset_count(candidates: list[tuple[float, str]]) -> float:
 
 def _looks_like_cadence_seconds(name: str, unit: str, source: str) -> bool:
     text = f"{name} {unit} {source}".lower()
+    if is_latency_seconds(name, unit, source):
+        return False
+    if not any(term in text for term in ("telemetry", "sensor", "reading", "readings", "gps", "update", "updates", "stream", "event stream", "iot", "message")):
+        return False
     return ("second" in text or re.search(r"\bevery\s+\d+(?:\.\d+)?\s*s\b", text)) and not any(term in text for term in ("retention", "retain"))
 
 
@@ -778,6 +800,15 @@ def _looks_like_base_item_rate_per_asset(name: str, unit: str, source: str) -> b
 def _looks_like_text_items_per_month(name: str, unit: str, source: str) -> bool:
     text = f"{name} {unit} {source}".lower()
     return any(term in text for term in ("note", "notes", "summary", "summaries")) and any(term in text for term in ("per month", "_per_month", "monthly"))
+
+
+def _looks_like_document_pages_per_item(name: str, unit: str, source: str) -> bool:
+    text = f"{name} {unit} {source}".lower()
+    if not any(term in text for term in ("page", "pages")):
+        return False
+    if any(term in text for term in ("per month", "_per_month", "monthly", "per day", "_per_day", "daily", "per year", "_per_year", "annual")):
+        return False
+    return any(term in text for term in ("document", "packet", "form", "pdf", "application", "case"))
 
 
 def _storage_class(text: str) -> str | None:

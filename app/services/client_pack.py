@@ -718,8 +718,9 @@ def _workload_context_section(context: dict | None) -> list[str]:
         rows.append("Governed actions: " + ", ".join(_client_label(item, capitalize=False) for item in context["actions"]))
     if context.get("quantities"):
         rows.append("Confirmed quantities: " + "; ".join(_client_text(item) for item in context["quantities"][:8]))
-    if context.get("latency_slos"):
-        rows.append("Latency or cadence constraints: " + "; ".join(_client_text(item) for item in context["latency_slos"]))
+    latency_rows = _filtered_fact_texts(context.get("latency_slos") or [], limit=6)
+    if latency_rows:
+        rows.append("Latency or cadence constraints: " + "; ".join(latency_rows))
     if context.get("connectivity_constraints"):
         rows.append("Connectivity constraints: " + ", ".join(_client_label(item, capitalize=False) for item in context["connectivity_constraints"]))
     if context.get("compliance_security_hints"):
@@ -737,7 +738,7 @@ def _workload_context_section(context: dict | None) -> list[str]:
 def _workload_quantity_rows(context: dict | None) -> list[str]:
     context = context or {}
     rows = [_client_text(item) for item in _filtered_quantity_texts(context.get("quantities") or [])]
-    rows.extend(_client_text(item) for item in context.get("latency_slos") or [])
+    rows.extend(_filtered_fact_texts(context.get("latency_slos") or [], limit=6))
     return list(dict.fromkeys(rows))[:12]
 
 
@@ -762,6 +763,43 @@ def _filtered_quantity_texts(values: list | tuple) -> list[str]:
             continue
         result.append(item)
     return result
+
+
+def _filtered_fact_texts(values: list | tuple, *, limit: int) -> list[str]:
+    low_signal = {
+        "unknown", "second", "seconds", "minute", "minutes", "hour", "hours",
+        "day", "days", "week", "weeks", "month", "months", "year", "years",
+    }
+    output: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = _client_text(value).strip(" ,.;")
+        if not text:
+            continue
+        parts = [
+            part.strip(" ,.;")
+            for part in re.split(r"(?<!\d)\s*[,;]\s*(?!\d)", text)
+            if part.strip(" ,.;")
+        ]
+        for part in parts or [text]:
+            lower = part.lower()
+            if lower in low_signal:
+                continue
+            if " unknown" in lower or lower.endswith(" unknown"):
+                part = re.sub(r"\bunknown\b", "", part, flags=re.IGNORECASE).strip(" ,.;")
+                lower = part.lower()
+            if not part or lower in low_signal:
+                continue
+            if not re.search(r"\d|[a-z]{4,}", lower):
+                continue
+            key = re.sub(r"\W+", " ", lower).strip()
+            if key in seen:
+                continue
+            seen.add(key)
+            output.append(part)
+            if len(output) >= limit:
+                return output
+    return output
 
 
 def _requirement_coverage_rows(spec: dict) -> list[str]:

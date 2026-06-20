@@ -1,7 +1,8 @@
 import re
 from typing import Any
 
-from app.models.domain import ArchitectureComponent, ArchitectureFlow, ArchitectureSpec, ResearchReport
+from app.models.domain import AWSServiceRecommendation, ArchitectureComponent, ArchitectureFlow, ArchitectureSpec, ResearchReport
+from app.services.canonical_intent import canonical_intent_for_profile
 from app.services.pattern_catalog import (
     expected_views,
     observability_controls,
@@ -21,10 +22,11 @@ class ArchitecturePlanner:
     def _build(self, report: ResearchReport, production: bool) -> ArchitectureSpec:
         profile_metadata = (report.metadata or {}).get("use_case_profile")
         profile = profile_from_metadata(profile_metadata, report.use_case_interpretation)
+        intent = canonical_intent_for_profile(profile, report.use_case_interpretation)
         components = pattern_components(profile, production=production)
-        components = _open_world_components(profile, components, raw_requirement_text=report.use_case_interpretation)
+        components = _open_world_components(profile, components, raw_requirement_text=report.use_case_interpretation, intent=intent)
         flows = pattern_flows(profile, production=production, components=components)
-        flows = _open_world_flows(profile, components, flows)
+        flows = _open_world_flows(profile, components, flows, intent=intent)
         mode = "production" if production else "poc"
         workload = _workload_title(profile)
         semantic = semantic_views(profile, production=production)
@@ -40,7 +42,7 @@ class ArchitecturePlanner:
                 context=workload_context,
                 production=production,
             ),
-            selected_services=report.aws_service_recommendations,
+            selected_services=_augment_selected_services(report.aws_service_recommendations, components, intent=intent),
             components=components,
             flows=flows,
             security_controls=security_controls(profile, production=production),
@@ -67,6 +69,16 @@ class ArchitecturePlanner:
                 "network_private_connectivity_view_status": _network_view_status(semantic, compiler),
                 "requirement_coverage": _requirement_coverage(profile, components, flows, production=production, snapshot=(report.metadata or {}).get("canonical_fact_snapshot")),
                 "workload_specific_context": workload_context,
+                "canonical_intent": {
+                    "streaming_evidence": intent.streaming_evidence,
+                    "document_evidence": intent.document_evidence,
+                    "approval_evidence": intent.approval_evidence,
+                    "notification_evidence": intent.notification_evidence,
+                    "external_integration_evidence": intent.external_integration_evidence,
+                    "audit_evidence": intent.audit_evidence,
+                    "geospatial_evidence": intent.geospatial_evidence,
+                    "reasons": list(intent.reasons),
+                },
                 "architecture_generation": "pattern_catalog",
             },
         )
@@ -149,7 +161,10 @@ def _architecture_summary(base: str, *, context: dict | None, production: bool) 
         elif item:
             latency.append(str(item).strip())
     latency = _clean_architecture_fact_list(latency, limit=3)
-    pieces = [_clean_base_architecture_summary(base, context).strip().rstrip(".")]
+    base_summary = _clean_base_architecture_summary(base, context).strip().rstrip(".")
+    if _summary_is_generic_or_misaligned(base_summary, context):
+        base_summary = _evidence_derived_architecture_summary(context, production=production)
+    pieces = [base_summary]
     if latency:
         pieces.append(f"Must carry extracted latency targets such as {', '.join(latency)}")
     if quantities:
@@ -159,6 +174,56 @@ def _architecture_summary(base: str, *, context: dict | None, production: bool) 
     else:
         pieces.append("POC design keeps measurable success criteria, pricing drivers, and governance assumptions visible for review")
     return ". ".join(piece for piece in pieces if piece) + "."
+
+
+def _summary_is_generic_or_misaligned(summary: str, context: dict | None) -> bool:
+    text = str(summary or "").lower()
+    if not text:
+        return True
+    generic_markers = (
+        "validate answer quality",
+        "safe retrieval",
+        "curated corpus",
+        "tool policy",
+        "write actions",
+        "generic",
+    )
+    if any(marker in text for marker in generic_markers):
+        return True
+    actions = _clean_architecture_fact_list((context or {}).get("actions") or [], limit=3)
+    signals = _clean_architecture_fact_list((context or {}).get("signals") or [], limit=3)
+    if actions and not any(action.lower() in text for action in actions):
+        return True
+    if signals and not any(signal.lower() in text for signal in signals):
+        return True
+    return False
+
+
+def _evidence_derived_architecture_summary(context: dict | None, *, production: bool) -> str:
+    context = context if isinstance(context, dict) else {}
+    entity = _context_title_fragment(context, "entities") or "the workload"
+    signals = _compact_fact_phrase(context.get("signals") or [], limit=3, fallback="customer-submitted records")
+    actions = _compact_fact_phrase(context.get("actions") or [], limit=3, fallback="policy checks, workflow decisions, and status updates")
+    actors = _compact_fact_phrase(context.get("actors") or [], limit=2, fallback="business users and operators")
+    if production:
+        return (
+            f"For {entity.lower()} operations, the production design ingests {signals}, "
+            f"applies {actions}, keeps human approval and exception handling explicit for {actors}, "
+            "and preserves audit, retention, encryption, observability, and integration boundaries for rollout review"
+        )
+    return (
+        f"For {entity.lower()} operations, the POC validates ingestion of {signals}, "
+        f"controlled execution of {actions}, and a reviewed path for {actors} before any automated action is trusted"
+    )
+
+
+def _compact_fact_phrase(values: list[Any], *, limit: int, fallback: str) -> str:
+    cleaned = _clean_architecture_fact_list(values, limit=limit)
+    if not cleaned:
+        return fallback
+    if len(cleaned) == 1:
+        return cleaned[0].lower()
+    return ", ".join(item.lower() for item in cleaned[:-1]) + f", and {cleaned[-1].lower()}"
 
 
 def _clean_base_architecture_summary(base: str, context: dict | None) -> str:
@@ -207,7 +272,7 @@ def _clean_architecture_fact_list(values: list[Any], *, limit: int) -> list[str]
             continue
         parts = [
             part.strip(" ,.;")
-            for part in re.split(r"(?<!\d)\s*,\s*(?!\d)", text)
+            for part in re.split(r"(?<!\d)\s*[,;]\s*(?!\d)", text)
             if part.strip(" ,.;")
         ]
         for part in parts or [text]:
@@ -217,7 +282,12 @@ def _clean_architecture_fact_list(values: list[Any], *, limit: int) -> list[str]
             if lowered.endswith(" unknown"):
                 part = part[: -len(" unknown")].strip(" ,.;")
                 lowered = part.lower()
+            if " unknown" in lowered:
+                part = re.sub(r"\bunknown\b", "", part, flags=re.IGNORECASE).strip(" ,.;")
+                lowered = part.lower()
             if not part or lowered in low_signal:
+                continue
+            if not re.search(r"\d|[a-z]{4,}", lowered):
                 continue
             key = re.sub(r"\W+", " ", lowered).strip()
             if not key or key in seen:
@@ -259,7 +329,92 @@ def _network_view_status(semantic: list[str], compiler: list[str]) -> dict[str, 
     }
 
 
-def _open_world_components(profile, components: list[ArchitectureComponent], *, raw_requirement_text: str = "") -> list[ArchitectureComponent]:
+def _augment_selected_services(
+    recommendations: list[AWSServiceRecommendation],
+    components: list[ArchitectureComponent],
+    *,
+    intent,
+) -> list[AWSServiceRecommendation]:
+    output = [
+        item for item in recommendations
+        if _service_supported_by_canonical_intent(item.service, intent)
+    ]
+    seen = {item.service.lower() for item in output}
+    roles = {str((component.metadata or {}).get("role") or ""): component for component in components}
+
+    def add(service: str, purpose: str, rationale: str, alternatives: list[str] | None = None) -> None:
+        if service.lower() in seen:
+            return
+        output.append(AWSServiceRecommendation(
+            service=service,
+            purpose=purpose,
+            rationale=rationale,
+            alternatives_considered=alternatives or [],
+            evidence_ids=[],
+        ))
+        seen.add(service.lower())
+
+    if intent.document_evidence or "document_text_processing" in roles:
+        add(
+            "Amazon Textract",
+            "Document OCR, text, and form extraction",
+            "Selected because the canonical workload intent includes documents, PDFs, forms, or OCR-style extraction before human review.",
+            ["Amazon Bedrock Data Automation", "Amazon Comprehend", "Custom OCR"],
+        )
+        add(
+            "Amazon S3",
+            "Document packet, evidence, and audit artifact storage",
+            "Selected because document payloads and appeal-ready evidence need durable lifecycle-managed storage.",
+            ["Amazon EFS", "Amazon Aurora"],
+        )
+    if intent.notification_evidence or "notification_service" in roles:
+        add(
+            "Amazon SNS / Amazon SES",
+            "SMS/email notification fan-out",
+            "Selected because the canonical workload intent requires outbound rider, caregiver, operator, or stakeholder notifications.",
+            ["Amazon Pinpoint", "EventBridge API Destinations"],
+        )
+    if intent.external_integration_evidence or "enterprise_integration_adapter" in roles:
+        add(
+            "Amazon API Gateway",
+            "External system integration boundary",
+            "Selected because the workload must integrate with existing systems through governed API or adapter boundaries.",
+            ["Amazon EventBridge API Destinations", "AWS PrivateLink", "AWS AppSync"],
+        )
+    if "integration_authorizer" in roles:
+        add(
+            "Amazon Cognito",
+            "Authenticated access for integration and partner-facing APIs",
+            "Selected because the architecture exposes an API integration boundary that needs a visible authentication or authorizer control.",
+            ["IAM Identity Center", "Customer IdP via SAML/OIDC"],
+        )
+    if "low_latency_read_model" in roles:
+        add(
+            "Amazon ElastiCache",
+            "Low-latency status and read-model cache",
+            "Selected because the workload includes interactive read or status queries with a strict low-second latency target.",
+            ["Amazon DynamoDB Accelerator", "Amazon DynamoDB materialized read model"],
+        )
+    if intent.audit_evidence or "evidence_archive" in roles:
+        add(
+            "Amazon S3 Object Lock",
+            "Immutable evidence archive option",
+            "Selected because the workload requires appeal-ready, traceable, or tamper-resistant audit evidence.",
+            ["Amazon QLDB", "Amazon Aurora PostgreSQL"],
+        )
+    return output
+
+
+def _service_supported_by_canonical_intent(service_name: str, intent) -> bool:
+    service = service_name.lower()
+    if "location" in service and not getattr(intent, "geospatial_evidence", False):
+        return False
+    if any(term in service for term in ("kinesis", "flink", "iot core", "managed service for apache flink")) and not getattr(intent, "streaming_evidence", False):
+        return False
+    return True
+
+
+def _open_world_components(profile, components: list[ArchitectureComponent], *, raw_requirement_text: str = "", intent=None) -> list[ArchitectureComponent]:
     """Add generic modality components for model-understood use cases.
 
     This deliberately keys off modality/capability signals instead of named
@@ -269,6 +424,7 @@ def _open_world_components(profile, components: list[ArchitectureComponent], *, 
     output = list(components)
     seen = {component.id for component in output}
     profile_text = f"{_profile_requirement_text(profile)} {raw_requirement_text or ''}".lower()
+    intent = intent or canonical_intent_for_profile(profile, raw_requirement_text)
     workload_action = _workload_action_label(profile)
     workload_entity = _workload_entity_label(profile)
 
@@ -303,7 +459,7 @@ def _open_world_components(profile, components: list[ArchitectureComponent], *, 
             logical_group="Open-world payload ingestion",
             metadata={"role": "file_payload_ingestion", "source": "open_world_requirement"},
         ))
-    if _requires_documents(profile, profile_text) and not _excludes_document_processing(profile):
+    if _requires_documents(profile, profile_text) and (intent.document_evidence or not _excludes_document_processing(profile)):
         add(ArchitectureComponent(
             id="text_document_processing",
             name=f"{workload_entity} Document and Notes Processing Path",
@@ -321,7 +477,7 @@ def _open_world_components(profile, components: list[ArchitectureComponent], *, 
             logical_group="Open-world edge and sync",
             metadata={"role": "offline_store_and_forward", "source": "open_world_requirement", "deployment_posture": "edge_store_and_forward"},
         ))
-    if _requires_real_time_stream(profile, profile_text):
+    if _requires_real_time_stream(profile, profile_text, intent=intent):
         add(ArchitectureComponent(
             id="stream_ingest",
             name=f"{workload_entity} Streaming Ingestion",
@@ -355,6 +511,32 @@ def _open_world_components(profile, components: list[ArchitectureComponent], *, 
             scope="regional_entry",
             logical_group="Enterprise integration boundary",
             metadata={"role": "enterprise_integration_adapter", "source": "open_world_requirement", "alternatives": ["Amazon EventBridge API Destinations", "AWS PrivateLink"]},
+        ))
+        add(ArchitectureComponent(
+            id="integration_authorizer",
+            name="Integration API Authorizer",
+            service="cognito",
+            scope="regional_identity",
+            logical_group="Enterprise integration boundary",
+            metadata={"role": "integration_authorizer", "source": "open_world_requirement", "alternatives": ["Amazon Cognito", "IAM Identity Center", "Customer IdP via SAML/OIDC"]},
+        ))
+    if _requires_low_latency_read_path(profile, profile_text):
+        add(ArchitectureComponent(
+            id="low_latency_read_model",
+            name=f"{workload_entity} Low-Latency Status and Read Model",
+            service="elasticache",
+            scope="vpc_resident",
+            logical_group="Low-latency read path",
+            metadata={"role": "low_latency_read_model", "source": "open_world_requirement", "alternatives": ["Amazon ElastiCache", "Amazon DynamoDB Accelerator", "Amazon DynamoDB materialized read model"]},
+        ))
+    if intent.notification_evidence:
+        add(ArchitectureComponent(
+            id="notification_service",
+            name="Applicant and Caregiver Notification Service",
+            service="sns_ses",
+            scope="regional_managed_data",
+            logical_group="Notification and outreach",
+            metadata={"role": "notification_service", "source": "open_world_requirement", "alternatives": ["Amazon SNS", "Amazon SES", "Amazon Pinpoint"]},
         ))
     if profile.actions and "workflow" not in seen and "policy" not in seen:
         add(ArchitectureComponent(
@@ -394,12 +576,14 @@ def _open_world_components(profile, components: list[ArchitectureComponent], *, 
     return output
 
 
-def _open_world_flows(profile, components: list[ArchitectureComponent], flows: list[ArchitectureFlow]) -> list[ArchitectureFlow]:
+def _open_world_flows(profile, components: list[ArchitectureComponent], flows: list[ArchitectureFlow], *, intent=None) -> list[ArchitectureFlow]:
     output = list(flows)
     ids = {component.id for component in components}
     index = len(output) + 1
     workload_action = _workload_action_label(profile).lower()
     workload_entity = _workload_entity_label(profile).lower()
+    profile_text = _profile_requirement_text(profile).lower()
+    intent = intent or canonical_intent_for_profile(profile)
 
     def add(source: str, target: str, label: str, protocol: str = "managed AWS service integration") -> None:
         nonlocal index
@@ -416,13 +600,18 @@ def _open_world_flows(profile, components: list[ArchitectureComponent], flows: l
 
     source_id = "edge_offline_sync" if "edge_offline_sync" in ids else "devices" if "devices" in ids else "user" if "user" in ids else ""
     if source_id:
-        add(source_id, "stream_ingest", f"Publish {workload_entity} telemetry and event facts into the hot path", "HTTPS/MQTT/TLS")
+        if intent.streaming_evidence:
+            add(source_id, "stream_ingest", f"Publish {workload_entity} source events into the hot path", "HTTPS/MQTT/TLS")
         add(source_id, "image_ingest", f"Capture and persist {workload_entity} image/video evidence with workload metadata", "HTTPS/MQTT/TLS")
         add(source_id, "file_payload_ingest", f"Capture {workload_entity} file payloads with lifecycle policy and audit tags", "HTTPS/MQTT/TLS")
-        add(source_id, "text_document_processing", f"Submit {workload_entity} notes, documents, or OCR text for extraction", "HTTPS/TLS")
-    add("enterprise_integration_adapter", "stream_ingest", "Normalize external system events into the streaming ingestion contract", "HTTPS/TLS")
-    add("stream_ingest", "privacy_boundary", "Filter sensitive fields before model prompts, dashboards, or external notifications")
+        if "privacy_boundary" not in ids:
+            add(source_id, "text_document_processing", f"Submit {workload_entity} notes, documents, or OCR text for extraction", "HTTPS/TLS")
+    if intent.streaming_evidence:
+        add("enterprise_integration_adapter", "stream_ingest", "Normalize external system events into the streaming ingestion contract", "HTTPS/TLS")
+        add("stream_ingest", "privacy_boundary", "Filter sensitive fields before model prompts, dashboards, or external notifications")
     add("privacy_boundary", "stream_rule_processor", f"Forward privacy-safe events for {workload_action} evaluation")
+    add("file_payload_ingest", "privacy_boundary", "Apply sensitive-data separation before extraction and model prompts")
+    add("privacy_boundary", "text_document_processing", f"Forward privacy-safe {workload_entity} documents for extraction")
     add("stream_ingest", "stream_rule_processor", f"Evaluate {workload_action} rules, windows, and thresholds on the hot path")
     add("stream_rule_processor", "events", "Provide validated workload events for workflow and notification consumers")
     add("stream_rule_processor", "audit_event_ledger", "Record event state, idempotency keys, and evaluation outcomes")
@@ -432,8 +621,18 @@ def _open_world_flows(profile, components: list[ArchitectureComponent], flows: l
     add("image_ingest", "vision_inference", f"Run preprocessing and model inference for {workload_action}")
     add("file_payload_ingest", "evidence_archive", "Persist file payloads under per-data-class retention controls")
     add("text_document_processing", "vision_inference", "Join extracted text with visual and event features")
+    add("text_document_processing", "human_review_workflow", _document_to_review_label(profile, profile_text, workload_action))
+    workflow_target = "human_review_workflow" if "human_review_workflow" in ids else "workflow" if "workflow" in ids else ""
+    if workflow_target:
+        add("integration_authorizer", "enterprise_integration_adapter", "Authorize partner and external-system API requests before integration access")
+        add("enterprise_integration_adapter", workflow_target, "Read governed external system records into the review workflow", "HTTPS/TLS")
+        add(workflow_target, "low_latency_read_model", "Publish approved status and summary facts into the low-latency read path")
+        add(workflow_target, "notification_service", "Send approved status, follow-up, and scheduling notifications")
+        add(workflow_target, "operational_dashboard", "Display workflow status, SLA, and exception metrics")
+    add("low_latency_read_model", "operational_dashboard", "Serve low-latency status, queue, and SLA views for operators")
+    add("notification_service", "audit_event_ledger", "Record notification delivery evidence and exceptions")
     if "vision_inference" in ids:
-        target = "human_review_workflow" if "human_review_workflow" in ids else "workflow" if "workflow" in ids else ""
+        target = workflow_target
         if target:
             add("vision_inference", target, f"Route {workload_action} recommendations to governed human review")
     if "human_review_workflow" in ids:
@@ -489,15 +688,14 @@ def _title_fragment(value: str) -> str:
 
 
 def _requires_imagery(profile, profile_text: str) -> bool:
-    return "computer_vision" in set(profile.capabilities or []) or any(
-        term in profile_text
-        for term in ("image", "imagery", "photo", "video", "camera", "vision", "multispectral", "ocr", "scan")
-    )
+    if any(term in profile_text for term in ("image", "imagery", "photo", "video", "camera", "vision", "multispectral")):
+        return True
+    return "computer_vision" in set(profile.capabilities or []) and not _requires_documents(profile, profile_text)
 
 
 def _requires_documents(profile, profile_text: str) -> bool:
     return "document_retrieval" in set(profile.capabilities or []) or any(
-        term in profile_text for term in ("document", "pdf", "docx", "note", "contract", "text", "ocr")
+        term in profile_text for term in ("document", "pdf", "docx", "note", "contract", "text", "ocr", "form", "forms", "packet", "packets", "approval letter", "approval letters")
     )
 
 
@@ -523,12 +721,13 @@ def _requires_intermitent_connectivity(profile, profile_text: str) -> bool:
     )
 
 
-def _requires_real_time_stream(profile, profile_text: str) -> bool:
+def _requires_real_time_stream(profile, profile_text: str, *, intent=None) -> bool:
+    if intent is not None:
+        return bool(intent.streaming_evidence)
     capabilities = set(getattr(profile, "capabilities", []) or []) | set(getattr(profile, "capability_model", []) or [])
-    return bool({"real_time_ingestion", "real_time_analytics", "device_telemetry", "stream_processing"} & capabilities) or any(
-        term in profile_text
-        for term in ("real time", "real-time", "live ", "telemetry", "gps", "sensor", "scan", "barcode", "every ", "within ", "stream")
-    )
+    if not bool({"real_time_ingestion", "device_telemetry", "stream_processing"} & capabilities):
+        return False
+    return canonical_intent_for_profile(profile, profile_text).streaming_evidence
 
 
 def _requires_sensitive_boundary(profile, profile_text: str) -> bool:
@@ -545,6 +744,32 @@ def _requires_external_integration(profile, profile_text: str) -> bool:
         term in profile_text
         for term in ("external", "integration", "erp", "crm", "lab", "partner", "vendor", "third-party", "existing")
     )
+
+
+def _requires_low_latency_read_path(profile, profile_text: str) -> bool:
+    """Require an explicit read model/cache for interactive low-second reads.
+
+    Low latency alone can describe batch generation or alerts. Read/query
+    language alone can use ordinary storage. The combination is the topology
+    signal a senior architecture review expects.
+    """
+    read_terms = (
+        "status", "query", "queries", "lookup", "look up", "read", "retrieve",
+        "answer", "dashboard", "browse", "search", "check", "checking",
+    )
+    if not any(term in profile_text for term in read_terms):
+        return False
+    latency_text = " ".join(str(item) for item in list(getattr(profile, "business_targets", []) or []))
+    latency_text = f"{latency_text} {profile_text}".lower()
+    if re.search(r"\b(?:sub[- ]?second|under\s+[1-5]\s*seconds?|within\s+[1-5]\s*seconds?|<\s*[1-5]\s*s)\b", latency_text):
+        return True
+    return bool(re.search(r"\b[1-5]\s*seconds?\b", latency_text))
+
+
+def _document_to_review_label(profile, profile_text: str, workload_action: str) -> str:
+    if any(term in profile_text for term in ("briefing packet", "briefing", "summary", "summaries", "generate", "generated")):
+        return f"Generate briefing-ready document facts and route them into {workload_action} review"
+    return f"Route extracted document facts into {workload_action} review"
 
 
 def _requires_audit_evidence(profile, profile_text: str) -> bool:
@@ -582,6 +807,10 @@ def _requirement_coverage(profile, components, flows, production: bool, snapshot
         *(getattr(component, "purpose", "") for component in components),
         *(getattr(component, "logical_group", "") or "" for component in components),
     ]).lower()
+    component_roles = {
+        str((getattr(component, "metadata", {}) or {}).get("role") or "")
+        for component in components
+    }
     flow_text = " ".join([*(getattr(flow, "label", "") or "" for flow in flows), *(" ".join(str(value) for value in getattr(flow, "metadata", {}).values()) for flow in flows)]).lower()
     body = f"{component_text} {flow_text}"
     requirements: list[dict[str, str]] = []
@@ -594,19 +823,23 @@ def _requirement_coverage(profile, components, flows, production: bool, snapshot
             "message": message,
         })
 
-    image_or_video_required = "computer_vision" in capabilities or any(
+    intent = canonical_intent_for_profile(profile, requirement_text)
+    image_or_video_required = (
+        ("computer_vision" in capabilities and not intent.document_evidence)
+        or any(
         term in requirement_text
-        for term in ("image", "imagery", "photo", "video", "camera", "vision", "multispectral", "ocr", "scan")
+        for term in ("image", "imagery", "photo", "video", "camera", "vision", "multispectral")
+        )
     )
     if image_or_video_required:
-        covered = any(term in body for term in ("video", "image", "imagery", "photo", "camera", "vision", "multispectral", "ocr", "rekognition", "textract"))
+        covered = any(term in body for term in ("video", "image", "imagery", "photo", "camera", "vision", "multispectral", "rekognition"))
         add(
             "computer_vision_hot_path",
             "Computer vision / imagery processing",
             "covered" if covered else "unmet",
             "Architecture carries an imagery/video inference path." if covered else "Computer-vision requirement was extracted but no imagery/video inference path is explicit.",
         )
-    file_payload_required = any(term in requirement_text for term in ("file", "files", "payload", "upload", "uploads", "mb", "gb", "attachment"))
+    file_payload_required = "file_payload_ingestion" in component_roles or any(term in requirement_text for term in ("file", "files", "payload", "upload", "uploads", "mb", "gb", "attachment"))
     if file_payload_required:
         covered = any(term in body for term in ("file", "payload", "upload", "s3", "object", "archive", "evidence"))
         add(
@@ -616,7 +849,9 @@ def _requirement_coverage(profile, components, flows, production: bool, snapshot
             "Architecture carries a file/payload ingestion and storage path." if covered else "File or payload upload requirements were extracted but no ingestion/storage path is explicit.",
         )
     document_required = not _excludes_document_processing(profile) and (
-        "document_retrieval" in capabilities or any(term in requirement_text for term in ("document", "pdf", "docx", "note", "contract", "text", "ocr"))
+        "document_text_processing" in component_roles
+        or "document_retrieval" in capabilities
+        or any(term in requirement_text for term in ("document", "pdf", "docx", "note", "contract", "text", "ocr", "form", "forms", "packet", "packets", "approval letter", "approval letters"))
     )
     if document_required:
         covered = any(term in body for term in ("document", "pdf", "docx", "text", "ocr", "textract", "knowledge base", "opensearch", "bedrock"))
@@ -716,17 +951,43 @@ def _workload_specific_context(profile, snapshot: dict | None, *, raw_requiremen
         if source and source not in quantities:
             quantities.append(source)
     quantities = _prefer_specific_quantity_sources(quantities)
+    profile_text = f"{_profile_requirement_text(profile)} {raw_requirement_text or ''}".lower()
+    support_text = f"{raw_requirement_text or ''} {_snapshot_requirement_text(snapshot)}".lower()
+    actions = [
+        item for item in list(dict.fromkeys(profile.actions or []))[:12]
+        if _context_term_supported(item, support_text)
+    ]
+    signals = [
+        item for item in list(dict.fromkeys(profile.signals or []))[:12]
+        if _context_term_supported(item, support_text)
+    ]
+    entities = [
+        item for item in list(dict.fromkeys(profile.entities or []))[:12]
+        if _context_term_supported(item, support_text)
+    ]
     return {
         "domain": profile.domain,
-        "profile_text": f"{_profile_requirement_text(profile)} {raw_requirement_text or ''}".lower(),
-        "signals": list(dict.fromkeys(profile.signals or []))[:12],
-        "actions": list(dict.fromkeys(profile.actions or []))[:12],
-        "entities": list(dict.fromkeys(profile.entities or []))[:12],
+        "profile_text": profile_text,
+        "signals": signals,
+        "actions": actions,
+        "entities": entities,
         "quantities": quantities[:16],
         "latency_slos": list(snapshot.get("latency_slos") or [])[:8],
         "connectivity_constraints": list(snapshot.get("connectivity_constraints") or [])[:8],
         "compliance_security_hints": list(snapshot.get("compliance_security_hints") or [])[:8],
     }
+
+
+def _context_term_supported(value: str, profile_text: str) -> bool:
+    normalized = str(value or "").replace("_", " ").lower().strip()
+    if not normalized:
+        return False
+    if normalized == "dispatch":
+        return bool(re.search(r"\bdispatch\s+(?:crew|crews|vehicle|vehicles|technician|technicians|driver|drivers|courier|couriers|team|teams|work|job|response|responder|responders)\b", profile_text))
+    if normalized == "recommend operational recovery action":
+        return "recovery" in profile_text and "recommend" in profile_text
+    tokens = [token for token in re.findall(r"[a-z0-9]+", normalized) if len(token) > 3]
+    return not tokens or any(token in profile_text for token in tokens)
 
 
 def _prefer_specific_quantity_sources(values: list[str]) -> list[str]:

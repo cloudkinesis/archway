@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 import json
 import time
@@ -53,7 +54,8 @@ class BedrockProvider:
             bedrock_messages, system_messages = _converse_messages(messages, response_schema)
             for attempt in range(settings.bedrock_retry_count + 1):
                 retry_count = attempt
-                response = client.converse(
+                response = await asyncio.to_thread(
+                    client.converse,
                     modelId=model_id,
                     messages=bedrock_messages,
                     system=system_messages,
@@ -132,6 +134,7 @@ class BedrockProvider:
             "model_id": settings.bedrock_main_model_id,
             "main_model_id": settings.bedrock_main_model_id,
             "judge_model_id": settings.bedrock_judge_model_id,
+            "judge_inference_profile_id": settings.bedrock_judge_inference_profile_id,
             "judge_enabled": settings.enable_llm_judge,
             "structured_output": settings.bedrock_enable_structured_output,
             "usage": result.token_usage,
@@ -155,8 +158,8 @@ class BedrockProvider:
 
 def _model_id_for_task(settings, task: LLMTask) -> str:
     if task.model_role == "judge":
-        if settings.enable_llm_judge and settings.bedrock_judge_model_id:
-            return settings.bedrock_judge_model_id
+        if settings.enable_llm_judge:
+            return settings.bedrock_judge_inference_profile_id or settings.bedrock_judge_model_id or ""
         return ""
     return settings.bedrock_main_model_id or settings.bedrock_model_id or ""
 

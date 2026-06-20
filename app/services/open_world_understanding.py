@@ -12,6 +12,7 @@ from app.services.agentic.live_audit import LiveCallAudit
 from app.services.agentic.live_bedrock_harness import LiveRunContext, live_call
 from app.services.capability_extractor import explicit_negative_constraints
 from app.services.dossier_manifest import stable_json_hash
+from app.services.canonical_intent import STREAM_SOURCE_TERMS, STREAM_TRANSPORT_TERMS
 from app.services.llm.base import LLMMessage, LLMTaskType
 from app.services.metric_extractor import extract_metrics
 from app.services.pricing_filter_mapper import _SERVICE_CODE_ALIASES, pricing_filter_plan_for_service
@@ -906,12 +907,37 @@ def _capabilities_from_understanding(understanding: CanonicalWorkloadUnderstandi
         label = item.label.lower()
         slug = _slug(label)
         capabilities.append(aliases.get(label, aliases.get(slug.replace("_", " "), slug)))
-    if understanding.events_signals and "stream_ingestion" not in capabilities:
+    if _understanding_has_streaming_evidence(understanding) and "stream_ingestion" not in capabilities:
         capabilities.append("stream_ingestion")
     if understanding.actions_workflows and "event_driven_workflow" not in capabilities:
         capabilities.append("event_driven_workflow")
     capabilities.extend(["security_governance", "observability", "audit_trail"])
     return list(dict.fromkeys(capabilities))
+
+
+def _understanding_has_streaming_evidence(understanding: CanonicalWorkloadUnderstanding) -> bool:
+    text = " ".join(
+        str(item)
+        for item in [
+            *[candidate.label for candidate in understanding.domain_candidates],
+            *[candidate.label for candidate in understanding.workload_family_candidates],
+            *[capability.label for capability in understanding.candidate_aws_capabilities],
+            *[signal.label for signal in understanding.events_signals],
+            *[action.label for action in understanding.actions_workflows],
+            *[entity.label for entity in understanding.data_classes],
+            *[source.label for source in understanding.source_systems],
+            understanding.workload_intent,
+        ]
+        if item
+    ).replace("_", " ").lower()
+    has_source_or_transport = any(term in text for term in STREAM_SOURCE_TERMS + STREAM_TRANSPORT_TERMS)
+    has_cadence = bool(
+        re.search(r"\bevery\s+\d+(?:\.\d+)?\s*(?:ms|milliseconds?|seconds?|minutes?|hours?)\b", text)
+        or re.search(r"\b\d+(?:\.\d+)?\s*(?:events?|updates?|messages?|readings?|transactions?)\s+per\s+(?:second|minute|hour|day)\b", text)
+        or "streaming" in text
+        or "stream processing" in text
+    )
+    return has_source_or_transport and has_cadence
 
 
 def _families_from_understanding(understanding: CanonicalWorkloadUnderstanding, capabilities: list[str]) -> list[str]:
