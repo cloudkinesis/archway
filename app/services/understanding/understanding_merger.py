@@ -16,7 +16,7 @@ def _judge_allows_family_authority(understanding: DeepUseCaseUnderstanding, llm_
     if review is None or review.status == "not_attempted":
         return True, llm_families, None
     rejected = set(review.rejected_families or [])
-    accepted = [family for family in (review.accepted_families or llm_families) if family in llm_families and family not in rejected]
+    accepted = [family for family in (review.accepted_families or []) if family in llm_families and family not in rejected]
     if review.status == "accepted" and review.decision == "accept" and accepted:
         return True, accepted, None
     return False, [family for family in llm_families if family not in rejected], f"judge_{review.decision}"

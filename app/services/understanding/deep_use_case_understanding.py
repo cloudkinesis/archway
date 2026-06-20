@@ -211,26 +211,35 @@ async def _review_family_topology_fit(
             judge_model_id=None,
             warnings=["judge_model_not_configured"],
         )
-    result = await ModelRouter().complete(
-        LLMTask(task_type=LLMTaskType.llm_judge_review, session_id=session_id, name="family_topology_fit", model_role="judge"),
-        [
-            LLMMessage(role="system", content=_judge_system_prompt()),
-            LLMMessage(
-                role="user",
-                content=(
-                    f"Raw use case:\n{raw_use_case}\n\n"
-                    f"Deterministic extraction:\n{profile_to_metadata(deterministic_profile)}\n\n"
-                    f"Main-model proposed understanding:\n{understanding.model_dump(mode='json', exclude={'family_topology_judge'})}\n\n"
-                    "Review whether the proposed workload families/topology intent fits the use case. "
-                    "Do not propose prices. Do not add AWS service facts unless directly implied by the use case. "
-                    "If the family appears borrowed from telemetry/ML/streaming without evidence, downgrade or reject it."
+    try:
+        result = await ModelRouter().complete(
+            LLMTask(task_type=LLMTaskType.llm_judge_review, session_id=session_id, name="family_topology_fit", model_role="judge"),
+            [
+                LLMMessage(role="system", content=_judge_system_prompt()),
+                LLMMessage(
+                    role="user",
+                    content=(
+                        f"Raw use case:\n{raw_use_case}\n\n"
+                        f"Deterministic extraction:\n{profile_to_metadata(deterministic_profile)}\n\n"
+                        f"Main-model proposed understanding:\n{understanding.model_dump(mode='json', exclude={'family_topology_judge'})}\n\n"
+                        "Review whether the proposed workload families/topology intent fits the use case. "
+                        "Do not propose prices. Do not add AWS service facts unless directly implied by the use case. "
+                        "If the family appears borrowed from telemetry/ML/streaming without evidence, downgrade or reject it."
+                    ),
                 ),
-            ),
-        ],
-        response_schema=FamilyTopologyJudgeReview,
-        temperature=0,
-        timeout_seconds=settings.bedrock_timeout_seconds,
-    )
+            ],
+            response_schema=FamilyTopologyJudgeReview,
+            temperature=0,
+            timeout_seconds=settings.bedrock_timeout_seconds,
+        )
+    except Exception as exc:  # noqa: BLE001 - judge failure must downgrade, not abort research
+        return FamilyTopologyJudgeReview(
+            status="failed",
+            decision="needs_review",
+            rationale="LLM judge invocation failed; LLM family authority must not be promoted by judge.",
+            judge_model_id=settings.bedrock_judge_model_id,
+            warnings=[f"judge_exception:{type(exc).__name__}"],
+        )
     if result.validated and isinstance(result.parsed, FamilyTopologyJudgeReview):
         review = result.parsed
         review.status = "accepted"

@@ -73,6 +73,37 @@ def test_judge_rejected_family_is_removed_from_llm_contribution():
     assert any(conflict.resolution == "judge_reject" for conflict in result.conflicts)
 
 
+def test_failed_judge_review_blocks_llm_family_authority():
+    profile, understanding = _understanding_with_llm_family()
+    understanding.family_topology_judge = FamilyTopologyJudgeReview(
+        status="failed",
+        decision="needs_review",
+        fit_confidence="low",
+        rationale="Judge response did not validate.",
+    )
+
+    result = UnderstandingMerger().merge(profile, understanding)
+
+    assert result.profile_metadata["workload_families"][0] == profile.workload_families[0]
+    assert any(conflict.resolution == "judge_needs_review" for conflict in result.conflicts)
+
+
+def test_judge_accept_with_empty_family_set_blocks_llm_family_authority():
+    profile, understanding = _understanding_with_llm_family()
+    understanding.family_topology_judge = FamilyTopologyJudgeReview(
+        status="accepted",
+        decision="accept",
+        fit_confidence="low",
+        accepted_families=[],
+        rationale="Empty accepted family set cannot authorize topology authority.",
+    )
+
+    result = UnderstandingMerger().merge(profile, understanding)
+
+    assert result.profile_metadata["workload_families"][0] == profile.workload_families[0]
+    assert any(conflict.resolution == "judge_accept" for conflict in result.conflicts)
+
+
 def test_missing_judge_review_preserves_d36_behavior():
     profile, understanding = _understanding_with_llm_family()
     understanding.family_topology_judge = None
