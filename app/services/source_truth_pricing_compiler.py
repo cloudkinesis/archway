@@ -167,35 +167,71 @@ def _compile_generic_not_estimated(
         for line in pricing.line_items
     ]
     rate_bindings = [_generic_rate_binding(dimension, region_code=pricing.region) for dimension in usage_dimensions]
-    ledger = PricingLedger(
-        line_items=[
-            PricingLedgerLineItem(
-                service_name=dimension.service_name,
-                usage_name=dimension.usage_name,
-                quantity=None,
-                quantity_unit=dimension.unit,
-                formula=dimension.formula,
-                rate_binding_id=rate_bindings[index].id if index < len(rate_bindings) else None,
-                unit_price=None,
-                monthly_total=None,
-                evidence_class="not_estimated",
+    ledger = _pricing_ledger(pricing, usage_dimensions, rate_bindings, assumptions)
+    has_quantity_backing = any(item.quantity is not None for item in ledger.line_items)
+    has_critical_plausibility = any(
+        str(item.get("severity") or "").lower() == "critical"
+        for item in generic_context.get("plausibility_findings") or []
+    )
+    mode = "generic_quantity_backed_directional" if has_quantity_backing and not has_critical_plausibility else "generic_not_estimated"
+    original_status = str(pricing.metadata.get("status") or "")
+    if mode == "generic_quantity_backed_directional":
+        # A generic/open-world workload may have coherent quantities but still lacks
+        # enough service-specific SKU authority for procurement. Keep quantities and
+        # heuristic totals visible for workshop planning, but fail closed on headline
+        # and procurement readiness.
+        for item in ledger.line_items:
+            item.procurement_ready = False
+            if item.evidence_class == "sku_tier_backed":
+                item.evidence_class = "price_catalog_referenced"
+            item.confidence = "medium" if item.quantity is not None else "low"
+            if item.quantity is not None:
+                item.limitations.append(
+                    "Quantity is derived from the typed canonical fact graph; exact SKU/tier binding is still required before procurement use."
+                )
+        ledger.summary.procurement_ready = False
+        ledger.summary.headline_safe = False
+        ledger.summary.sku_tier_backed_subtotal = Decimal("0")
+        ledger.summary.pricing_page_or_mcp_backed_subtotal = Decimal("0")
+        ledger.summary.heuristic_subtotal = sum(
+            (Decimal(str(item.monthly_total)) for item in ledger.line_items if item.monthly_total is not None),
+            Decimal("0"),
+        )
+    else:
+        ledger = PricingLedger(
+            line_items=[
+                PricingLedgerLineItem(
+                    service_name=dimension.service_name,
+                    usage_name=dimension.usage_name,
+                    quantity=None,
+                    quantity_unit=dimension.unit,
+                    formula=dimension.formula,
+                    rate_binding_id=rate_bindings[index].id if index < len(rate_bindings) else None,
+                    unit_price=None,
+                    monthly_total=None,
+                    evidence_class="not_estimated",
+                    procurement_ready=False,
+                    confidence="low",
+                    assumptions=[],
+                    limitations=[
+                        "Directional local range exists, but source-truth usage and AWS rate binding are not yet available for this workload family.",
+                    ],
+                )
+                for index, dimension in enumerate(usage_dimensions)
+            ],
+            summary=PricingLedgerSummary(
+                sku_tier_backed_subtotal=Decimal("0"),
+                pricing_page_or_mcp_backed_subtotal=Decimal("0"),
+                heuristic_subtotal=Decimal("0"),
+                not_estimated_items=[dimension.service_name for dimension in usage_dimensions],
+                headline_safe=False,
                 procurement_ready=False,
-                confidence="low",
-                assumptions=[],
-                limitations=[
-                    "Directional local range exists, but source-truth usage and AWS rate binding are not yet available for this workload family.",
-                ],
-            )
-            for index, dimension in enumerate(usage_dimensions)
-        ],
-        summary=PricingLedgerSummary(
-            sku_tier_backed_subtotal=Decimal("0"),
-            pricing_page_or_mcp_backed_subtotal=Decimal("0"),
-            heuristic_subtotal=Decimal("0"),
-            not_estimated_items=[dimension.service_name for dimension in usage_dimensions],
-            headline_safe=False,
-            procurement_ready=False,
-        ),
+            ),
+        )
+    exposed_status = (
+        "generic_quantity_backed_directional"
+        if mode == "generic_quantity_backed_directional" and original_status in {"invalid_extracted_scale_not_applied", "invalid_placeholder", "generic_not_estimated", ""}
+        else (original_status or mode)
     )
     sanity = [
         finding(
@@ -204,13 +240,14 @@ def _compile_generic_not_estimated(
             category="pricing",
             title="Pricing Family Needs Usage Binding",
             description=(
-                "Archway captured workload facts, but this workload family does not yet have a source-truth "
-                "pricing formula and exact AWS rate binding. Treat any directional range as a planning placeholder."
+                "Archway captured workload facts and may have derived typed usage quantities, but this workload family "
+                "does not yet have full source-truth formulas and exact AWS rate bindings. Treat any directional range "
+                "as a planning placeholder."
             ),
             evidence=["pricing.metadata.source_truth_pricing_compiler.enabled=true"],
             auto_repairable=True,
             repair_strategy="Use the pricing-dimension lane to bind service-specific units, quantities, and AWS rates before showing a headline.",
-            customer_readiness_impact="cap_to_directional",
+            customer_readiness_impact="cap_to_workshop" if mode == "generic_quantity_backed_directional" else "cap_to_directional",
         )
     ]
     for item in generic_context.get("plausibility_findings") or []:
@@ -232,9 +269,14 @@ def _compile_generic_not_estimated(
             "workload_family": family,
             "headline_safe": False,
             "procurement_ready": False,
-            "mode": "generic_not_estimated",
-            "reason": "No source-truth pricing formula is bound for this workload family yet.",
+            "mode": mode,
+            "reason": (
+                "Typed generic quantities were applied, but exact SKU/tier rate authority is still required."
+                if mode == "generic_quantity_backed_directional"
+                else "No source-truth pricing formula is bound for this workload family yet."
+            ),
         },
+        "status": exposed_status,
         "canonical_facts": facts.model_dump(mode="json"),
         "assumption_ledger": assumptions.model_dump(mode="json"),
         "pricing_driver_bindings": [item.model_dump(mode="json") for item in driver_bindings],
@@ -245,7 +287,11 @@ def _compile_generic_not_estimated(
         "pricing_sanity_findings": [item.model_dump(mode="json") for item in sanity],
         "generic_quantity_context": _export_quantity_context(generic_context),
         "pricing_can_be_displayed_as_headline": False,
-        "headline_display": "Pricing withheld from executive headline because exact usage and AWS rate bindings are not available for this workload family.",
+        "headline_display": (
+            "Quantity-backed directional pricing is available for workshop discussion, but exact SKU/rate binding is required before procurement use."
+            if mode == "generic_quantity_backed_directional"
+            else "Pricing withheld from executive headline because exact usage and AWS rate bindings are not available for this workload family."
+        ),
     }
     closure = build_pricing_driver_closure(pricing, scenario_profile_used=getattr(drivers, "scenario_profile_id", None))
     pricing.metadata = {
@@ -256,13 +302,20 @@ def _compile_generic_not_estimated(
         "directional_scenario_allowed": closure.directional_scenario_allowed,
     }
     for line in pricing.line_items:
+        matching_dimension = next((item for item in usage_dimensions if item.service_name == line.service), None)
         line.pricing_trace = {
             **(line.pricing_trace or {}),
-            "calculation_source": "generic_not_estimated_source_truth_trace",
+            "calculation_source": f"{mode}_source_truth_trace",
             "procurement_ready": False,
             "headline_safe": False,
-            "pricing_validity": "not_estimated",
-            "reason": "No source-truth usage dimension and AWS rate binding are available for this service/workload family yet.",
+            "source_truth_quantity": str(matching_dimension.quantity) if matching_dimension and matching_dimension.quantity is not None else None,
+            "source_truth_quantity_unit": matching_dimension.unit if matching_dimension else None,
+            "pricing_validity": "quantity_backed_directional" if matching_dimension and matching_dimension.quantity is not None else "not_estimated",
+            "reason": (
+                "Typed source-truth quantity applied; exact AWS SKU/rate binding is still required before procurement."
+                if matching_dimension and matching_dimension.quantity is not None
+                else "No source-truth usage dimension and AWS rate binding are available for this service/workload family yet."
+            ),
         }
     return pricing
 

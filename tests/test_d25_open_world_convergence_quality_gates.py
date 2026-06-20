@@ -10,7 +10,7 @@ from app.models.domain import (
     SecurityControl,
 )
 from app.domain.source_of_truth import CanonicalFact, CanonicalFactsLedger
-from app.services.architecture import _architecture_summary, _open_world_components, _requirement_coverage, _workload_specific_context
+from app.services.architecture import _architecture_summary, _open_world_components, _open_world_flows, _requirement_coverage, _workload_specific_context
 from app.services.architecture_critique import (
     ArchitectureCritiqueFinding,
     _drop_non_actionable_positive_findings,
@@ -453,6 +453,28 @@ def test_open_world_components_do_not_add_document_processing_when_excluded():
     assert all(component.id != "text_document_processing" for component in components)
 
 
+def test_open_world_components_and_flows_use_extracted_workload_labels_without_named_templates():
+    profile = UseCaseProfile(
+        domain="orbital maintenance",
+        workload_families=["open_world_other"],
+        excluded_families=[],
+        capabilities=["computer_vision", "predictive_ml"],
+        entities=["inspection satellite"],
+        signals=["panel crack imagery"],
+        actions=["prioritize repair maneuver"],
+    )
+
+    components = _open_world_components(profile, [])
+    flows = _open_world_flows(profile, components, [])
+
+    component_text = " ".join(component.name for component in components).lower()
+    flow_text = " ".join(flow.label for flow in flows).lower()
+    assert "inspection satellite" in component_text
+    assert "prioritize repair maneuver" in component_text
+    assert "prioritize repair maneuver" in flow_text
+    assert "fraud" not in component_text + flow_text
+
+
 def test_requirement_coverage_does_not_require_document_path_when_excluded():
     profile = UseCaseProfile(
         domain="novel_operations",
@@ -641,6 +663,32 @@ def test_export_live_agent_calls_include_bedrock_llm_telemetry():
     assert audits[0].lane == "understanding"
     assert audits[0].validated is True
     assert audits[0].token_usage == {"input_tokens": 100, "output_tokens": 50}
+
+
+def test_export_live_agent_calls_derives_error_type_from_failed_bedrock_telemetry():
+    telemetry = SimpleNamespace(model_dump=lambda mode="json": {
+        "call_id": "llm_failed",
+        "session_id": "sess_test",
+        "task_type": LLMTaskType.architecture_critique.value,
+        "provider": "bedrock",
+        "model_id": "us.amazon.nova-pro-v1:0",
+        "started_at": "2026-06-17T00:00:00Z",
+        "completed_at": "2026-06-17T00:00:29Z",
+        "duration_ms": 29000,
+        "schema_validated": False,
+        "retry_count": 0,
+        "status": "failed",
+        "schema_name": "ArchitectureCritique",
+        "prompt_hash": "sha256:prompt",
+        "warnings": ["Bedrock call failed: TimeoutError: timed out"],
+    })
+
+    audits = _llm_telemetry_live_audits([telemetry])
+
+    assert len(audits) == 1
+    assert audits[0].status == "failed"
+    assert audits[0].error_type == "TimeoutError"
+    assert audits[0].lane == "architecture"
 
 
 def test_client_pack_hides_legacy_range_for_generic_not_estimated_pricing_and_shows_derived_quantities():

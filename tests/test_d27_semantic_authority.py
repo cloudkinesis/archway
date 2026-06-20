@@ -157,6 +157,19 @@ _LEGACY_INTENT_GUARDS = {
     },
 }
 
+_LEGACY_ARCHITECTURE_CRITIQUE_SUPPRESSORS = {
+    "_drop_satisfied_media_findings",
+    "_drop_satisfied_governance_findings",
+    "_drop_satisfied_human_approval_findings",
+    "_drop_satisfied_command_center_findings",
+    "_drop_satisfied_healthcare_occupancy_findings",
+    "_drop_satisfied_requirement_coverage_findings",
+    "_drop_satisfied_metric_findings",
+    "_drop_satisfied_pricing_driver_findings",
+    "_drop_satisfied_deployment_posture_findings",
+    "_drop_satisfied_service_rationale_findings",
+}
+
 
 @pytest.mark.parametrize("rel_path", sorted(_LEGACY_INTENT_GUARDS))
 def test_no_new_per_intent_or_refiner_guards(rel_path):
@@ -177,3 +190,22 @@ def test_no_new_per_intent_or_refiner_guards(rel_path):
     # The baseline must only shrink: a guard that no longer exists must be removed from it.
     stale = _LEGACY_INTENT_GUARDS[rel_path] - guards
     assert not stale, f"Remove now-deleted guards from the ratchet baseline for {rel_path}: {sorted(stale)}"
+
+
+def test_no_new_architecture_critique_scenario_suppressors():
+    rel_path = "app/services/architecture_critique.py"
+    source = (ROOT / rel_path).read_text()
+    tree = ast.parse(source)
+    suppressors = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith("_drop_satisfied_")
+    }
+    new_suppressors = suppressors - _LEGACY_ARCHITECTURE_CRITIQUE_SUPPRESSORS
+    assert not new_suppressors, (
+        f"{rel_path} introduced NEW architecture-critique suppressor(s): {sorted(new_suppressors)}. "
+        "Add generic reconciliation logic instead of scenario-shaped post-hoc suppression."
+    )
+    stale = _LEGACY_ARCHITECTURE_CRITIQUE_SUPPRESSORS - suppressors
+    assert not stale, f"Remove now-deleted suppressors from the ratchet baseline: {sorted(stale)}"
