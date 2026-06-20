@@ -38,6 +38,10 @@ def _bedrock_judge_model_id() -> str | None:
     return os.getenv("ARCHWAY_BEDROCK_JUDGE_MODEL_ID") or os.getenv("ARCHWAY_LLM_JUDGE_MODEL_ID") or None
 
 
+def _bedrock_judge_inference_profile_id() -> str | None:
+    return os.getenv("ARCHWAY_BEDROCK_JUDGE_INFERENCE_PROFILE_ID") or os.getenv("ARCHWAY_LLM_JUDGE_INFERENCE_PROFILE_ID") or None
+
+
 class Settings(BaseModel):
     env: str = Field(default_factory=lambda: os.getenv("ARCHWAY_ENV", "development"))
     cors_origins: list[str] = Field(
@@ -138,6 +142,7 @@ class Settings(BaseModel):
     bedrock_model_id: str | None = Field(default_factory=_bedrock_main_model_id)
     bedrock_main_model_id: str | None = Field(default_factory=_bedrock_main_model_id)
     bedrock_judge_model_id: str | None = Field(default_factory=_bedrock_judge_model_id)
+    bedrock_judge_inference_profile_id: str | None = Field(default_factory=_bedrock_judge_inference_profile_id)
     enable_llm_judge: bool = Field(default_factory=lambda: os.getenv("ARCHWAY_ENABLE_LLM_JUDGE", "false") == "true")
     bedrock_use_inference_profile: bool = Field(default_factory=lambda: os.getenv("ARCHWAY_BEDROCK_USE_INFERENCE_PROFILE", "false") == "true")
     bedrock_max_tokens: int = Field(default_factory=lambda: int(os.getenv("ARCHWAY_BEDROCK_MAX_TOKENS", "8192")))

@@ -11,6 +11,7 @@ from app.domain.pricing_drivers import (
     WorkflowPricingDrivers,
 )
 from app.models.domain import AWSServiceSelection, EvidenceItem, PricingAnalysis, PricingLineItem, UseCaseBrief
+from app.services.canonical_intent import canonical_intent_for_profile
 from app.services.pattern_catalog import pricing_dimensions
 from app.services.pricing_driver_selector import PricingDriverFamily, select_pricing_driver_family
 from app.services.source_truth_pricing_compiler import SourceTruthPricingCompiler
@@ -413,8 +414,16 @@ def derive_pricing_drivers(profile: UseCaseProfile, pricing_driver_overrides: di
             reporting_query_tb_scanned_monthly=reporting_query_tb_scanned_monthly,
             cache_node_hours_monthly=risk_grid_nodes * 720,
         )
+    intent = canonical_intent_for_profile(profile)
     advisory_driver_names = _advisory_pricing_driver_names(profile)
-    if advisory_driver_names and "real_time_ingestion" not in profile.capabilities:
+    open_world_directional = bool(
+        advisory_driver_names
+        or intent.document_evidence
+        or intent.approval_evidence
+        or intent.external_integration_evidence
+        or intent.audit_evidence
+    )
+    if open_world_directional and not intent.streaming_evidence:
         active_users = int(
             _structured_metric(profile, "asset_counts", "active_users")
             or _metric_value(profile, "active_users")

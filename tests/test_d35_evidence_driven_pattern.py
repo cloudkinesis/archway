@@ -41,7 +41,12 @@ def test_document_workflow_does_not_get_telemetry_topology():
 
 
 def test_genuine_streaming_family_keeps_telemetry_topology():
-    services = _services(_profile(["industrial_iot_streaming_ml", "event_driven_workflow"]))
+    services = _services(
+        _profile(
+            ["industrial_iot_streaming_ml", "event_driven_workflow"],
+            structured={"asset_counts": {"telemetry_frequency_seconds": {"value": 3.0}}},
+        )
+    )
     assert any("Kinesis" in svc for svc in services), services
 
 
@@ -78,5 +83,8 @@ def test_guard_strips_future_wrong_alias_without_streaming_evidence(monkeypatch)
 
 
 def test_native_streaming_pattern_family_remains_streaming():
-    prof = _profile(["operational_event_prediction_workflow"])
+    prof = _profile(
+        ["operational_event_prediction_workflow"],
+        structured={"asset_counts": {"telemetry_frequency_seconds": {"value": 3.0}}},
+    )
     assert any("Kinesis" in c.service for p in selected_patterns(prof) for c in p.services)

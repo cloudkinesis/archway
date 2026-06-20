@@ -201,13 +201,14 @@ async def _review_family_topology_fit(
             status="not_attempted",
             decision="not_attempted",
             rationale="LLM judge is disabled.",
-            judge_model_id=settings.bedrock_judge_model_id,
+            judge_model_id=settings.bedrock_judge_inference_profile_id or settings.bedrock_judge_model_id,
         )
-    if not settings.bedrock_judge_model_id:
+    judge_identifier = settings.bedrock_judge_inference_profile_id or settings.bedrock_judge_model_id
+    if not judge_identifier:
         return FamilyTopologyJudgeReview(
             status="failed",
             decision="needs_review",
-            rationale="LLM judge is enabled but ARCHWAY_BEDROCK_JUDGE_MODEL_ID is not configured.",
+            rationale="LLM judge is enabled but no judge model or inference profile is configured.",
             judge_model_id=None,
             warnings=["judge_model_not_configured"],
         )
@@ -237,7 +238,7 @@ async def _review_family_topology_fit(
             status="failed",
             decision="needs_review",
             rationale="LLM judge invocation failed; LLM family authority must not be promoted by judge.",
-            judge_model_id=settings.bedrock_judge_model_id,
+            judge_model_id=judge_identifier,
             warnings=[f"judge_exception:{type(exc).__name__}"],
         )
     if result.validated and isinstance(result.parsed, FamilyTopologyJudgeReview):

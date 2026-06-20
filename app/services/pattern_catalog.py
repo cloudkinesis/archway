@@ -15,6 +15,7 @@ from app.services.lane_planner import (
     resolve_domain_lane_model,
 )
 from app.services.display_labels import display_label
+from app.services.canonical_intent import STREAMING_CAPABILITIES, canonical_intent_for_profile
 from app.services.use_case_profile import UseCaseProfile
 from app.services.view_planner import compiler_views_for_semantic, plan_semantic_views
 
@@ -455,26 +456,14 @@ _STREAMING_HEAVY_PATTERN_IDS = frozenset({
     "industrial_iot_streaming_ml",
 })
 
-# Families that genuinely denote a streaming/telemetry workload. Presence of one is
-# trustworthy streaming evidence (unlike capabilities, which are over-tagged).
-_STREAMING_EVIDENCE_FAMILIES = frozenset({
-    "operational_event_prediction_workflow",
-    "industrial_iot_streaming_ml",
-    "real_time_anomaly_detection",
-    "telecom_network_analytics",
-    "cdr_congestion_prediction",
-    "live_streaming",
-})
-
-
 def _has_streaming_evidence(profile: UseCaseProfile) -> bool:
     """Positive justification for a telemetry/streaming topology.
 
-    Trusts the workload-family classification and the typed quantity graph (a real
-    cadence/frequency metric over monitored assets), NOT the capability tags, which are
-    over-generated and routinely mislabel document/approval workloads as streaming.
+    A family label alone is no longer enough. The label may be produced by a coarse
+    deterministic ranker, so streaming topology also needs source/cadence/transport
+    evidence from the canonical intent or a typed telemetry metric.
     """
-    if set(profile.workload_families or []) & _STREAMING_EVIDENCE_FAMILIES:
+    if canonical_intent_for_profile(profile).streaming_evidence:
         return True
     structured = getattr(profile, "structured_metrics", None) or {}
     for bucket in ("asset_counts", "business_targets", "telemetry_signals"):
@@ -974,7 +963,7 @@ def _family_pricing_dimensions(family: str) -> list[str]:
 
 
 def expected_views(profile: UseCaseProfile, production: bool) -> list[str]:
-    semantic = plan_semantic_views(_capabilities(profile), production=production, network_required=production and _network_required(profile, []))
+    semantic = plan_semantic_views(_intent_capabilities(profile), production=production, network_required=production and _network_required(profile, []))
     compiler_views = compiler_views_for_semantic(semantic)
     is_video_streaming = "video_streaming" in _capabilities(profile) or "live_streaming" in profile.workload_families
     for pattern in selected_patterns(profile):
@@ -987,7 +976,22 @@ def expected_views(profile: UseCaseProfile, production: bool) -> list[str]:
 
 
 def semantic_views(profile: UseCaseProfile, production: bool) -> list[str]:
-    return plan_semantic_views(_capabilities(profile), production=production, network_required=production and _network_required(profile, []))
+    return plan_semantic_views(_intent_capabilities(profile), production=production, network_required=production and _network_required(profile, []))
+
+
+def _intent_capabilities(profile: UseCaseProfile) -> list[str]:
+    capabilities = _capabilities(profile)
+    if canonical_intent_for_profile(profile).streaming_evidence:
+        return capabilities
+    blocked = set(STREAMING_CAPABILITIES) | {
+        "real_time_ingestion",
+        "real_time_analytics",
+        "stream_processing",
+        "device_telemetry",
+        "time_series_analytics",
+        "time_series_storage",
+    }
+    return [capability for capability in capabilities if capability not in blocked]
 
 
 def poc_scope(profile: UseCaseProfile) -> str:

@@ -219,6 +219,7 @@ class HealthService:
                     "region": settings.bedrock_region,
                     "main_model_id": None,
                     "judge_model_id": settings.bedrock_judge_model_id,
+                    "judge_inference_profile_id": settings.bedrock_judge_inference_profile_id,
                     "judge_enabled": settings.enable_llm_judge,
                 },
             )
@@ -258,6 +259,7 @@ class HealthService:
                 "bedrock_model_id": settings.bedrock_main_model_id or settings.bedrock_model_id,
                 "bedrock_main_model_id": settings.bedrock_main_model_id,
                 "bedrock_judge_model_id": settings.bedrock_judge_model_id,
+                "bedrock_judge_inference_profile_id": settings.bedrock_judge_inference_profile_id,
                 "llm_judge_enabled": settings.enable_llm_judge,
             },
         )

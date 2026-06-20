@@ -68,6 +68,19 @@ def test_bedrock_judge_model_routes_when_enabled(monkeypatch):
     assert _model_id_for_task(settings, LLMTask(task_type=LLMTaskType.open_world_understanding)) == "main-model"
 
 
+def test_bedrock_judge_inference_profile_takes_precedence(monkeypatch):
+    monkeypatch.setenv("ARCHWAY_BEDROCK_MAIN_MODEL_ID", "main-model")
+    monkeypatch.setenv("ARCHWAY_BEDROCK_JUDGE_MODEL_ID", "judge-model")
+    monkeypatch.setenv("ARCHWAY_BEDROCK_JUDGE_INFERENCE_PROFILE_ID", "judge-profile")
+    monkeypatch.setenv("ARCHWAY_ENABLE_LLM_JUDGE", "true")
+    get_settings.cache_clear()
+
+    settings = get_settings()
+
+    assert _model_id_for_task(settings, LLMTask(task_type=LLMTaskType.llm_judge_review, model_role="judge")) == "judge-profile"
+    assert _model_id_for_task(settings, LLMTask(task_type=LLMTaskType.open_world_understanding)) == "main-model"
+
+
 def test_model_router_uses_deterministic_fallback_when_not_configured(monkeypatch):
     monkeypatch.setenv("ARCHWAY_LLM_PROVIDER", "deterministic")
     get_settings.cache_clear()

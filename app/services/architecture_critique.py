@@ -64,6 +64,10 @@ class ArchitectureCritiqueService:
             parsed.findings = _drop_satisfied_pricing_driver_findings(parsed.findings, spec)
             parsed.findings = _drop_satisfied_deployment_posture_findings(parsed.findings, spec)
             parsed.findings = _drop_satisfied_service_rationale_findings(parsed.findings, spec)
+            parsed.findings = _reconcile_integration_evidence_findings(parsed.findings, spec)
+            parsed.findings = _reconcile_generation_and_read_path_findings(parsed.findings, spec)
+            parsed.findings = _reconcile_unverified_service_label_findings(parsed.findings, spec)
+            parsed.findings = _reconcile_unsourced_custom_ml_findings(parsed.findings, raw_use_case, spec)
             parsed.findings = _downgrade_unconfirmed_model_criticals(parsed.findings, deterministic_findings)
             parsed.passed = not any(item.severity == "critical" for item in parsed.findings)
             if deterministic.customer_readiness_cap == "internal_only":
@@ -138,6 +142,7 @@ def _drop_non_actionable_positive_findings(findings: list[ArchitectureCritiqueFi
     """
     positive_terms = (
         "correctly",
+        "appropriate",
         "appropriately",
         "well-suited",
         "well suited",
@@ -370,3 +375,104 @@ def _drop_satisfied_service_rationale_findings(findings: list[ArchitectureCritiq
             continue
         output.append(item)
     return output
+
+
+def _reconcile_integration_evidence_findings(findings: list[ArchitectureCritiqueFinding], spec: ArchitectureSpec) -> list[ArchitectureCritiqueFinding]:
+    architecture_text = _architecture_text(spec)
+    has_integration_boundary = any(
+        component.metadata.get("role") == "enterprise_integration_adapter"
+        or component.service.lower() in {"api_gateway", "eventbridge"}
+        for component in spec.components
+    )
+    has_auth = any(
+        component.metadata.get("role") in {"integration_authorizer", "auth_control"}
+        or component.service.lower() in {"cognito", "iam_identity_center"}
+        for component in spec.components
+    )
+    etl_evidence = any(term in architecture_text for term in ("etl", "data catalog", "batch transform", "data warehouse", "lakehouse"))
+    output: list[ArchitectureCritiqueFinding] = []
+    for item in findings:
+        text = " ".join([item.category, item.issue, item.why_it_matters, item.recommended_fix]).lower()
+        if item.category == "missing_component" and "glue" in text and has_integration_boundary and not etl_evidence:
+            continue
+        if "public" in text and "auth" in text and has_integration_boundary and has_auth:
+            continue
+        output.append(item)
+    return output
+
+
+def _reconcile_generation_and_read_path_findings(findings: list[ArchitectureCritiqueFinding], spec: ArchitectureSpec) -> list[ArchitectureCritiqueFinding]:
+    architecture_text = _architecture_text(spec)
+    has_generation_flow = any(
+        any(term in flow.label.lower() for term in ("briefing", "summary", "summar"))
+        and any(term in flow.label.lower() for term in ("route", "review", "generate"))
+        for flow in spec.flows
+    )
+    has_generation_component = (
+        "bedrock" in architecture_text
+        and any(term in architecture_text for term in ("textract", "document", "extraction"))
+        and any(term in architecture_text for term in ("workflow", "human_review"))
+    )
+    has_low_latency_read = "low_latency_read_model" in architecture_text or "elasticache" in architecture_text
+    output: list[ArchitectureCritiqueFinding] = []
+    for item in findings:
+        text = " ".join([item.category, item.issue, item.why_it_matters, item.recommended_fix]).lower()
+        if item.category in {"missing_flow", "missing_component"}:
+            if any(term in text for term in ("briefing", "summary", "summar", "generate")) and (has_generation_flow or has_generation_component):
+                continue
+            if any(term in text for term in ("status", "question", "query", "read")) and has_low_latency_read:
+                continue
+        output.append(item)
+    return output
+
+
+def _reconcile_unverified_service_label_findings(findings: list[ArchitectureCritiqueFinding], spec: ArchitectureSpec) -> list[ArchitectureCritiqueFinding]:
+    selected = " ".join(item.service.lower() for item in spec.selected_services)
+    components = " ".join(component.service.lower() for component in spec.components)
+    output: list[ArchitectureCritiqueFinding] = []
+    for item in findings:
+        text = " ".join([item.category, item.issue, item.why_it_matters, item.recommended_fix]).lower()
+        if item.category == "service_fit" and "unknown-unverified" in text:
+            if ("textract" in text and ("textract" in selected or "textract" in components)) or (
+                "comprehend" in text and "comprehend" not in selected and "comprehend" not in components
+            ):
+                continue
+        output.append(item)
+    return output
+
+
+def _reconcile_unsourced_custom_ml_findings(findings: list[ArchitectureCritiqueFinding], raw_use_case: str, spec: ArchitectureSpec) -> list[ArchitectureCritiqueFinding]:
+    """Do not require custom ML platforms for generic AI-assisted workflows.
+
+    Bedrock is the right default for managed foundation-model reasoning. A
+    custom training/deployment platform becomes required only when the use case
+    actually carries training, fine-tuning, endpoint, MLOps, or custom model
+    evidence.
+    """
+    use_case_text = str(raw_use_case or "").lower()
+    architecture_text = _architecture_text(spec)
+    custom_ml_evidence = any(term in use_case_text for term in (
+        "custom model", "train a model", "training pipeline", "fine-tune", "fine tune",
+        "sagemaker", "mlops", "model endpoint", "dedicated endpoint", "bring your own model",
+    ))
+    has_managed_model_path = "bedrock" in architecture_text
+    output: list[ArchitectureCritiqueFinding] = []
+    for item in findings:
+        text = " ".join([item.category, item.issue, item.why_it_matters, item.recommended_fix]).lower()
+        if item.category == "missing_component" and "sagemaker" in text and has_managed_model_path and not custom_ml_evidence:
+            continue
+        output.append(item)
+    return output
+
+
+def _architecture_text(spec: ArchitectureSpec) -> str:
+    return " ".join([
+        spec.summary or "",
+        *(component.id for component in spec.components),
+        *(component.name for component in spec.components),
+        *(component.service for component in spec.components),
+        *(str(component.metadata.get("role") or "") for component in spec.components),
+        *(flow.label or "" for flow in spec.flows),
+        *(item.service for item in spec.selected_services),
+        *(item.purpose for item in spec.selected_services),
+    ]).lower()
