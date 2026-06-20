@@ -11,6 +11,17 @@ def _live_llm_validated(status: str | None) -> bool:
     return status.endswith("_validated") and not status.startswith("deterministic")
 
 
+def _judge_allows_family_authority(understanding: DeepUseCaseUnderstanding, llm_families: list[str]) -> tuple[bool, list[str], str | None]:
+    review = getattr(understanding, "family_topology_judge", None)
+    if review is None or review.status == "not_attempted":
+        return True, llm_families, None
+    rejected = set(review.rejected_families or [])
+    accepted = [family for family in (review.accepted_families or []) if family in llm_families and family not in rejected]
+    if review.status == "accepted" and review.decision == "accept" and accepted:
+        return True, accepted, None
+    return False, [family for family in llm_families if family not in rejected], f"judge_{review.decision}"
+
+
 class UnderstandingConflict(BaseModel):
     field: str
     deterministic_value: object
@@ -49,8 +60,9 @@ class UnderstandingMerger:
                 family for family in understanding.workload_families
                 if family in WORKLOAD_FAMILY_VOCABULARY and family not in excluded
             ]
+            judge_allows_authority, llm, judge_resolution = _judge_allows_family_authority(understanding, llm)
             llm_new = [family for family in llm if family not in deterministic]
-            if llm_new and _live_llm_validated(understanding.enhancement_status):
+            if llm_new and _live_llm_validated(understanding.enhancement_status) and judge_allows_authority:
                 merged = list(dict.fromkeys(llm + deterministic))
                 conflicts.append(UnderstandingConflict(
                     field="workload_families",
@@ -60,6 +72,13 @@ class UnderstandingMerger:
                 ))
             else:
                 merged = list(dict.fromkeys(deterministic + llm))
+                if llm_new and _live_llm_validated(understanding.enhancement_status) and not judge_allows_authority:
+                    conflicts.append(UnderstandingConflict(
+                        field="workload_families",
+                        deterministic_value=deterministic,
+                        llm_value=llm,
+                        resolution=judge_resolution or "llm_classification_judge_blocked",
+                    ))
             metadata["workload_families"] = (merged or ["web_api_application"])[:4]
         if understanding.capabilities:
             metadata["capabilities"] = list(dict.fromkeys(metadata.get("capabilities", []) + understanding.capabilities))
