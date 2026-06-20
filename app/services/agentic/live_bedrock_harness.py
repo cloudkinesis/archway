@@ -219,8 +219,19 @@ def _result_from_llm(
             provider = repair.provider
             model_id = repair.model_id or settings.bedrock_model_id
     status = "accepted" if provider == "bedrock" and validated else "rejected"
-    error_type = None if status == "accepted" else "structured_output_invalid"
-    error_message = None if status == "accepted" else "Live Bedrock response did not validate against the lane schema."
+    # Distinguish a transport/connectivity failure (provider unreachable) from a genuine
+    # schema-invalid response. Both arrive here as not-validated, but conflating them
+    # mislabels a network outage as "the model returned bad JSON" and hides config errors
+    # (e.g. a wrong model id, which raises a permanent ClientError, NOT a transport error).
+    if status == "accepted":
+        error_type = None
+        error_message = None
+    elif getattr(result, "transport_error", False):
+        error_type = "provider_unavailable"
+        error_message = f"Live Bedrock provider is unavailable: {warnings[-1] if warnings else 'transport failure'}"
+    else:
+        error_type = "structured_output_invalid"
+        error_message = "Live Bedrock response did not validate against the lane schema."
     audit = LiveCallAudit(
         provider=provider,
         model_id=model_id,

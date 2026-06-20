@@ -54,6 +54,11 @@ class LLMResult(BaseModel):
     duration_ms: int = 0
     token_usage: dict[str, Any] | None = None
     warnings: list[str] = Field(default_factory=list)
+    # True only for connectivity/transport failures (endpoint unreachable, connect/read
+    # timeout). NEVER set for permanent client errors (ValidationException, AccessDenied,
+    # Throttling) — those are real, non-transient failures that must not be masked as
+    # "provider unavailable / retry when online".
+    transport_error: bool = False
 
 
 class StructuredLLMCallResult(BaseModel):

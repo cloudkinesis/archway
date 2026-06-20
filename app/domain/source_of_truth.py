@@ -94,6 +94,7 @@ class AwsRateBinding(BaseModel):
     source: Literal["price_list_query_api", "price_list_bulk_api", "pricing_mcp", "pricing_page", "unbound"] = "unbound"
     confidence: Literal["high", "medium", "low", "none"] = "none"
     binding_status: Literal["bound", "ambiguous", "not_found", "unsupported"] = "not_found"
+    is_tiered: bool = False
     notes: list[str] = Field(default_factory=list)
 
 

@@ -424,6 +424,52 @@ def _filter_for_dimension(dimension: ServiceUsageDimension, parsed: PriceListPar
     )
 
 
+def select_tier_by_quantity(dimensions: list[PriceDimensionEvidence], quantity: Decimal | None) -> list[PriceDimensionEvidence]:
+    if quantity is None:
+        return dimensions
+    matched = []
+    for item in dimensions:
+        begin_val = _parse_decimal(item.begin_range, Decimal("0"))
+        end_val = _parse_decimal(item.end_range, Decimal("Infinity"))
+        if quantity >= begin_val:
+            if end_val == Decimal("Infinity") or quantity < end_val:
+                matched.append(item)
+    return matched if matched else dimensions
+
+
+def calculate_cumulative_unit_price(dimensions: list[PriceDimensionEvidence], quantity: Decimal) -> Decimal:
+    if quantity <= 0:
+        zero_tiers = [d for d in dimensions if _parse_decimal(d.begin_range, Decimal("0")) == 0]
+        if zero_tiers:
+            return zero_tiers[0].price_per_unit
+        return dimensions[0].price_per_unit
+
+    sorted_dims = sorted(dimensions, key=lambda d: _parse_decimal(d.begin_range, Decimal("0")))
+    total_cost = Decimal("0")
+    for dim in sorted_dims:
+        begin = _parse_decimal(dim.begin_range, Decimal("0"))
+        end = _parse_decimal(dim.end_range, Decimal("Infinity"))
+        tier_size = end - begin
+        amount_in_tier = min(quantity - begin, tier_size)
+        if amount_in_tier > 0 and quantity > begin:
+            total_cost += amount_in_tier * dim.price_per_unit
+
+    return (total_cost / quantity).quantize(Decimal("0.00000001"))
+
+
+def _parse_decimal(val: str | None, default_if_none: Decimal | None = None) -> Decimal:
+    if val is None or val.strip() == "":
+        raise ValueError("Malformed tier bound: value is None or empty")
+    val_clean = val.lower().strip()
+    if val_clean in {"inf", "infinity"}:
+        return Decimal("Infinity")
+    try:
+        return Decimal(val_clean)
+    except Exception as e:
+        raise ValueError(f"Malformed tier bound: '{val}'") from e
+
+
+
 def _binding_from_candidates(
     dimension: ServiceUsageDimension,
     parsed: PriceListParseResult,
@@ -432,8 +478,43 @@ def _binding_from_candidates(
     extra_notes: list[str],
 ) -> AwsRateBinding:
     candidates = parsed.dimensions
+    is_tiered_sku = False
+    if len(candidates) > 1 and len({c.sku for c in candidates if c.sku}) == 1:
+        is_tiered_sku = True
+
+    effective_price: Decimal | None = None
+    calculation_failed = False
+    if is_tiered_sku and dimension.quantity is not None:
+        try:
+            effective_price = calculate_cumulative_unit_price(candidates, dimension.quantity)
+        except Exception as e:
+            extra_notes.append(f"Cumulative pricing calculation error: {e}")
+            calculation_failed = True
+
     if len(candidates) > 1:
-        return _binding_from_dimension(
+        try:
+            candidates = select_tier_by_quantity(candidates, dimension.quantity)
+        except Exception as e:
+            extra_notes.append(f"Tier selection error: {e}")
+            calculation_failed = True
+
+    if calculation_failed:
+        binding = _binding_from_dimension(
+            dimension,
+            candidates[0] if candidates else parsed.dimensions[0],
+            status="unsupported",
+            confidence="none",
+            notes=_dedupe_notes([
+                *extra_notes,
+                *parsed.failures,
+                "Failed to resolve tiered pricing due to malformed bounds data.",
+            ]),
+        )
+        binding.is_tiered = is_tiered_sku
+        return binding
+
+    if len(candidates) > 1:
+        binding = _binding_from_dimension(
             dimension,
             candidates[0],
             status="ambiguous",
@@ -445,7 +526,10 @@ def _binding_from_candidates(
                 "Confirm usage type, operation, region/edge location, tier, and product attributes before procurement use.",
             ]),
         )
-    return _binding_from_dimension(
+        binding.is_tiered = is_tiered_sku
+        return binding
+
+    binding = _binding_from_dimension(
         dimension,
         candidates[0],
         status="bound",
@@ -456,6 +540,13 @@ def _binding_from_candidates(
             f"Exact single OnDemand price dimension matched through {source_label}.",
         ]),
     )
+    binding.is_tiered = is_tiered_sku
+    if effective_price is not None:
+        binding.price_per_unit = effective_price
+        binding.notes.append(
+            f"Calculated cumulative tier-sliced unit price of {effective_price} USD based on quantity {dimension.quantity}."
+        )
+    return binding
 
 
 def _get_products(dimension: ServiceUsageDimension, region_code: str) -> dict[str, Any]:
@@ -559,8 +650,6 @@ def _candidate_score(dimension: ServiceUsageDimension, usage_terms: set[str], it
         score += 5
     if _generic_billable_intent_matches(dimension, item):
         score += 6
-    if item.begin_range in {None, "0", "0.0", "0.0000000000"}:
-        score += 1
     if shared or _generic_billable_intent_matches(dimension, item):
         return score
     return 1 if not _meaningful_pricing_terms(usage_terms) else 0

@@ -45,6 +45,25 @@ def _is_open_world_profile(profile) -> bool:
     return getattr(profile, "profile_source", "") == "open_world_understanding"
 
 
+def _understanding_unavailable_reason(open_world, settings) -> str | None:
+    """Surface the TRUE reason an *attempted* open-world classification failed.
+
+    Returns None when open-world is disabled by config: that is the sanctioned
+    deterministic offline mode, not a fault, and it is governed by the existing
+    readiness machinery — it must NOT trip the D27 fail-closed cap. A non-None
+    reason means open-world was attempted and did not yield an authoritative
+    result (provider down, schema-invalid); convergence caps those to internal_only
+    and surfaces this reason verbatim ("retry when online").
+    """
+    if not getattr(settings, "enable_open_world_understanding", False):
+        return None
+    trace = getattr(open_world, "trace", None)
+    live_call = getattr(trace, "live_call", None) if trace else None
+    if live_call is not None and getattr(live_call, "error_message", None):
+        return str(live_call.error_message)
+    return "Open-world model provider unavailable."
+
+
 class SynthesisEngine:
     def opening_message(self, brief: UseCaseBrief) -> str:
         return opening_interview_message(brief)
@@ -58,9 +77,23 @@ class SynthesisEngine:
     def create_initial_brief(self, raw_use_case: str) -> UseCaseBrief:
         settings = get_settings()
         open_world = OpenWorldUnderstandingService().build(raw_use_case, settings=settings)
-        profile = open_world.profile or profile_use_case(raw_use_case)
-        if not open_world.profile and settings.enable_open_world_understanding:
-            profile.open_world_understanding = open_world.trace.model_dump(mode="json")
+        # D27 INV-2: never silently fall back to the keyword categorizer as an authority.
+        # Authority is decided once, on the trace. When the open-world understanding is
+        # available, it drives the deliverable. When it is unavailable (provider down,
+        # schema-invalid, disabled), we may still build a deterministic profile for
+        # interview scaffolding, but it is stamped non-authoritative + carries the true
+        # reason, and convergence will cap the package to internal_only.
+        authoritative = bool(getattr(open_world.trace, "understanding_authoritative", False))
+        if authoritative and open_world.profile is not None:
+            profile = open_world.profile
+            profile.understanding_authoritative = True
+            profile.understanding_unavailable_reason = None
+        else:
+            profile = profile_use_case(raw_use_case)
+            profile.understanding_authoritative = False
+            profile.understanding_unavailable_reason = _understanding_unavailable_reason(open_world, settings)
+            if settings.enable_open_world_understanding:
+                profile.open_world_understanding = open_world.trace.model_dump(mode="json")
         if not _is_open_world_profile(profile):
             profile.discovery_plan = DiscoveryPlannerService().plan_sync(
                 raw_use_case,

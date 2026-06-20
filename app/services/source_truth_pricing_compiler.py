@@ -586,6 +586,9 @@ def _generic_quantity_context(facts: CanonicalFactsLedger) -> dict[str, Any]:
         monthly_events=monthly_events,
         monthly_media_items=monthly_media_items,
         storage_gb_month=storage_gb_month,
+        # Events are justified only by a telemetry basis (asset x cadence) or a directly
+        # stated event count; a purely derived/assumed figure is not.
+        events_from_confirmed_input=bool(telemetry_monthly or direct_event_monthly),
     )
 
     driver_names = [names_by_key[key] for key in values if key in names_by_key]
@@ -814,8 +817,21 @@ def _quantity_plausibility_findings(
     monthly_events: float,
     monthly_media_items: float,
     storage_gb_month: float,
+    events_from_confirmed_input: bool = True,
 ) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
+    # D27 INV-4 (scale-free): a headline event quantity must trace to a confirmed scale
+    # input — a telemetry basis (asset_count x cadence) or a directly-stated event count.
+    # If events were produced with neither (purely derived/assumed), the figure has no
+    # quantity-graph justification and must not anchor a headline. Scale-free: no absolute
+    # magnitude ceiling — a genuinely large but justified workload passes; an unjustified
+    # small one does not.
+    if monthly_events > 0 and not events_from_confirmed_input:
+        findings.append({
+            "code": "quantity.missing_graph_justification",
+            "severity": "critical",
+            "message": "Headline event quantity is derived but lacks any confirmed scale or throughput input.",
+        })
     if asset_count and cadence_seconds:
         max_events = asset_count * (_SECONDS_PER_MONTH / max(cadence_seconds, 1))
         if monthly_events > max_events * 1.05:
@@ -1136,7 +1152,7 @@ def _pricing_ledger(pricing: PricingAnalysis, usage_dimensions: list[ServiceUsag
         procurement_ready = False
         if rate and rate.binding_status == "bound":
             evidence_class = "sku_tier_backed"
-            procurement_ready = not bool(dimension and dimension.assumption_ids)
+            procurement_ready = not bool(dimension and dimension.assumption_ids) and not getattr(rate, "is_tiered", False)
             if dimension and dimension.quantity is not None and rate.price_per_unit is not None:
                 monthly = (Decimal(dimension.quantity) * Decimal(rate.price_per_unit)).quantize(Decimal("0.01"))
         elif rate and rate.binding_status == "ambiguous":

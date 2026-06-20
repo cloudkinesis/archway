@@ -93,8 +93,15 @@ class ExportPackageService:
         self.artifacts = ArtifactStore()
         self.sessions = SessionStore()
 
+    def _check_cancellation(self, session_id: str) -> None:
+        from app.services.jobs import job_manager
+        job = job_manager.latest_for_session(session_id, "export")
+        if job and job_manager.should_cancel(job.id):
+            raise Exception("Export job was cancelled by user request.")
+
     def generate(self, session_id: str, progress: Callable[[int, str], None] | None = None) -> ExportBundle:
         progress = progress or (lambda _progress, _message: None)
+        self._check_cancellation(session_id)
         session = self.sessions.get(session_id)
         if session is None:
             raise ValueError("Session was not found.")
@@ -106,6 +113,7 @@ class ExportPackageService:
         export_dir.mkdir(parents=True, exist_ok=True)
         warnings: list[str] = []
 
+        self._check_cancellation(session_id)
         progress(18, "Collecting quality and repair summary.")
         convergence_result, convergence_status, convergence_reason = _collect_async(
             lambda: GoldenConvergenceOrchestrator().run(session_id, session.initial_use_case, [], "deep_dossier"),
@@ -195,6 +203,7 @@ class ExportPackageService:
         }
         included_artifacts = []
         for relative_name, content in files.items():
+            self._check_cancellation(session_id)
             (export_dir / relative_name).write_text(content, encoding="utf-8")
             included_artifacts.append(f"exports/{export_name}/{relative_name}")
 
@@ -298,6 +307,7 @@ class ExportPackageService:
         zip_path = root / "exports" / f"{export_name}.zip"
         with ZipFile(zip_path, "w", ZIP_DEFLATED) as archive:
             for path in sorted(export_dir.rglob("*")):
+                self._check_cancellation(session_id)
                 if path.is_file():
                     archive.write(path, arcname=str(path.relative_to(export_dir)))
         if not zip_path.is_file() or zip_path.stat().st_size == 0:

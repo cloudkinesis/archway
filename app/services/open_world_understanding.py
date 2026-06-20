@@ -15,7 +15,7 @@ from app.services.dossier_manifest import stable_json_hash
 from app.services.llm.base import LLMMessage, LLMTaskType
 from app.services.metric_extractor import extract_metrics
 from app.services.pricing_filter_mapper import _SERVICE_CODE_ALIASES, pricing_filter_plan_for_service
-from app.services.use_case_profile import ExtractedMetric, UseCaseProfile, reconcile_profile_constraints
+from app.services.use_case_profile import WORKLOAD_FAMILY_VOCABULARY, ExtractedMetric, UseCaseProfile, reconcile_profile_constraints
 
 
 SCHEMA_VERSION = "open_world_understanding_v1"
@@ -95,6 +95,10 @@ class CanonicalQuestion(BaseModel):
 class CanonicalWorkloadUnderstanding(BaseModel):
     schema_version: str = SCHEMA_VERSION
     domain_candidates: list[CanonicalCandidate] = Field(default_factory=list)
+    # D27 INV-3: the model's own workload-family classification, picked from the known
+    # catalog vocabulary (or open_world_other). Replaces the downstream capability→family
+    # keyword squeeze — the LLM's archetype call is carried faithfully, not re-derived.
+    workload_family_candidates: list[CanonicalCandidate] = Field(default_factory=list)
     workload_intent: str
     actors: list[CanonicalCandidate] = Field(default_factory=list)
     source_systems: list[CanonicalCandidate] = Field(default_factory=list)
@@ -136,6 +140,10 @@ class OpenWorldUnderstandingTrace(BaseModel):
     enabled: bool
     accepted: bool
     fallback_used: bool = False
+    # Single source of truth for "is the open-world classification authoritative?".
+    # Decided here and nowhere else (D27 INV-2). Downstream stages must read this flag
+    # rather than re-deriving authority from profile presence or provider strings.
+    understanding_authoritative: bool = False
     schema_version: str = SCHEMA_VERSION
     provider: str
     model_id: str | None = None
@@ -267,10 +275,12 @@ def build_result_from_understanding(
         live_call=live_call,
         reproducibility_posture=_reproducibility_posture(model_id),
     )
+    trace.understanding_authoritative = trace.enabled and trace.accepted and not trace.fallback_used
     if not accepted:
         trace.output_hash = stable_json_hash(trace.model_dump(mode="json"))
         return OpenWorldUnderstandingResult(trace=trace)
     profile = adapt_to_profile(raw_use_case, understanding, source_facts, trace)
+    profile.understanding_authoritative = trace.understanding_authoritative
     questions = generated_open_questions(understanding)
     trace.output_hash = stable_json_hash(trace.model_dump(mode="json"))
     profile.open_world_understanding["trace_hash"] = trace.output_hash
@@ -629,7 +639,10 @@ def _messages(raw_use_case: str, source_facts: list[CanonicalSourceFact]) -> lis
         "raw_use_case": raw_use_case,
         "schema_version": SCHEMA_VERSION,
         "deterministically_extracted_facts": [fact.model_dump(mode="json") for fact in source_facts],
+        "allowed_workload_family_slugs": sorted(WORKLOAD_FAMILY_VOCABULARY),
         "instructions": [
+            "For workload_family_candidates, choose the closest-matching slug(s) ONLY from allowed_workload_family_slugs that genuinely describe this system's software/architecture archetype. Output the slug verbatim (exact characters). If none genuinely fit, output a single candidate with label 'open_world_other' rather than forcing a wrong match.",
+            "workload_family_candidates is your archetype call and is authoritative; it is NOT a keyword guess and must reflect what the system actually does, not which buzzwords appear.",
             "Do not use any deterministic workload family or preselected category.",
             "Preserve every source_text exactly in the appropriate scale_metrics, latency_slos, retention, or exclusions list.",
             "For every deterministically_extracted_facts item, emit one corresponding object with the same source_text copied byte-for-byte; do not summarize, merge, or omit these facts.",
@@ -902,16 +915,20 @@ def _capabilities_from_understanding(understanding: CanonicalWorkloadUnderstandi
 
 
 def _families_from_understanding(understanding: CanonicalWorkloadUnderstanding, capabilities: list[str]) -> list[str]:
-    labels = " ".join([understanding.workload_intent, *[item.label for item in understanding.domain_candidates]]).lower()
+    """D27 INV-3: carry the LLM's workload-family classification faithfully.
+
+    The model picks workload families from the known catalog vocabulary (positive
+    justification). We keep only candidates that name a recognised family slug; anything
+    else — including the explicit ``open_world_other`` escape, or a label that doesn't
+    match the catalog — is dropped, routing the workload to the generic default rather
+    than being keyword-squeezed into a wrong specialized family (the food-delivery bug).
+    ``capabilities`` is intentionally no longer consulted for family selection.
+    """
     families: list[str] = []
-    if {"rag_retrieval", "document_ingestion"} & set(capabilities):
-        families.append("rag_assistant" if "rag_retrieval" in capabilities else "document_intelligence")
-    if {"stream_ingestion", "stream_processing", "ml_inference"} & set(capabilities):
-        families.append("real_time_anomaly_detection" if "anomaly" in labels or "prediction" in labels else "operational_event_prediction_workflow")
-    if "event_driven_workflow" in capabilities:
-        families.append("agentic_workflow")
-    if "data_lake" in capabilities or understanding.data_classes:
-        families.append("data_platform_analytics")
+    for item in understanding.workload_family_candidates:
+        slug = _slug(item.label)
+        if slug in WORKLOAD_FAMILY_VOCABULARY:
+            families.append(slug)
     return list(dict.fromkeys(families))[:5] or ["web_api_application"]
 
 

@@ -4,6 +4,7 @@ from app.models.domain import (
     ArchitectureComponent,
     ArchitectureFlow,
     AWSServiceRecommendation,
+    FlowIntent,
     ObservabilityControl,
     SecurityControl,
 )
@@ -654,6 +655,19 @@ def pattern_components(profile: UseCaseProfile, production: bool) -> list[Archit
     return components
 
 
+def _map_classification_to_intent(classification: str | None) -> FlowIntent:
+    if not classification:
+        return FlowIntent.READ_ONLY
+    cls = classification.lower()
+    if cls in _EFFECTFUL_CLASSIFICATIONS or "write" in cls or "block" in cls or "change" in cls or "update" in cls or "dispatch" in cls or "pre_position" in cls:
+        return FlowIntent.MUTATING_WRITE
+    if "integration" in cls or "stream" in cls or "buffer" in cls or "queue" in cls:
+        return FlowIntent.INTEGRATION_SYNC
+    if "approval" in cls or "control" in cls or "policy" in cls or "guardrail" in cls:
+        return FlowIntent.CONTROL_PLANE
+    return FlowIntent.READ_ONLY
+
+
 def pattern_flows(profile: UseCaseProfile, production: bool, components: list[ArchitectureComponent]) -> list[ArchitectureFlow]:
     component_ids = {component.id for component in components}
     flows: list[ArchitectureFlow] = []
@@ -663,24 +677,25 @@ def pattern_flows(profile: UseCaseProfile, production: bool, components: list[Ar
             if source not in component_ids or target not in component_ids:
                 continue
             metadata = _flow_metadata(profile, source, target, label, classification)
-            flows.append(ArchitectureFlow(id=f"f{index}", source=source, target=target, label=label, protocol=protocol, metadata=metadata))
+            intent = _map_classification_to_intent(classification)
+            flows.append(ArchitectureFlow(id=f"f{index}", source=source, target=target, label=label, protocol=protocol, flow_intent=intent, metadata=metadata))
             index += 1
     if "devices" in component_ids and "edge_buffer" in component_ids:
-        flows.append(ArchitectureFlow(id=f"f{index}", source="devices", target="edge_buffer", label="Buffer telemetry and video samples during intermittent connectivity", protocol="MQTT/local network", metadata={"classification": "edge_buffering"}))
+        flows.append(ArchitectureFlow(id=f"f{index}", source="devices", target="edge_buffer", label="Buffer telemetry and video samples during intermittent connectivity", protocol="MQTT/local network", flow_intent=FlowIntent.INTEGRATION_SYNC, metadata={"classification": "edge_buffering"}))
         index += 1
         if "iot" in component_ids:
-            flows.append(ArchitectureFlow(id=f"f{index}", source="edge_buffer", target="iot", label="Forward store-and-forward batches when connectivity is restored", protocol="MQTT/TLS", metadata={"classification": "edge_buffering"}))
+            flows.append(ArchitectureFlow(id=f"f{index}", source="edge_buffer", target="iot", label="Forward store-and-forward batches when connectivity is restored", protocol="MQTT/TLS", flow_intent=FlowIntent.INTEGRATION_SYNC, metadata={"classification": "edge_buffering"}))
             index += 1
     if production and "waf" in component_ids and "api" in component_ids and "user" in component_ids:
         if "shield" in component_ids:
-            flows.append(ArchitectureFlow(id=f"f{index}", source="user", target="shield", label="DDoS-protected ingress", protocol="HTTPS", metadata={"classification": "request"}))
+            flows.append(ArchitectureFlow(id=f"f{index}", source="user", target="shield", label="DDoS-protected ingress", protocol="HTTPS", flow_intent=FlowIntent.READ_ONLY, metadata={"classification": "request"}))
             index += 1
-            flows.append(ArchitectureFlow(id=f"f{index}", source="shield", target="waf", label="Forward protected traffic", protocol="HTTPS", metadata={"classification": "request"}))
+            flows.append(ArchitectureFlow(id=f"f{index}", source="shield", target="waf", label="Forward protected traffic", protocol="HTTPS", flow_intent=FlowIntent.READ_ONLY, metadata={"classification": "request"}))
             index += 1
         else:
-            flows.append(ArchitectureFlow(id=f"f{index}", source="user", target="waf", label="Protected ingress", protocol="HTTPS", metadata={"classification": "request"}))
+            flows.append(ArchitectureFlow(id=f"f{index}", source="user", target="waf", label="Protected ingress", protocol="HTTPS", flow_intent=FlowIntent.READ_ONLY, metadata={"classification": "request"}))
             index += 1
-        flows.append(ArchitectureFlow(id=f"f{index}", source="waf", target="api", label="Allowed requests", protocol="HTTPS", metadata={"classification": "request"}))
+        flows.append(ArchitectureFlow(id=f"f{index}", source="waf", target="api", label="Allowed requests", protocol="HTTPS", flow_intent=FlowIntent.READ_ONLY, metadata={"classification": "request"}))
         index += 1
     healthcare_or = "healthcare_operations_scheduling" in profile.workload_families
     for target, label, classification in (("logs", "Emit metrics and logs", ""), ("kms", "Encrypt data and artifacts", ""), ("audit", "Record audit events", "")):
@@ -693,7 +708,8 @@ def pattern_flows(profile: UseCaseProfile, production: bool, components: list[Ar
             # preserved (recorded in metadata) and surfaced in governance/detail views.
             if healthcare_or:
                 metadata["logical_detail_only"] = True
-            flows.append(ArchitectureFlow(id=f"f{index}", source=source, target=target, label=label, metadata=metadata))
+            intent = FlowIntent.CONTROL_PLANE
+            flows.append(ArchitectureFlow(id=f"f{index}", source=source, target=target, label=label, flow_intent=intent, metadata=metadata))
             index += 1
             break
     return _dedupe_flows(flows)
@@ -1013,3 +1029,14 @@ def _dedupe_named(items):
         seen.add(item.name.lower())
         result.append(item)
     return result
+
+
+def validate_catalog() -> None:
+    for name, pattern in PATTERNS.items():
+        for flow in pattern.flows:
+            if len(flow) < 5:
+                raise ValueError(f"WorkloadPattern '{name}' flow '{flow}' must have 5 elements.")
+
+
+validate_catalog()
+

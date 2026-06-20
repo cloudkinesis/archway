@@ -151,6 +151,7 @@ class GoldenConvergenceOrchestrator:
 
     async def _collect_findings(self, session_id: str, use_case: str, context: dict[str, Any]) -> list[QualityFinding]:
         findings: list[QualityFinding] = []
+        findings.extend(_understanding_authority_findings(context.get("brief")))
         findings.extend(_understanding_findings(context.get("report")))
         findings.extend(_pricing_findings(context.get("pricing") or ((context.get("report") or {}).get("pricing_analysis"))))
         findings.extend(_diagram_findings(context.get("diagrams")))
@@ -251,6 +252,32 @@ def _load_context(root: Path) -> dict[str, Any]:
         "diagrams": _read_json(root / "diagrams" / "gallery.json"),
         "dossier_consistency": _read_json(root / "quality" / "dossier_consistency_check.json"),
     }
+
+
+def _understanding_authority_findings(brief: dict | None) -> list[QualityFinding]:
+    """D27 INV-2: fail closed when an *attempted* open-world classification was not
+    authoritative. A non-None ``understanding_unavailable_reason`` means the open-world
+    lane was enabled and ran but did not yield an authoritative result (provider down,
+    schema-invalid), so the classification driving this package came from a deterministic
+    fallback and must NOT be promoted to a customer-facing tier. Disabled-by-design
+    offline mode leaves the reason None and is governed by the existing readiness gates.
+    """
+    profile_meta = ((brief or {}).get("use_case_profile") or {})
+    if profile_meta.get("understanding_authoritative", False):
+        return []
+    reason = profile_meta.get("understanding_unavailable_reason")
+    if not reason:
+        return []
+    return [finding(
+        code="understanding.unavailable",
+        severity="critical",
+        category="understanding",
+        title="Open World Understanding Unavailable",
+        description=f"Classification is non-authoritative: {reason}. Retry when the model provider is online.",
+        evidence=["open_world_understanding.live_call", "use_case_profile.understanding_authoritative=false"],
+        auto_repairable=False,
+        customer_readiness_impact="cap_to_internal_only",
+    )]
 
 
 def _understanding_findings(report: dict | None) -> list[QualityFinding]:
