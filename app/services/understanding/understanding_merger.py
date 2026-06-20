@@ -6,6 +6,11 @@ from app.services.understanding.deep_use_case_understanding import DeepUseCaseUn
 from app.services.use_case_profile import WORKLOAD_FAMILY_VOCABULARY, UseCaseProfile, profile_to_metadata
 
 
+def _live_llm_validated(status: str | None) -> bool:
+    status = (status or "").strip().lower()
+    return status.endswith("_validated") and not status.startswith("deterministic")
+
+
 class UnderstandingConflict(BaseModel):
     field: str
     deterministic_value: object
@@ -45,7 +50,7 @@ class UnderstandingMerger:
                 if family in WORKLOAD_FAMILY_VOCABULARY and family not in excluded
             ]
             llm_new = [family for family in llm if family not in deterministic]
-            if llm_new:
+            if llm_new and _live_llm_validated(understanding.enhancement_status):
                 merged = list(dict.fromkeys(llm + deterministic))
                 conflicts.append(UnderstandingConflict(
                     field="workload_families",

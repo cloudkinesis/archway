@@ -40,6 +40,18 @@ def test_live_llm_divergence_is_authoritative():
         assert fam in families
 
 
+def test_non_live_divergence_does_not_become_authoritative():
+    profile, understanding = _det_understanding()
+    understanding = understanding.model_copy(deep=True)
+    understanding.workload_families = ["document_intelligence", "approval_gated_workflow_automation"]
+    understanding.enhancement_status = "deterministic_fallback"
+    result = UnderstandingMerger().merge(profile, understanding)
+    families = result.profile_metadata["workload_families"]
+    assert families[0] == profile.workload_families[0]
+    assert "document_intelligence" in families
+    assert not any(c.field == "workload_families" for c in result.conflicts)
+
+
 def test_hallucinated_family_is_gated_out():
     profile, understanding = _det_understanding()
     understanding = understanding.model_copy(deep=True)
