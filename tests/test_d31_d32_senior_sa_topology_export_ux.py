@@ -3,6 +3,7 @@ from zipfile import ZipFile
 from app.core.config import get_settings
 from app.db.session_store import SessionStore
 from app.models.domain import AWSServiceRecommendation, PricingAnalysis, ResearchReport
+from app.services.convergence.golden_convergence_orchestrator import _architecture_domain_contamination_findings
 from app.services.architecture import ArchitecturePlanner
 from app.services.export_package import ExportPackageService
 from app.services.synthesis import SynthesisEngine
@@ -101,6 +102,69 @@ def test_open_world_architecture_adds_senior_sa_topology_from_generic_signals():
     assert "case state" not in text
 
 
+def test_generic_approval_workflow_does_not_inherit_healthcare_or_topology():
+    profile_metadata = {
+        "domain": "agriculture",
+        "workload_families": [
+            "agentic_workflow",
+            "real_time_anomaly_detection",
+            "approval_gated_workflow_automation",
+            "event_driven_workflow",
+        ],
+        "excluded_families": [],
+        "capabilities": [
+            "real_time_ingestion",
+            "event_driven_workflow",
+            "predictive_ml",
+            "human_approval",
+            "auditability",
+            "sensitive_data",
+        ],
+        "entities": ["seed lots", "cold-room vaults", "shipments"],
+        "signals": ["rfid scans", "freezer telemetry", "shipment handoff events"],
+        "actions": ["quarantine recommendation", "curator approval"],
+        "capability_model": ["stream_ingestion", "ml_inference", "human_approval", "audit_trail"],
+        "deployment_posture": ["hybrid"],
+        "confidence": "high",
+        "understanding_authoritative": True,
+    }
+    brief = SynthesisEngine().create_initial_brief(NOVEL_CUSTODY_TELEMETRY_USE_CASE)
+    brief.use_case_profile = profile_metadata
+    report = _minimal_report(brief)
+
+    specs = ArchitecturePlanner().generate(report)
+    text = _spec_text(specs)
+
+    assert "Epic" not in text
+    assert "EHR" not in text
+    assert "OR command" not in text
+    assert "sterile processing" not in text
+    assert "surgical" not in text
+    assert "hospital" not in text.lower()
+    assert "Operational Event Stream" in text
+    assert "Governed recovery" in text or "Tool Governance Workflow" in text
+
+
+def test_architecture_domain_contamination_blocks_unsupported_healthcare_leakage():
+    brief = SynthesisEngine().create_initial_brief(NOVEL_CUSTODY_TELEMETRY_USE_CASE)
+    report = _minimal_report(brief)
+    spec = ArchitecturePlanner().generate(report)[0]
+    contaminated = spec.model_copy(update={
+        "summary": spec.summary + " Integrate with Epic / EHR and the OR command center for surgical scheduling.",
+    })
+
+    findings = _architecture_domain_contamination_findings(
+        NOVEL_CUSTODY_TELEMETRY_USE_CASE,
+        report.model_dump(mode="json"),
+        [contaminated],
+    )
+
+    assert any(item.code == "architecture.healthcare_domain_contamination" for item in findings)
+    finding = next(item for item in findings if item.code == "architecture.healthcare_domain_contamination")
+    assert finding.severity == "critical"
+    assert finding.customer_readiness_impact == "cap_to_internal_only"
+
+
 def _minimal_report(brief):
     return ResearchReport(
         session_id="sess_d31_topology",
@@ -137,3 +201,20 @@ def _minimal_report(brief):
         uncertainties=[],
         metadata={"use_case_profile": brief.use_case_profile},
     )
+
+
+def _spec_text(specs) -> str:
+    chunks: list[str] = []
+    for spec in specs:
+        chunks.extend(
+            [
+                spec.title,
+                spec.summary,
+                *(component.name for component in spec.components),
+                *(component.service for component in spec.components),
+                *(flow.label or "" for flow in spec.flows),
+                *(rec.service for rec in spec.selected_services),
+                *(rec.purpose for rec in spec.selected_services),
+            ]
+        )
+    return "\n".join(chunks)

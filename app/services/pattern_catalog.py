@@ -887,8 +887,13 @@ def _pattern_ids_for_family(family: str) -> list[str]:
     aliases = {
         "surgical_scheduling_prediction": ["healthcare_operations_scheduling"],
         "clinical_workflow_decision_support": ["healthcare_operations_scheduling"],
-        "computer_vision_metadata_processing": ["healthcare_operations_scheduling"],
-        "approval_gated_workflow_automation": ["healthcare_operations_scheduling"],
+        # These families are generic. They must not route through the
+        # healthcare OR pattern unless the profile already selected an
+        # explicitly clinical/surgical family. Otherwise an approval-gated
+        # workflow in any domain can inherit stale EHR/OR topology.
+        "computer_vision_metadata_processing": ["computer_vision_quality_inspection"],
+        "approval_gated_workflow_automation": ["operational_event_prediction_workflow"],
+        "event_driven_workflow": ["operational_event_prediction_workflow"],
         "telecom_network_analytics": ["real_time_anomaly_detection", "data_platform_analytics"],
         "cdr_congestion_prediction": ["real_time_anomaly_detection", "data_platform_analytics"],
         "capital_markets_risk_engine": ["capital_markets_risk_engine"],
@@ -1039,4 +1044,3 @@ def validate_catalog() -> None:
 
 
 validate_catalog()
-
