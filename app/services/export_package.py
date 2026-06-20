@@ -5,6 +5,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import asyncio
 import copy
 import json
+import re
 import threading
 
 from app.core.config import get_settings
@@ -154,7 +155,6 @@ class ExportPackageService:
             }
         golden_regression = GoldenRegressionExportService().export()
         job_telemetry = _job_telemetry(session_id, finalize_export=True, export_result_path=f"exports/{export_name}.zip")
-        workflow_status = _workflow_status(session, report)
         diagram_fidelity = _diagram_fidelity(architectures, diagrams)
         report = _report_with_convergence_readiness(report, convergence_result)
         progress(38, "Building narrative research dossier.")
@@ -174,6 +174,7 @@ class ExportPackageService:
             warnings,
         )
         report = _report_with_convergence_readiness(report, convergence_result)
+        workflow_status = _workflow_status(session, report)
         for issue in diagram_fidelity.get("missing_requested_views", []):
             _warn_once(
                 warnings,
@@ -1475,12 +1476,26 @@ def _llm_telemetry_live_audits(items) -> list[LiveCallAudit]:
                 prompt_hash=payload.get("prompt_hash"),
                 response_hash=response_hash,
                 status=status,
+                error_type=_live_error_type_from_telemetry(payload) if status == "failed" else None,
                 warnings=warnings,
                 created_at=str(payload.get("started_at") or ""),
             ))
         except Exception:
             continue
     return audits
+
+
+def _live_error_type_from_telemetry(payload: dict) -> str | None:
+    warnings = " ".join(str(item) for item in payload.get("warnings") or [])
+    match = re.search(
+        r"(?:Bedrock call failed|Ollama call failed|Structured output validation failed)(?::| on attempt \d+:)\s*([A-Za-z_][A-Za-z0-9_.]*)",
+        warnings,
+    )
+    if match:
+        return match.group(1)
+    if payload.get("schema_validated") is False:
+        return "structured_output_invalid"
+    return "llm_call_failed"
 
 
 def _live_lane_for_task(task_type: str | None) -> str:

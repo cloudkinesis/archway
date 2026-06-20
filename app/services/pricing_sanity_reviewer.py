@@ -61,6 +61,11 @@ class PricingSanityReviewer:
 def deterministic_pricing_sanity(raw_use_case: str, understanding: DeepUseCaseUnderstanding, pricing: PricingAnalysis) -> PricingSanityReview:
     findings: list[PricingSanityFinding] = []
     metadata = pricing.metadata or {}
+    source_truth = metadata.get("source_truth_pricing_compiler") or {}
+    quantity_backed_directional = (
+        metadata.get("status") == "generic_quantity_backed_directional"
+        or source_truth.get("mode") == "generic_quantity_backed_directional"
+    )
     if metadata.get("status") == "invalid_extracted_scale_not_applied":
         findings.append(PricingSanityFinding(
             severity="critical",
@@ -77,7 +82,11 @@ def deterministic_pricing_sanity(raw_use_case: str, understanding: DeepUseCaseUn
             impacted_pricing_driver="risk_compute_jobs/hpc_compute_hours/risk_grid_nodes/shared_storage_throughput",
             recommended_fix="Treat pricing as internal directional only until simulation count, node/runtime profile, storage throughput, and reporting scan volumes are confirmed.",
         ))
-    if any(metric.pricing_relevance == "high" for metric in understanding.extracted_metrics) and metadata.get("scale_applied") is False:
+    if (
+        any(metric.pricing_relevance == "high" for metric in understanding.extracted_metrics)
+        and metadata.get("scale_applied") is False
+        and not quantity_backed_directional
+    ):
         findings.append(PricingSanityFinding(
             severity="critical",
             issue="High-relevance extracted metrics were not applied.",
@@ -85,13 +94,21 @@ def deterministic_pricing_sanity(raw_use_case: str, understanding: DeepUseCaseUn
             impacted_pricing_driver="pricing model",
             recommended_fix="Regenerate pricing drivers from merged understanding.",
         ))
-    if understanding.extracted_metrics and metadata.get("pricing_driver_family") == "generic_directional":
+    if understanding.extracted_metrics and metadata.get("pricing_driver_family") == "generic_directional" and not quantity_backed_directional:
         findings.append(PricingSanityFinding(
             severity="critical",
             issue="Pricing used a generic driver family despite explicit metrics.",
             evidence_from_use_case=", ".join(metric.name for metric in understanding.extracted_metrics[:8]),
             impacted_pricing_driver="pricing_driver_family",
             recommended_fix="Select a workload-specific pricing driver family or mark pricing as not headline-safe.",
+        ))
+    elif understanding.extracted_metrics and quantity_backed_directional:
+        findings.append(PricingSanityFinding(
+            severity="warning",
+            issue="Pricing uses generic quantity-backed directional drivers.",
+            evidence_from_use_case=", ".join(metric.name for metric in understanding.extracted_metrics[:8]),
+            impacted_pricing_driver="pricing_driver_family",
+            recommended_fix="Use for workshop planning only; bind exact AWS SKU/rate dimensions before procurement.",
         ))
     if metadata.get("pricing_can_be_displayed_as_headline") is False:
         findings.append(PricingSanityFinding(

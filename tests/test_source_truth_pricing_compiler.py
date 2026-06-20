@@ -76,6 +76,42 @@ async def test_pass1_media_separates_cdn_egress_from_edge_function_requests():
 
 
 @pytest.mark.asyncio
+async def test_generic_open_world_pricing_preserves_typed_quantities_without_procurement_claims():
+    use_case = (
+        "A drone logistics command center coordinates 420 autonomous medical delivery drones, receives GPS and "
+        "telemetry updates every 5 seconds, stores 2 KB telemetry payloads for 90 days, predicts route risks, "
+        "and dispatches operational alerts."
+    )
+    brief = SynthesisEngine().create_initial_brief(use_case)
+
+    estimate = await PricingEngine().estimate(
+        brief,
+        [
+            AWSServiceSelection(service="Amazon Kinesis Data Streams", purpose="telemetry stream", rationale="managed"),
+            AWSServiceSelection(service="Amazon S3", purpose="telemetry archive", rationale="durable"),
+            AWSServiceSelection(service="AWS Lambda", purpose="dispatch actions", rationale="serverless"),
+        ],
+    )
+
+    assert estimate.metadata["source_truth_pricing_compiler"]["mode"] == "generic_quantity_backed_directional"
+    ledger = estimate.metadata["pricing_ledger"]
+    assert ledger["summary"]["procurement_ready"] is False
+    assert ledger["summary"]["headline_safe"] is False
+    quantified = [item for item in ledger["line_items"] if item["quantity"] is not None]
+    assert quantified
+    assert all(item["procurement_ready"] is False for item in ledger["line_items"])
+    assert any(item["service_name"] == "Amazon Kinesis Data Streams" and float(item["quantity"]) > 0 for item in quantified)
+    assert any(item["service_name"] == "Amazon S3" and float(item["quantity"]) > 0 for item in quantified)
+    assert any(
+        item["code"] == "pricing.unsupported_family_not_estimated"
+        and item["customer_readiness_impact"] == "cap_to_workshop"
+        for item in estimate.metadata["pricing_sanity_findings"]
+    )
+    traces = [item.pricing_trace for item in estimate.line_items]
+    assert any(item.get("pricing_validity") == "quantity_backed_directional" for item in traces)
+
+
+@pytest.mark.asyncio
 async def test_pass1_risk_marks_missing_compute_drivers_not_procurement_ready():
     brief = SynthesisEngine().create_initial_brief(GOLDEN_SCENARIOS["investment_risk"])
 

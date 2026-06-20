@@ -113,6 +113,9 @@ _HARD_PRICING_STATUSES = {
     "invalid_extracted_scale_not_applied",
     "directional_only_missing_core_compute_drivers",
 }
+_DIRECTIONAL_PRICING_STATUSES = {
+    "generic_quantity_backed_directional",
+}
 
 # Evidence-authority grades too weak for workshop discussion. These cap a
 # coherent package at demo_ready — they NEVER force internal_only.
@@ -249,6 +252,8 @@ def _estimate_class(tier: str, pricing_metadata: dict, closure: dict, ledger_sum
     basis_supports_range = (
         pricing_metadata.get("pricing_can_be_displayed_as_headline") is True
         or bool(closure.get("directional_scenario_allowed"))
+        or pricing_metadata.get("status") in _DIRECTIONAL_PRICING_STATUSES
+        or (pricing_metadata.get("source_truth_pricing_compiler") or {}).get("mode") in _DIRECTIONAL_PRICING_STATUSES
     )
     if tier == "workshop_ready" and basis_supports_range:
         return "budgetary_range"

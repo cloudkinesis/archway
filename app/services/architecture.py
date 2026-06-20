@@ -228,6 +228,8 @@ def _open_world_components(profile, components: list[ArchitectureComponent]) -> 
     output = list(components)
     seen = {component.id for component in output}
     profile_text = _profile_requirement_text(profile)
+    workload_action = _workload_action_label(profile)
+    workload_entity = _workload_entity_label(profile)
 
     def add(component: ArchitectureComponent) -> None:
         if component.id not in seen:
@@ -237,7 +239,7 @@ def _open_world_components(profile, components: list[ArchitectureComponent]) -> 
     if _requires_imagery(profile, profile_text):
         add(ArchitectureComponent(
             id="image_ingest",
-            name="Image and Video Evidence Ingestion",
+            name=f"{workload_entity} Image and Video Evidence Ingestion",
             service="amazon_s3",
             scope="regional_managed_data",
             logical_group="Open-world evidence ingestion",
@@ -245,7 +247,7 @@ def _open_world_components(profile, components: list[ArchitectureComponent]) -> 
         ))
         add(ArchitectureComponent(
             id="vision_inference",
-            name="Computer Vision Inference Path",
+            name=f"{workload_action} Inference Path",
             service="amazon_sagemaker",
             scope="regional_managed_ai",
             logical_group="Open-world inference",
@@ -254,7 +256,7 @@ def _open_world_components(profile, components: list[ArchitectureComponent]) -> 
     if _requires_file_payload_ingestion(profile, profile_text):
         add(ArchitectureComponent(
             id="file_payload_ingest",
-            name="File and Batch Payload Ingestion",
+            name=f"{workload_entity} File and Batch Payload Ingestion",
             service="amazon_s3",
             scope="regional_managed_data",
             logical_group="Open-world payload ingestion",
@@ -263,7 +265,7 @@ def _open_world_components(profile, components: list[ArchitectureComponent]) -> 
     if _requires_documents(profile, profile_text) and not _excludes_document_processing(profile):
         add(ArchitectureComponent(
             id="text_document_processing",
-            name="Document and Notes Processing Path",
+            name=f"{workload_entity} Document and Notes Processing Path",
             service="amazon_textract_bedrock",
             scope="regional_managed_ai",
             logical_group="Open-world evidence processing",
@@ -281,7 +283,7 @@ def _open_world_components(profile, components: list[ArchitectureComponent]) -> 
     if profile.actions and "workflow" not in seen and "policy" not in seen:
         add(ArchitectureComponent(
             id="human_review_workflow",
-            name="Human Review and Disposition Workflow",
+            name=f"{workload_action} Review and Disposition Workflow",
             service="aws_step_functions",
             scope="regional_orchestration",
             logical_group="Governed action path",
@@ -303,6 +305,8 @@ def _open_world_flows(profile, components: list[ArchitectureComponent], flows: l
     output = list(flows)
     ids = {component.id for component in components}
     index = len(output) + 1
+    workload_action = _workload_action_label(profile).lower()
+    workload_entity = _workload_entity_label(profile).lower()
 
     def add(source: str, target: str, label: str, protocol: str = "managed AWS service integration") -> None:
         nonlocal index
@@ -319,16 +323,16 @@ def _open_world_flows(profile, components: list[ArchitectureComponent], flows: l
 
     source_id = "edge_offline_sync" if "edge_offline_sync" in ids else "devices" if "devices" in ids else "user" if "user" in ids else ""
     if source_id:
-        add(source_id, "image_ingest", "Capture and persist image/video evidence with workload metadata", "HTTPS/MQTT/TLS")
-        add(source_id, "file_payload_ingest", "Capture file payloads with workload metadata, lifecycle policy, and audit tags", "HTTPS/MQTT/TLS")
-        add(source_id, "text_document_processing", "Submit notes, documents, or OCR text for extraction", "HTTPS/TLS")
-    add("image_ingest", "vision_inference", "Run image/video preprocessing and model inference")
+        add(source_id, "image_ingest", f"Capture and persist {workload_entity} image/video evidence with workload metadata", "HTTPS/MQTT/TLS")
+        add(source_id, "file_payload_ingest", f"Capture {workload_entity} file payloads with lifecycle policy and audit tags", "HTTPS/MQTT/TLS")
+        add(source_id, "text_document_processing", f"Submit {workload_entity} notes, documents, or OCR text for extraction", "HTTPS/TLS")
+    add("image_ingest", "vision_inference", f"Run preprocessing and model inference for {workload_action}")
     add("file_payload_ingest", "evidence_archive", "Persist file payloads under per-data-class retention controls")
     add("text_document_processing", "vision_inference", "Join extracted text with visual and event features")
     if "vision_inference" in ids:
         target = "human_review_workflow" if "human_review_workflow" in ids else "workflow" if "workflow" in ids else ""
         if target:
-            add("vision_inference", target, "Route recommendations to governed human review")
+            add("vision_inference", target, f"Route {workload_action} recommendations to governed human review")
     if "human_review_workflow" in ids:
         add("human_review_workflow", "evidence_archive", "Write approved decision, evidence bundle, and audit trail")
     elif "evidence_archive" in ids and "vision_inference" in ids:
@@ -350,6 +354,33 @@ def _profile_requirement_text(profile) -> str:
         ]
         if item
     ).lower()
+
+
+def _workload_action_label(profile) -> str:
+    candidates = _clean_architecture_fact_list(
+        list(getattr(profile, "actions", []) or [])
+        + list(getattr(profile, "signals", []) or [])
+        + list(getattr(profile, "capabilities", []) or []),
+        limit=1,
+    )
+    return _title_fragment(candidates[0]) if candidates else "Workload Decision"
+
+
+def _workload_entity_label(profile) -> str:
+    candidates = _clean_architecture_fact_list(
+        list(getattr(profile, "entities", []) or [])
+        + list(getattr(profile, "signals", []) or []),
+        limit=1,
+    )
+    return _title_fragment(candidates[0]) if candidates else "Workload"
+
+
+def _title_fragment(value: str) -> str:
+    text = re.sub(r"[_/]+", " ", str(value or "")).strip()
+    text = re.sub(r"\s+", " ", text)
+    if not text:
+        return "Workload"
+    return " ".join(word.capitalize() for word in text.split()[:5])
 
 
 def _requires_imagery(profile, profile_text: str) -> bool:

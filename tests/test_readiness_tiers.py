@@ -89,6 +89,16 @@ def test_internal_only_reserved_for_hard_failures():
     assert result["estimate_display"] == "Planning estimate"
 
 
+def test_quantity_backed_generic_pricing_is_workshop_not_procurement_ready():
+    pricing = _pricing(status="directional_valid_with_extracted_scale")
+    pricing["metadata"]["source_truth_pricing_compiler"] = {"mode": "generic_quantity_backed_directional"}
+    result = _tier(pricing=pricing)
+
+    assert result["tier"] == "workshop_ready"
+    assert result["estimate_display"] == "Budgetary range"
+    assert any("not yet rate-backed" in reason for reason in result["reasons"])
+
+
 def test_evidence_failure_does_not_collapse_coherent_package_to_internal_only():
     # The Codex-discovered regression: a coherent package whose citation gate
     # has not passed must NOT collapse to internal_only.

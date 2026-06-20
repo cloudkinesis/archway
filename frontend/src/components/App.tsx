@@ -669,7 +669,6 @@ function DiagramView({ session, setSession, galleries, setGalleries, latestExpor
                   <h3 className="font-semibold">{diagram.title}</h3>
                   <p className="text-sm text-awsTextMuted">{gallery.mode} · {diagram.view_id}</p>
                   {diagram.user_description ? <p className="mt-1 text-sm text-awsTextSecondary">{diagram.user_description}</p> : null}
-                  {diagram.fallback_reason ? <p className="mt-1 text-xs text-awsTextMuted">Represented through a supported compiler view; details are in the audit pack.</p> : null}
                 </div>
                 <StatusPill status={status} />
               </div>
@@ -994,7 +993,7 @@ function BuildStatusCard({ status }: { status?: BuildStatusSummary }) {
   return (
     <div className="mb-4 border border-awsBorder bg-surface p-3 text-sm">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="text-xs uppercase tracking-[0.12em] text-awsTextMuted">Build Plumbing</div>
+        <div className="text-xs uppercase tracking-[0.12em] text-awsTextMuted">Environment Checks</div>
         <StatusPill status={status?.status ?? "degraded"} />
       </div>
       <div className="space-y-2">
